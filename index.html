@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>INTERPRÉS · Exposé Generator</title>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400&family=Manrope:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --navy: #1A3A5C;
+  --gold: #C8A96E;
+  --champagne: #F2E8D5;
+  --cream: #FEFDFB;
+  --dark: #0D1821;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: 'Manrope', sans-serif;
+  background: var(--dark);
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+}
+.container { width: 100%; max-width: 640px; }
+
+.header { text-align: center; margin-bottom: 48px; }
+.logo {
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 38px;
+  font-weight: 300;
+  letter-spacing: 0.2em;
+  color: var(--gold);
+  display: block;
+}
+.gold-line { width: 40px; height: 1px; background: var(--gold); margin: 16px auto; }
+.tagline { font-size: 11px; letter-spacing: 0.25em; color: rgba(200,169,110,0.45); text-transform: uppercase; }
+
+.card { background: #111; border: 1px solid rgba(200,169,110,0.12); padding: 40px; }
+.card-title { font-family: 'Cormorant Garamond', serif; font-size: 22px; font-weight: 300; color: var(--cream); margin-bottom: 6px; }
+.card-sub { font-size: 12px; color: #444; margin-bottom: 32px; line-height: 1.6; }
+
+label {
+  display: block;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--gold);
+  margin-bottom: 8px;
+}
+
+.upload-zone {
+  border: 1px dashed rgba(200,169,110,0.25);
+  padding: 44px 20px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  background: #0f0f0f;
+  position: relative;
+}
+.upload-zone:hover, .upload-zone.drag-over { border-color: var(--gold); background: rgba(200,169,110,0.03); }
+.upload-zone input[type="file"] { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; }
+.upload-icon { font-size: 36px; margin-bottom: 14px; display: block; }
+.upload-title { font-family: 'Cormorant Garamond', serif; font-size: 20px; color: var(--cream); margin-bottom: 8px; }
+.upload-hint { font-size: 11px; color: #444; line-height: 1.7; }
+.upload-hint strong { color: rgba(200,169,110,0.6); }
+
+.file-list { margin-top: 12px; display: flex; flex-direction: column; gap: 5px; }
+.file-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 12px;
+  background: #161616; border: 1px solid #222;
+}
+.file-icon { font-size: 15px; }
+.file-name { flex: 1; font-size: 12px; color: #ccc; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.file-size { font-size: 11px; color: #444; flex-shrink: 0; }
+.file-remove { background: none; border: none; color: #333; cursor: pointer; font-size: 18px; line-height: 1; transition: color 0.15s; flex-shrink: 0; }
+.file-remove:hover { color: #c55; }
+
+.divider { border: none; border-top: 1px solid #1e1e1e; margin: 28px 0; }
+
+.optional-toggle {
+  font-size: 11px; color: #383838; cursor: pointer;
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 18px; user-select: none;
+  transition: color 0.2s;
+}
+.optional-toggle:hover { color: var(--gold); }
+.optional-fields { display: none; }
+.optional-fields.open { display: block; }
+
+.form-group { margin-bottom: 16px; }
+input[type="text"] {
+  width: 100%; background: #1a1a1a; border: 1px solid #252525;
+  color: var(--cream); padding: 11px 14px;
+  font-family: 'Manrope', sans-serif; font-size: 13px;
+  outline: none; transition: border-color 0.2s;
+}
+input[type="text"]:focus { border-color: var(--gold); }
+
+.submit-btn {
+  width: 100%; background: var(--gold); color: var(--dark); border: none;
+  padding: 16px; font-family: 'Manrope', sans-serif;
+  font-size: 12px; font-weight: 700; letter-spacing: 0.15em;
+  text-transform: uppercase; cursor: pointer; transition: all 0.2s; margin-top: 4px;
+}
+.submit-btn:hover { background: #d4b87a; }
+.submit-btn:disabled { background: #222; color: #444; cursor: not-allowed; }
+
+.progress-area { display: none; margin-top: 24px; }
+.progress-area.active { display: block; }
+.progress-step { font-size: 12px; color: var(--gold); margin-bottom: 10px; display: flex; align-items: center; gap: 10px; }
+.spinner { width: 14px; height: 14px; border: 2px solid rgba(200,169,110,0.2); border-top-color: var(--gold); border-radius: 50%; animation: spin 0.8s linear infinite; flex-shrink: 0; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.progress-bar-bg { background: #1a1a1a; height: 2px; }
+.progress-bar-fill { height: 100%; background: var(--gold); width: 0; transition: width 0.6s ease; }
+
+.result-area { display: none; margin-top: 24px; padding: 24px; background: rgba(200,169,110,0.04); border: 1px solid rgba(200,169,110,0.15); text-align: center; }
+.result-area.active { display: block; }
+.result-check { font-size: 28px; margin-bottom: 10px; }
+.result-title { font-family: 'Cormorant Garamond', serif; font-size: 22px; color: var(--cream); margin-bottom: 4px; }
+.result-sub { font-size: 11px; color: #444; margin-bottom: 20px; }
+.download-btn {
+  display: inline-block; background: var(--gold); color: var(--dark);
+  padding: 12px 36px; font-family: 'Manrope', sans-serif;
+  font-size: 12px; font-weight: 700; letter-spacing: 0.12em;
+  text-transform: uppercase; text-decoration: none; cursor: pointer;
+}
+.download-btn:hover { background: #d4b87a; }
+
+.error-area { display: none; margin-top: 20px; padding: 14px 16px; background: rgba(180,40,40,0.08); border: 1px solid rgba(180,40,40,0.2); font-size: 12px; color: #d88; line-height: 1.5; }
+.error-area.active { display: block; }
+
+.footer { text-align: center; margin-top: 28px; font-size: 10px; color: #252525; letter-spacing: 0.08em; }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <div class="header">
+    <span class="logo">INTERPRÉS</span>
+    <div class="gold-line"></div>
+    <p class="tagline">Exposé Generator</p>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Datenraum hochladen</div>
+    <p class="card-sub">Laden Sie Ihre Projektdokumente hoch. Das System extrahiert automatisch alle relevanten Daten und erstellt Ihr professionelles Marketing-Exposé.</p>
+
+    <form id="uploadForm">
+
+      <!-- UPLOAD -->
+      <div class="form-group">
+        <label>Projektdokumente</label>
+        <div class="upload-zone" id="dropZone">
+          <input type="file" id="fileInput" name="files[]" multiple
+                 accept=".pdf,.xlsx,.xls,.csv,.jpg,.jpeg,.png,.webp">
+          <span class="upload-icon">📂</span>
+          <div class="upload-title">Dateien hier ablegen</div>
+          <p class="upload-hint">
+            <strong>PDF</strong> · Baubeschreibung, Prospekt, Exposé-Entwurf<br>
+            <strong>Excel / CSV</strong> · Preisliste, Wohnungsliste<br>
+            <strong>Fotos</strong> · Außen, Innen, Stadtbilder<br>
+            <strong>Grundrisse</strong> · Dateiname mit „grundriss" oder „floor"
+          </p>
+        </div>
+        <div class="file-list" id="fileList"></div>
+      </div>
+
+      <hr class="divider">
+
+      <!-- OPTIONALE OVERRIDES -->
+      <div class="optional-toggle" onclick="toggleOptional()">
+        <span id="toggleIcon">▶</span>
+        Angaben manuell überschreiben (optional)
+      </div>
+      <div class="optional-fields" id="optionalFields">
+        <div class="form-group">
+          <label>Projektname</label>
+          <input type="text" name="project_name" placeholder="z.B. Stadtvillen am Park">
+        </div>
+        <div class="form-group">
+          <label>Kaufpreis ab</label>
+          <input type="text" name="price_from" placeholder="z.B. 299.000 €">
+        </div>
+        <div class="form-group">
+          <label>Anzahl Wohneinheiten</label>
+          <input type="text" name="num_units" placeholder="z.B. 24">
+        </div>
+        <div class="form-group">
+          <label>Fertigstellung</label>
+          <input type="text" name="completion" placeholder="z.B. Q3 2027">
+        </div>
+      </div>
+
+      <button type="submit" class="submit-btn" id="submitBtn">
+        ✦ &nbsp; Exposé generieren
+      </button>
+    </form>
+
+    <div class="progress-area" id="progressArea">
+      <div class="progress-step">
+        <div class="spinner"></div>
+        <span id="progressText">Wird vorbereitet...</span>
+      </div>
+      <div class="progress-bar-bg">
+        <div class="progress-bar-fill" id="progressBar"></div>
+      </div>
+    </div>
+
+    <div class="result-area" id="resultArea">
+      <div class="result-check">✓</div>
+      <div class="result-title">Exposé fertig</div>
+      <p class="result-sub">Ihr Marketing-Exposé wurde erfolgreich erstellt.</p>
+      <a id="downloadLink" class="download-btn" download>↓ &nbsp; PDF herunterladen</a>
+    </div>
+
+    <div class="error-area" id="errorArea">
+      <strong>Fehler:</strong> <span id="errorText"></span>
+    </div>
+  </div>
+
+  <div class="footer">INTERPRÉS GmbH · Magdeburg</div>
+</div>
+
+<script>
+// ─── N8N WEBHOOK URL ──────────────────────────────────────────────
+// Hier die n8n Webhook URL eintragen:
+const WEBHOOK_URL = 'https://interpres.app.n8n.cloud/webhook/expose-generator';
+
+// ─── Dateiverwaltung ──────────────────────────────────────────────
+let selectedFiles = [];
+
+document.getElementById('fileInput').addEventListener('change', e => addFiles([...e.target.files]));
+
+const dz = document.getElementById('dropZone');
+dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag-over'); });
+dz.addEventListener('dragleave', () => dz.classList.remove('drag-over'));
+dz.addEventListener('drop', e => { e.preventDefault(); dz.classList.remove('drag-over'); addFiles([...e.dataTransfer.files]); });
+
+function addFiles(files) {
+  files.forEach(f => { if (!selectedFiles.find(x => x.name === f.name)) selectedFiles.push(f); });
+  renderFiles();
+}
+function removeFile(name) { selectedFiles = selectedFiles.filter(f => f.name !== name); renderFiles(); }
+
+function getIcon(name) {
+  const ext = name.split('.').pop().toLowerCase();
+  if (ext === 'pdf') return '📄';
+  if (['xlsx','xls','csv'].includes(ext)) return '📊';
+  if (['jpg','jpeg','png','webp'].includes(ext)) return '🖼';
+  return '📎';
+}
+function fmtSize(b) {
+  if (b < 1024) return b + ' B';
+  if (b < 1048576) return (b/1024).toFixed(0) + ' KB';
+  return (b/1048576).toFixed(1) + ' MB';
+}
+function renderFiles() {
+  document.getElementById('fileList').innerHTML = selectedFiles.map(f => `
+    <div class="file-item">
+      <span class="file-icon">${getIcon(f.name)}</span>
+      <span class="file-name">${f.name}</span>
+      <span class="file-size">${fmtSize(f.size)}</span>
+      <button class="file-remove" onclick="removeFile('${f.name}')" type="button">×</button>
+    </div>`).join('');
+}
+
+// ─── Optional Toggle ──────────────────────────────────────────────
+function toggleOptional() {
+  const f = document.getElementById('optionalFields');
+  f.classList.toggle('open');
+  document.getElementById('toggleIcon').textContent = f.classList.contains('open') ? '▼' : '▶';
+}
+
+// ─── Progress ─────────────────────────────────────────────────────
+const STEPS = [
+  [10, 'Dateien werden hochgeladen...'],
+  [25, 'Dokumente werden analysiert...'],
+  [45, 'KI extrahiert Projektdaten...'],
+  [65, 'Marketingtexte werden generiert...'],
+  [82, 'Exposé-Template wird befüllt...'],
+  [94, 'PDF wird erstellt...'],
+];
+let stepIdx = 0, ticker = null;
+
+function startProgress() {
+  stepIdx = 0; setP(STEPS[0]);
+  ticker = setInterval(() => { stepIdx = Math.min(stepIdx+1, STEPS.length-1); setP(STEPS[stepIdx]); }, 9000);
+}
+function stopProgress() { clearInterval(ticker); setP([100, 'Fertig!']); }
+function setP([pct, txt]) {
+  document.getElementById('progressBar').style.width = pct + '%';
+  document.getElementById('progressText').textContent = txt;
+}
+
+// ─── Submit ───────────────────────────────────────────────────────
+document.getElementById('uploadForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  if (selectedFiles.length === 0) { showError('Bitte mindestens eine Datei hochladen.'); return; }
+
+  // Reset
+  ['resultArea','errorArea'].forEach(id => document.getElementById(id).classList.remove('active'));
+  document.getElementById('progressArea').classList.add('active');
+  document.getElementById('submitBtn').disabled = true;
+  startProgress();
+
+  const fd = new FormData(document.getElementById('uploadForm'));
+  fd.delete('files[]');
+  selectedFiles.forEach(f => fd.append('files[]', f));
+
+  try {
+    const res = await fetch(WEBHOOK_URL, { method: 'POST', body: fd });
+    stopProgress();
+    if (!res.ok) {
+      let msg = res.statusText;
+      try { const j = await res.json(); msg = j.error || msg; } catch {}
+      throw new Error(msg);
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.getElementById('downloadLink');
+    link.href = url;
+    const cd = res.headers.get('Content-Disposition') || '';
+    const m = cd.match(/filename="?([^"]+)"?/);
+    link.download = m ? m[1] : 'Marketing_Expose.pdf';
+    document.getElementById('progressArea').classList.remove('active');
+    document.getElementById('resultArea').classList.add('active');
+    link.click();
+  } catch(err) {
+    stopProgress();
+    document.getElementById('progressArea').classList.remove('active');
+    showError(err.message || 'Unbekannter Fehler');
+  }
+  document.getElementById('submitBtn').disabled = false;
+});
+
+function showError(msg) {
+  document.getElementById('errorText').textContent = msg;
+  document.getElementById('errorArea').classList.add('active');
+}
+</script>
+</body>
+</html>
