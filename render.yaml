@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: interpres-pptx-filler
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --timeout 120 --workers 2
+    envVars:
+      - key: API_TOKEN
+        generateValue: false
+        value: interpres-secret-2026
+    plan: free
