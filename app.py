@@ -268,41 +268,42 @@ def analyze_pdfs_with_claude(pdfs):
     resp = requests.post(
         "https://api.anthropic.com/v1/messages",
         headers={"x-api-key": CLAUDE_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json"},
-        json={"model": "claude-opus-4-6", "max_tokens": 4000,
+        json={"model": "claude-haiku-4-5-20251001", "max_tokens": 4000,
               "messages": [{"role": "user", "content": content}]},
-        timeout=180
+        timeout=120
     )
     resp.raise_for_status()
     text = resp.json()["content"][0]["text"].replace("```json", "").replace("```", "").strip()
     return json.loads(text)
 
 def generate_expose_with_claude(projektdaten):
+    stadt = projektdaten.get('stadt', 'der Stadt')
     prompt = (
         "Du bist ein Immobilien-Exposé-Spezialist bei INTERPRÉS GmbH. "
         "Antworte NUR mit einem validen JSON-Objekt. Kein Text davor oder danach. Keine Markdown-Backticks.\n\n"
         f"## PROJEKTDATEN\n{json.dumps(projektdaten, ensure_ascii=False)}\n\n"
-        "## RECHERCHE\nNutze web_search für aktuelle Statistiken zur Stadt "
-        f"{projektdaten.get('stadt', 'Magdeburg')}: Einwohnerzahl, BIP des Bundeslandes, "
-        "Mietsteigerung, Studierende, Top-Arbeitgeber, Freizeiteinrichtungen mit Gehminuten "
-        f"von {projektdaten.get('adresse', '')}.\n\n"
-        f"## ALLE FELDER AUSFÜLLEN (kein Feld leer lassen):\n{json.dumps(PLATZHALTER, ensure_ascii=False)}"
+        f"## AUFGABE\nFülle alle Felder aus. Nutze dein Wissen über {stadt} für Statistiken "
+        "(Einwohner, BIP, Mietsteigerung, Studierende, Top-Arbeitgeber, Freizeiteinrichtungen).\n\n"
+        f"## ALLE FELDER AUSFÜLLEN:\n{json.dumps(PLATZHALTER, ensure_ascii=False)}"
     )
     resp = requests.post(
         "https://api.anthropic.com/v1/messages",
         headers={"x-api-key": CLAUDE_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json"},
         json={
-            "model": "claude-opus-4-6", "max_tokens": 16000,
-            "tools": [{"type": "web_search_20250305", "name": "web_search"}],
+            "model": "claude-sonnet-4-6", "max_tokens": 8000,
             "messages": [{"role": "user", "content": prompt}]
         },
-        timeout=300
+        timeout=240
     )
     resp.raise_for_status()
     json_text = ""
     for block in resp.json()["content"]:
-        if block["type"] == "text":
+        if block.get("type") == "text":
             json_text = block["text"]
     json_text = json_text.replace("```json", "").replace("```", "").strip()
+    if not json_text:
+        raise ValueError("Claude hat keinen Text zurückgegeben. Stop-Reason: " +
+                         str(resp.json().get("stop_reason")))
     return json.loads(json_text)
 
 def fill_pptx(template_bytes, data):
@@ -445,8 +446,8 @@ def generate_expose():
         if not pdfs:
             return jsonify({"error": "Keine relevanten PDFs gefunden"}), 400
 
-        # Falls mehrere ZIPs hochgeladen: nochmal auf 20 begrenzen
-        pdfs = sorted(pdfs, key=lambda x: x["priority"])[:20]
+        # Max. 3 PDFs senden (Kostenkontrolle)
+        pdfs = sorted(pdfs, key=lambda x: x["priority"])[:3]
 
         projektdaten = analyze_pdfs_with_claude(pdfs)
         expose_data = generate_expose_with_claude(projektdaten)
