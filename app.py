@@ -402,6 +402,12 @@ def upload_chunk():
         return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
 
 
+@app.route("/")
+def index():
+    index_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "index.html")
+    with open(index_path, encoding="utf-8") as f:
+        return f.read(), 200, {"Content-Type": "text/html; charset=utf-8"}
+
 @app.route("/health")
 def health():
     return jsonify({"status": "ok", "service": "INTERPRES Full Pipeline v3"})
