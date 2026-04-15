@@ -34,6 +34,8 @@ PDF_PRIORITY = [
 ]
 
 UNSPLASH_QUERIES = {
+    "BILD_TITEL": "modern luxury residential building exterior",
+    "BILD_QUARTIER": "city neighborhood street urban architecture",
     "BILD_PROJEKT_AUSSEN": "modern apartment building exterior architecture",
     "BILD_AMENITY_1": "car sharing electric vehicle urban",
     "BILD_AMENITY_2": "solar panels rooftop renewable energy",
@@ -106,6 +108,8 @@ PLATZHALTER = {
     "we_bereich_1": "", "we_bereich_2": "", "we_beispiel_1": "", "we_beispiel_2": "",
     "we_typ_beschreibung": "", "we_flaeche_1": "", "we_flaeche_2": "",
     "we_flaeche_3": "", "we_flaeche_4": "", "we_flaeche_5": "",
+    "logo_initial": "",
+    "bild_titel": "", "bild_quartier": "",
     "bild_projekt_aussen": "", "bild_amenity_1": "", "bild_amenity_2": "", "bild_amenity_3": "",
     "bild_amenity_4": "", "bild_amenity_5": "", "bild_amenity_6": "", "bild_amenity_7": "",
     "bild_amenity_8": "", "bild_amenity_9": "", "bild_greenliving_1": "", "bild_greenliving_2": "",
@@ -116,6 +120,18 @@ PLATZHALTER = {
     "bild_stadt_presse": "", "bild_stadt_branche": "",
     "bild_rechtlich_1": "", "bild_rechtlich_2": "",
 }
+
+def generate_logo_initial(projekt_name):
+    """Nimmt den ersten markanten Buchstaben des Projektnamens als Logo-Initial."""
+    if not projekt_name:
+        return "P"
+    skip_words = {"das", "der", "die", "ein", "eine", "am", "im", "an", "auf", "the", "a", "an"}
+    words = re.split(r'[\s\-_\.]+', projekt_name)
+    for word in words:
+        cleaned = re.sub(r'[^a-zA-Z\u00c4\u00d6\u00dc\u00e4\u00f6\u00fc]', '', word)
+        if cleaned and cleaned.lower() not in skip_words:
+            return cleaned[0].upper()
+    return projekt_name[0].upper()
 
 def get_pdf_priority(filename):
     name_lower = filename.lower()
@@ -204,11 +220,20 @@ def fetch_unsplash_image(query):
     return ""
 
 def fill_image_placeholders(data):
-    for placeholder_key, query in UNSPLASH_QUERIES.items():
+    stadt = data.get("stadt", "")
+    queries = UNSPLASH_QUERIES.copy()
+    if stadt:
+        queries["BILD_TITEL"] = f"modern residential building {stadt} urban architecture"
+        queries["BILD_QUARTIER"] = f"{stadt} city neighborhood street"
+        queries["BILD_PROJEKT_AUSSEN"] = f"modern apartment building {stadt} exterior"
+        queries["BILD_GREENLIVING_1"] = f"sustainable green building {stadt}"
+        queries["BILD_GREENLIVING_2"] = f"modern residential {stadt} facade"
+    for placeholder_key, query in queries.items():
         data_key = placeholder_key.lower()
         if data_key in data:
             url = fetch_unsplash_image(query)
-            data[data_key] = url
+            if url:
+                data[data_key] = url
     return data
 
 def analyze_pdfs_with_claude(pdfs):
@@ -234,7 +259,7 @@ def analyze_pdfs_with_claude(pdfs):
     resp = requests.post(
         "https://api.anthropic.com/v1/messages",
         headers={"x-api-key": CLAUDE_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json"},
-        json={"model": "claude-opus-4-5-20251101", "max_tokens": 4000,
+        json={"model": "claude-opus-4-6", "max_tokens": 4000,
               "messages": [{"role": "user", "content": content}]},
         timeout=180
     )
@@ -257,7 +282,7 @@ def generate_expose_with_claude(projektdaten):
         "https://api.anthropic.com/v1/messages",
         headers={"x-api-key": CLAUDE_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json"},
         json={
-            "model": "claude-opus-4-5-20251101", "max_tokens": 16000,
+            "model": "claude-opus-4-6", "max_tokens": 16000,
             "tools": [{"type": "web_search_20250305", "name": "web_search"}],
             "messages": [{"role": "user", "content": prompt}]
         },
@@ -349,6 +374,7 @@ def generate_expose():
 
         projektdaten = analyze_pdfs_with_claude(pdfs)
         expose_data = generate_expose_with_claude(projektdaten)
+        expose_data["logo_initial"] = generate_logo_initial(expose_data.get("projekt_name", ""))
         expose_data = fill_image_placeholders(expose_data)
 
         tmpl_bytes = requests.get(TEMPLATE_URL, timeout=30).content
