@@ -2,8 +2,13 @@ import os, io, json, base64, zipfile, requests, re
 from flask import Flask, request, jsonify, send_file
 
 app = Flask(__name__)
+app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500 MB Upload-Limit
 
 from flask import make_response
+
+@app.errorhandler(413)
+def request_too_large(e):
+    return jsonify({"error": "Datei zu groß (max. 500 MB)"}), 413
 
 @app.after_request
 def add_cors(response):
