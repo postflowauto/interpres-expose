@@ -31,7 +31,107 @@ API_TOKEN = os.environ.get("API_TOKEN", "interpres-secret-2026")
 CLAUDE_API_KEY = os.environ.get("CLAUDE_API_KEY", "")
 CLOUDCONVERT_KEY = os.environ.get("CLOUDCONVERT_KEY", "")
 UNSPLASH_ACCESS_KEY = os.environ.get("UNSPLASH_ACCESS_KEY", "")
+TEST_MODE = os.environ.get("TEST_MODE", "false").lower() == "true"
 TEMPLATE_URL = "https://raw.githubusercontent.com/postflowauto/interpres-expose/main/urbanunits_Marketing_Expose_v3.pdf-5.pptx"
+
+# Dummy-Daten für TEST_MODE (kein Claude-API-Call)
+DUMMY_PROJEKTDATEN = {
+    "projektname_roh": "Testprojekt Hannover", "adresse": "Lindener Marktplatz 5",
+    "stadt": "Hannover", "stadtteil": "Linden", "plz": "30449",
+    "bautraeger": "Urban Units GmbH", "anzahl_haeuser": "2",
+    "we_pro_haus": "24", "anzahl_we_gesamt": "48", "kfw_standard": "KfW 55 EE",
+    "energieversorgung": "Fernwärme + Photovoltaik", "stellplaetze": "24",
+    "groesse_von": "28", "groesse_bis": "67", "kaufpreis_ab": "189.000",
+    "besonderheiten": "Möbliert, Smart-Lock, Dachterrasse", "planungsphase": "Baugenehmigung erteilt"
+}
+
+DUMMY_EXPOSE_DATA = {
+    "projekt_name": "Stadtquartier Linden", "projekt_titel": "Leben im Herzen Lindens",
+    "entwickler_name": "Urban Units GmbH", "entwickler_name_gross": "URBAN UNITS GMBH",
+    "stadt": "Hannover", "stadt_gross": "HANNOVER", "stadtteil": "Linden",
+    "adresse_lang": "Lindener Marktplatz 5, 30449 Hannover", "plz": "30449",
+    "quartier_name": "Linden-Mitte", "quartier_history": "Lebendiges Gründerzeitviertel mit urbanem Flair",
+    "quartier_ref": "Hannover Linden", "stadt_bezeichnung": "Landeshauptstadt",
+    "anzahl_we": "48", "anzahl_1zi": "12", "anzahl_2zi": "24", "anzahl_barrierefrei": "12",
+    "groesse_von": "28", "groesse_bis": "67", "zimmer_typen": "1-Zimmer und 2-Zimmer",
+    "produkt_beschreibung": "Vollmöblierte Mikro-Apartments mit Smart-Lock",
+    "kaufpreis_ab": "189.000", "kfw_darlehen": "150.000", "stellplaetze": "24",
+    "kfw_standard": "KfW 55 EE", "energieversorgung": "Fernwärme + Photovoltaik",
+    "besonderheiten": "Möbliert, Smart-Lock, Dachterrasse, E-Bike-Sharing",
+    "steuerliche_moeglichkeiten": "Dreifach AfA - 5% degressiv §7 Abs.5a EStG + 5% Sonder-AfA §7b EStG + 10% Möbel-AfA",
+    "prospekt_datum": "April 2026",
+    "text_kapitel_invest": "INVEST", "text_kapitel_live": "LIVE",
+    "text_kapitel_stay": "STAY", "text_kapitel_know": "KNOW",
+    "text_intro": "Hannover wächst – und Linden ist mittendrin.",
+    "text_investment_pitch": "Solide Rendite in einem der dynamischsten Stadtteile Hannovers.",
+    "text_hotel": "Möbliert, flexibel, sofort vermietbar – ideal für Kurzzeitvermietung.",
+    "text_projekt_nachhaltig_1": "KfW 55 EE – höchster Förderstandard.",
+    "text_projekt_nachhaltig_2": "Photovoltaik deckt 30% des Allgemeinstrombedarfs.",
+    "text_greenliving_intro": "Nachhaltig wohnen in Hannover.",
+    "text_greenliving_1": "Fernwärme aus regenerativen Quellen.",
+    "text_greenliving_2": "E-Bike-Sharing für alle Bewohner.",
+    "text_ausstattung_intro": "Hochwertig. Vollständig. Bezugsfertig.",
+    "text_ausstattung_detail": "Designermöbel, Echtholzparkett, moderne Einbauküche.",
+    "text_ausstattung_kurz": "Alles inklusive.", "text_ausstattung_lang": "Vom Bett bis zur Kaffeemaschine.",
+    "text_grundriss_intro": "Clever geplante Grundrisse für maximale Nutzfläche.",
+    "text_architektur": "Zeitloser Klinkerbau trifft moderne Glaselemente.",
+    "text_nachhaltig_1": "KfW 55 EE", "text_nachhaltig_2": "Fernwärme",
+    "text_nachhaltig_3": "Photovoltaik", "text_nachhaltig_4": "E-Mobilität",
+    "text_standort_1": "Zentral in Hannover-Linden.", "text_standort_2": "Alles in Laufnähe.",
+    "stadt_einwohner": "535.932", "stadt_bip": "38.500", "stadt_mietsteigerung": "+3,2%",
+    "stadt_studierende": "48.000", "bundesland_bip": "310 Mrd. EUR",
+    "text_einwohner_detail": "Hannover wächst kontinuierlich.",
+    "text_bip_detail": "Niedersachsen – starke Industrie und Dienstleistungen.",
+    "text_mietsteigerung_detail": "Stabile Mietsteigerungen über dem Bundesschnitt.",
+    "text_studierende_detail": "Universitätsstadt mit hoher Nachfrage.",
+    "text_stadt_wachstum_1": "Bevölkerungswachstum seit 2015 konstant.",
+    "text_stadt_wachstum_2": "Zuzug aus Ballungsräumen verstärkt Nachfrage.",
+    "text_stadt_intro": "Hannover – Niedersachsens Wirtschaftsmotor.",
+    "text_stadt_wirtschaft_links": "Messe, Continental, TUI – globale Player vor Ort.",
+    "text_stadt_wirtschaft_rechts": "Starker Mittelstand und wachsende Startup-Szene.",
+    "stadt_invest_titel": "Investitionsstandort Hannover",
+    "stadt_invest_label": "Rendite", "text_stadt_invest_detail": "Attraktive Nettomietrenditen von 4–5%.",
+    "stadt_stat_1_zahl": "535.932", "stadt_stat_1_label": "Einwohner",
+    "stadt_stat_2_zahl": "48.000", "stadt_stat_2_label": "Studierende",
+    "stadt_stat_3_zahl": "+3,2%", "stadt_stat_3_label": "Mietsteigerung p.a.",
+    "stadt_branche_titel": "Leitbranchen", "text_stadt_branche_1": "Messe & Kongress",
+    "text_stadt_branche_2": "Automobil & Logistik",
+    "quelle_1": "Statistik Hannover 2024", "quelle_2": "IHK Hannover 2024",
+    "quelle_3": "Wohnmarktreport 2024", "quelle_4": "Bundesagentur für Arbeit 2024",
+    "freizeit_1_name": "Maschsee", "freizeit_2_name": "Eilenriede",
+    "freizeit_3_name": "Kröpcke", "freizeit_4_name": "Herrenhäuser Gärten",
+    "min_freizeit_1": "8", "min_freizeit_2": "12", "min_freizeit_3": "15", "min_freizeit_4": "20",
+    "min_uni": "18", "label_min_uni": "Leibniz Universität",
+    "min_bahnhof": "12", "label_min_bahnhof": "Hannover Hbf",
+    "min_altstadt": "14", "label_min_altstadt": "Altstadt",
+    "feature_1_zahl": "48", "feature_1_label": "Wohneinheiten",
+    "feature_2_zahl": "100", "feature_2_label": "Prozent möbliert",
+    "feature_3_zahl": "24", "feature_3_label": "Stunden Zugang per Smart-Lock-System",
+    "amenity_1": "E-Bike-Sharing", "amenity_2": "Solar-Carport",
+    "amenity_3": "Fitnessstudio", "amenity_4": "Paketstation",
+    "amenity_5": "Café im EG", "amenity_6": "Dachgarten",
+    "amenity_7": "Fernwärme", "amenity_8": "Tiefgarage", "amenity_9": "Balkon",
+    "grundriss_1_label": "Typ A – 28 m²", "grundriss_2_label": "Typ B – 42 m²",
+    "grundriss_3_label": "Typ C – 55 m²", "grundriss_4_label": "Typ D – 67 m²",
+    "ansicht_1_label": "Westfassade", "ansicht_2_label": "Südfassade",
+    "we_bereich_1": "Wohnen & Schlafen", "we_bereich_2": "Bad & Küche",
+    "we_beispiel_1": "Typ A", "we_beispiel_2": "Typ B",
+    "we_typ_beschreibung": "Kompakte Grundrisse, maximale Funktionalität.",
+    "we_flaeche_1": "28", "we_flaeche_2": "35", "we_flaeche_3": "42",
+    "we_flaeche_4": "55", "we_flaeche_5": "67",
+    "logo_initial": "S",
+    "bild_titel": "", "bild_quartier": "",
+    "bild_projekt_aussen": "", "bild_amenity_1": "", "bild_amenity_2": "",
+    "bild_amenity_3": "", "bild_amenity_4": "", "bild_amenity_5": "",
+    "bild_amenity_6": "", "bild_amenity_7": "", "bild_amenity_8": "",
+    "bild_amenity_9": "", "bild_greenliving_1": "", "bild_greenliving_2": "",
+    "bild_interior": "", "bild_ausstattung_1": "", "bild_ausstattung_2": "",
+    "bild_ausstattung_3": "", "bild_ausstattung_4": "", "bild_ausstattung_5": "",
+    "bild_ausstattung_6": "", "bild_grundriss_intro_1": "", "bild_grundriss_intro_2": "",
+    "bild_ansicht_1": "", "bild_ansicht_2": "", "bild_we_1": "", "bild_we_2": "",
+    "bild_stadt_presse": "", "bild_stadt_branche": "",
+    "bild_rechtlich_1": "", "bild_rechtlich_2": "",
+}
 
 # Relevante PDF-Typen nach Priorität
 PDF_PRIORITY = [
@@ -327,27 +427,50 @@ def fill_pptx(template_bytes, data):
     return output_buf.getvalue()
 
 def convert_to_pdf(pptx_bytes, filename):
+    import time
+    cc_headers = {"Authorization": f"Bearer {CLOUDCONVERT_KEY}", "Content-Type": "application/json"}
+
+    # Job erstellen (async API)
     job_resp = requests.post(
-        "https://sync.api.cloudconvert.com/v2/jobs",
-        headers={"Authorization": f"Bearer {CLOUDCONVERT_KEY}", "Content-Type": "application/json"},
+        "https://api.cloudconvert.com/v2/jobs",
+        headers=cc_headers,
         json={"tasks": {
-            "upload": {"operation": "import/upload"},
-            "convert": {"operation": "convert", "input": "upload", "input_format": "pptx", "output_format": "pdf", "engine": "libreoffice"},
-            "export": {"operation": "export/url", "input": "convert"}
+            "upload":  {"operation": "import/upload"},
+            "convert": {"operation": "convert", "input": "upload",
+                        "input_format": "pptx", "output_format": "pdf", "engine": "libreoffice"},
+            "export":  {"operation": "export/url", "input": "convert"}
         }}, timeout=30
     )
     job_resp.raise_for_status()
     job = job_resp.json()["data"]
+    job_id = job["id"]
+
+    # Datei hochladen
     upload_task = next(t for t in job["tasks"] if t["name"] == "upload")
     form = upload_task["result"]["form"]
-    files = {"file": (filename, pptx_bytes, "application/vnd.openxmlformats-officedocument.presentationml.presentation")}
+    files = {"file": (filename, pptx_bytes,
+                      "application/vnd.openxmlformats-officedocument.presentationml.presentation")}
     requests.post(form["url"], data=form.get("parameters", {}), files=files, timeout=60).raise_for_status()
-    status = requests.get(f"https://sync.api.cloudconvert.com/v2/jobs/{job['id']}",
-                          headers={"Authorization": f"Bearer {CLOUDCONVERT_KEY}"}, timeout=120)
-    status.raise_for_status()
-    tasks = status.json()["data"]["tasks"]
-    pdf_url = next(t for t in tasks if t["name"] == "export")["result"]["files"][0]["url"]
-    return requests.get(pdf_url, timeout=60).content
+
+    # Warten bis Job fertig (max 5 Minuten, alle 5s pollen)
+    for _ in range(60):
+        time.sleep(5)
+        status_resp = requests.get(
+            f"https://api.cloudconvert.com/v2/jobs/{job_id}",
+            headers=cc_headers, timeout=30
+        )
+        status_resp.raise_for_status()
+        job_status = status_resp.json()["data"]["status"]
+        if job_status == "finished":
+            tasks = status_resp.json()["data"]["tasks"]
+            pdf_url = next(t for t in tasks if t["name"] == "export")["result"]["files"][0]["url"]
+            return requests.get(pdf_url, timeout=60).content
+        if job_status == "error":
+            tasks = status_resp.json()["data"]["tasks"]
+            err = next((t.get("message","") for t in tasks if t.get("status") == "error"), "Unbekannter Fehler")
+            raise RuntimeError(f"CloudConvert Fehler: {err}")
+
+    raise RuntimeError("CloudConvert Timeout nach 5 Minuten")
 
 def assemble_session(session_id):
     """Liest alle Chunks einer Session von /tmp und gibt die assemblierten Bytes zurück."""
@@ -411,7 +534,8 @@ def index():
 
 @app.route("/health")
 def health():
-    return jsonify({"status": "ok", "service": "INTERPRES Full Pipeline v3"})
+    return jsonify({"status": "ok", "service": "INTERPRES Full Pipeline v3",
+                    "test_mode": TEST_MODE})
 
 @app.route("/generate-expose", methods=["POST"])
 def generate_expose():
@@ -449,10 +573,15 @@ def generate_expose():
         # Max. 3 PDFs senden (Kostenkontrolle)
         pdfs = sorted(pdfs, key=lambda x: x["priority"])[:3]
 
-        projektdaten = analyze_pdfs_with_claude(pdfs)
-        expose_data = generate_expose_with_claude(projektdaten)
-        expose_data["logo_initial"] = generate_logo_initial(expose_data.get("projekt_name", ""))
-        expose_data = fill_image_placeholders(expose_data)
+        if TEST_MODE:
+            print("TEST_MODE aktiv – überspringe Claude API")
+            expose_data = DUMMY_EXPOSE_DATA.copy()
+            expose_data = fill_image_placeholders(expose_data)
+        else:
+            projektdaten = analyze_pdfs_with_claude(pdfs)
+            expose_data = generate_expose_with_claude(projektdaten)
+            expose_data["logo_initial"] = generate_logo_initial(expose_data.get("projekt_name", ""))
+            expose_data = fill_image_placeholders(expose_data)
 
         tmpl_bytes = requests.get(TEMPLATE_URL, timeout=30).content
         pptx_bytes = fill_pptx(tmpl_bytes, expose_data)
