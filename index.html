@@ -130,8 +130,10 @@ async function uploadFileChunked(file, fileIndex, totalFiles) {
     });
 
     if (!resp.ok) {
-      const err = await resp.json().catch(() => ({ error: resp.statusText }));
-      throw new Error(`Upload-Fehler Chunk ${i}: ${err.error || resp.status}`);
+      const raw = await resp.text();
+      let errText = raw;
+      try { const j = JSON.parse(raw); errText = j.error || raw; } catch(_) {}
+      throw new Error(`Upload-Fehler Chunk ${i}: ${errText.substring(0, 200)}`);
     }
   }
   return sessionId;
@@ -173,9 +175,10 @@ generateBtn.addEventListener('click', async () => {
     });
 
     if (!resp.ok) {
-      let errText = '';
-      try { const j = await resp.json(); errText = j.error || JSON.stringify(j); }
-      catch(e) { errText = await resp.text(); }
+      // Body einmal als Text lesen, dann JSON versuchen — verhindert "Body disturbed"
+      const raw = await resp.text();
+      let errText = raw;
+      try { const j = JSON.parse(raw); errText = j.error || raw; } catch(_) {}
       throw new Error(`Fehler ${resp.status}: ${errText.substring(0, 400)}`);
     }
 
