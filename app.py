@@ -1,8 +1,12 @@
-import os, io, json, base64, zipfile, requests, re
+import os, io, json, base64, zipfile, requests, re, uuid, shutil
 from flask import Flask, request, jsonify, send_file
 
 app = Flask(__name__)
-app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500 MB Upload-Limit
+app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100 MB pro Chunk (Render Proxy Limit)
+
+# Chunk-Upload Verzeichnis
+CHUNK_DIR = "/tmp/interpres_chunks"
+os.makedirs(CHUNK_DIR, exist_ok=True)
 
 from flask import make_response
 
@@ -344,6 +348,60 @@ def convert_to_pdf(pptx_bytes, filename):
     pdf_url = next(t for t in tasks if t["name"] == "export")["result"]["files"][0]["url"]
     return requests.get(pdf_url, timeout=60).content
 
+def assemble_session(session_id):
+    """Liest alle Chunks einer Session von /tmp und gibt die assemblierten Bytes zurück."""
+    session_dir = os.path.join(CHUNK_DIR, session_id)
+    if not os.path.isdir(session_dir):
+        raise ValueError(f"Session {session_id} nicht gefunden")
+    meta_path = os.path.join(session_dir, "meta.json")
+    with open(meta_path) as f:
+        meta = json.load(f)
+    total = meta["total_chunks"]
+    assembled = b""
+    for i in range(total):
+        chunk_path = os.path.join(session_dir, f"chunk_{i:04d}")
+        with open(chunk_path, "rb") as f:
+            assembled += f.read()
+    shutil.rmtree(session_dir, ignore_errors=True)
+    return assembled
+
+
+@app.route("/upload-chunk", methods=["POST", "OPTIONS"])
+def upload_chunk():
+    if request.method == "OPTIONS":
+        return make_response("", 204)
+    if request.headers.get("X-API-Token") != API_TOKEN:
+        return jsonify({"error": "Unauthorized"}), 401
+    try:
+        session_id = request.form.get("session_id") or str(uuid.uuid4())
+        chunk_index = int(request.form.get("chunk_index", 0))
+        total_chunks = int(request.form.get("total_chunks", 1))
+        filename = request.form.get("filename", "upload.zip")
+
+        chunk_file = request.files.get("chunk")
+        if not chunk_file:
+            return jsonify({"error": "Kein 'chunk' im Request"}), 400
+
+        session_dir = os.path.join(CHUNK_DIR, session_id)
+        os.makedirs(session_dir, exist_ok=True)
+
+        chunk_path = os.path.join(session_dir, f"chunk_{chunk_index:04d}")
+        chunk_file.save(chunk_path)
+
+        meta_path = os.path.join(session_dir, "meta.json")
+        if not os.path.exists(meta_path):
+            with open(meta_path, "w") as f:
+                json.dump({"total_chunks": total_chunks, "filename": filename}, f)
+
+        received = len([n for n in os.listdir(session_dir) if n.startswith("chunk_")])
+        ready = received >= total_chunks
+        return jsonify({"session_id": session_id, "chunk": chunk_index,
+                        "received": received, "total": total_chunks, "ready": ready})
+    except Exception as e:
+        import traceback
+        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+
+
 @app.route("/health")
 def health():
     return jsonify({"status": "ok", "service": "INTERPRES Full Pipeline v3"})
@@ -355,7 +413,14 @@ def generate_expose():
     try:
         pdfs = []
 
-        if request.content_type and "multipart" in request.content_type:
+        # --- Chunked-Session Upload ---
+        session_ids = request.form.getlist("session_ids")
+        if session_ids:
+            for sid in session_ids:
+                zip_bytes = assemble_session(sid)
+                pdfs.extend(extract_pdfs_from_zip(zip_bytes))
+
+        elif request.content_type and "multipart" in request.content_type:
             uploaded = request.files.getlist("files") or request.files.getlist("file")
             if not uploaded:
                 return jsonify({"error": "Keine Dateien im Request"}), 400

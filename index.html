@@ -55,19 +55,26 @@
 </div>
 
 <script>
-// Direkt an Render senden — kein n8n
-const RENDER_URL = 'https://interpres-expose.onrender.com/generate-expose';
-const API_TOKEN = 'interpres-secret-2026';
+const BASE_URL    = 'https://interpres-expose.onrender.com';
+const RENDER_URL  = BASE_URL + '/generate-expose';
+const CHUNK_URL   = BASE_URL + '/upload-chunk';
+const API_TOKEN   = 'interpres-secret-2026';
+const CHUNK_SIZE  = 80 * 1024 * 1024; // 80 MB — sicher unter Render's 100 MB Proxy-Limit
 
-const dropZone = document.getElementById('dropZone');
-const fileInput = document.getElementById('fileInput');
-const fileList = document.getElementById('fileList');
+const dropZone   = document.getElementById('dropZone');
+const fileInput  = document.getElementById('fileInput');
+const fileList   = document.getElementById('fileList');
 const generateBtn = document.getElementById('generateBtn');
-const status = document.getElementById('status');
+const status     = document.getElementById('status');
 let selectedFiles = [];
 
 function formatSize(bytes) {
   return bytes > 1048576 ? (bytes/1048576).toFixed(1) + ' MB' : (bytes/1024).toFixed(0) + ' KB';
+}
+
+function setStatus(type, html) {
+  status.className = 'status ' + type;
+  status.innerHTML = html;
 }
 
 function updateFileList() {
@@ -85,7 +92,6 @@ fileInput.addEventListener('change', e => {
   selectedFiles = Array.from(e.target.files).filter(f => f.name.endsWith('.zip'));
   updateFileList();
 });
-
 dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
 dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
 dropZone.addEventListener('drop', e => {
@@ -95,17 +101,70 @@ dropZone.addEventListener('drop', e => {
   updateFileList();
 });
 
+// Datei in Chunks hochladen → gibt session_id zurück
+async function uploadFileChunked(file, fileIndex, totalFiles) {
+  const sessionId = crypto.randomUUID();
+  const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+
+  for (let i = 0; i < totalChunks; i++) {
+    const start = i * CHUNK_SIZE;
+    const end   = Math.min(start + CHUNK_SIZE, file.size);
+    const chunk = file.slice(start, end);
+
+    const fd = new FormData();
+    fd.append('chunk', chunk, file.name);
+    fd.append('session_id', sessionId);
+    fd.append('chunk_index', i);
+    fd.append('total_chunks', totalChunks);
+    fd.append('filename', file.name);
+
+    const pct = Math.round(((i + 1) / totalChunks) * 100);
+    setStatus('loading',
+      `<span class="spinner"></span> Lade Datei ${fileIndex + 1}/${totalFiles} hoch… ${pct}%` +
+      `<div class="progress">${file.name} · Chunk ${i+1}/${totalChunks} · ${formatSize(file.size)}</div>`);
+
+    const resp = await fetch(CHUNK_URL, {
+      method: 'POST',
+      headers: { 'X-API-Token': API_TOKEN },
+      body: fd
+    });
+
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ error: resp.statusText }));
+      throw new Error(`Upload-Fehler Chunk ${i}: ${err.error || resp.status}`);
+    }
+  }
+  return sessionId;
+}
+
 generateBtn.addEventListener('click', async () => {
   if (!selectedFiles.length) return;
-
   generateBtn.disabled = true;
-  status.className = 'status loading';
+
   const totalMB = (selectedFiles.reduce((s, f) => s + f.size, 0) / 1048576).toFixed(0);
-  status.innerHTML = `<span class="spinner"></span> Datenraum wird analysiert...<div class="progress">${selectedFiles.length} ZIP(s) · ${totalMB} MB · Bitte 3–5 Minuten warten</div>`;
+  const needsChunking = selectedFiles.some(f => f.size > CHUNK_SIZE);
 
   try {
-    const formData = new FormData();
-    selectedFiles.forEach(f => formData.append('files', f, f.name));
+    let formData = new FormData();
+
+    if (needsChunking) {
+      // --- Chunked Upload für große Dateien ---
+      const sessionIds = [];
+      for (let i = 0; i < selectedFiles.length; i++) {
+        const sid = await uploadFileChunked(selectedFiles[i], i, selectedFiles.length);
+        sessionIds.push(sid);
+      }
+      setStatus('loading',
+        `<span class="spinner"></span> Upload abgeschlossen – Analysiere mit Claude…` +
+        `<div class="progress">${selectedFiles.length} ZIP(s) · ${totalMB} MB · Bitte 3–5 Minuten warten</div>`);
+      sessionIds.forEach(sid => formData.append('session_ids', sid));
+    } else {
+      // --- Direkter Upload für kleine Dateien (<80 MB) ---
+      setStatus('loading',
+        `<span class="spinner"></span> Datenraum wird analysiert…` +
+        `<div class="progress">${selectedFiles.length} ZIP(s) · ${totalMB} MB · Bitte 3–5 Minuten warten</div>`);
+      selectedFiles.forEach(f => formData.append('files', f, f.name));
+    }
 
     const resp = await fetch(RENDER_URL, {
       method: 'POST',
@@ -115,13 +174,9 @@ generateBtn.addEventListener('click', async () => {
 
     if (!resp.ok) {
       let errText = '';
-      try {
-        const json = await resp.json();
-        errText = json.error || JSON.stringify(json);
-      } catch(e) {
-        errText = await resp.text();
-      }
-      throw new Error(`Fehler ${resp.status}: ${errText.substring(0, 300)}`);
+      try { const j = await resp.json(); errText = j.error || JSON.stringify(j); }
+      catch(e) { errText = await resp.text(); }
+      throw new Error(`Fehler ${resp.status}: ${errText.substring(0, 400)}`);
     }
 
     const blob = await resp.blob();
@@ -131,11 +186,12 @@ generateBtn.addEventListener('click', async () => {
     }
 
     const url = URL.createObjectURL(blob);
-    status.className = 'status success';
-    status.innerHTML = `✓ Exposé generiert! (${(blob.size/1048576).toFixed(1)} MB)<br><a class="download-btn" href="${url}" download="INTERPRÉS_Expose.pdf">PDF HERUNTERLADEN</a>`;
+    setStatus('success',
+      `✓ Exposé generiert! (${(blob.size/1048576).toFixed(1)} MB)<br>` +
+      `<a class="download-btn" href="${url}" download="INTERPRÉS_Expose.pdf">PDF HERUNTERLADEN</a>`);
+
   } catch(e) {
-    status.className = 'status error';
-    status.innerHTML = '✗ ' + e.message;
+    setStatus('error', '✗ ' + e.message);
     generateBtn.disabled = false;
   }
 });
