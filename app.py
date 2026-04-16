@@ -437,7 +437,7 @@ def convert_to_pdf(pptx_bytes, filename):
         json={"tasks": {
             "upload":  {"operation": "import/upload"},
             "convert": {"operation": "convert", "input": "upload",
-                        "input_format": "pptx", "output_format": "pdf", "engine": "libreoffice"},
+                        "input_format": "pptx", "output_format": "pdf", "engine": "office"},
             "export":  {"operation": "export/url", "input": "convert"}
         }}, timeout=30
     )
