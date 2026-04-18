@@ -32,7 +32,7 @@ CLAUDE_API_KEY = os.environ.get("CLAUDE_API_KEY", "")
 CLOUDCONVERT_KEY = os.environ.get("CLOUDCONVERT_KEY", "")
 UNSPLASH_ACCESS_KEY = os.environ.get("UNSPLASH_ACCESS_KEY", "")
 TEST_MODE = os.environ.get("TEST_MODE", "false").lower() == "true"
-TEMPLATE_URL = "https://raw.githubusercontent.com/postflowauto/interpres-expose/main/urbanunits_Marketing_Expose_v3.pdf-5.pptx"
+TEMPLATE_URL = "https://raw.githubusercontent.com/postflowauto/interpres-expose/main/urbanunits_Marketing_Expose_v3.pdf-6.pptx"
 
 # Dummy-Daten für TEST_MODE (kein Claude-API-Call)
 DUMMY_PROJEKTDATEN = {
@@ -131,6 +131,11 @@ DUMMY_EXPOSE_DATA = {
     "bild_ansicht_1": "", "bild_ansicht_2": "", "bild_we_1": "", "bild_we_2": "",
     "bild_stadt_presse": "", "bild_stadt_branche": "",
     "bild_rechtlich_1": "", "bild_rechtlich_2": "",
+    "bild_collage_1": "", "bild_collage_2": "", "bild_collage_3": "",
+    "bild_collage_4": "", "bild_collage_5": "",
+    "bild_standort_innen": "", "bild_standort_aussen": "",
+    "bild_hotel_1": "", "bild_hotel_2": "",
+    "bild_stadt_gross": "", "bild_stadt_klein": "",
 }
 
 # Relevante PDF-Typen nach Priorität
@@ -174,6 +179,17 @@ UNSPLASH_QUERIES = {
     "BILD_STADT_BRANCHE": "scientist laboratory research modern",
     "BILD_RECHTLICH_1": "modern residential building exterior",
     "BILD_RECHTLICH_2": "apartment building facade evening",
+    "BILD_COLLAGE_1": "modern apartment interior living room",
+    "BILD_COLLAGE_2": "food lifestyle dinner modern",
+    "BILD_COLLAGE_3": "rooftop terrace modern apartment",
+    "BILD_COLLAGE_4": "modern kitchen interior design",
+    "BILD_COLLAGE_5": "apartment building exterior architecture",
+    "BILD_STANDORT_INNEN": "modern bedroom interior minimal",
+    "BILD_STANDORT_AUSSEN": "residential building exterior street",
+    "BILD_HOTEL_1": "hotel bedroom luxury sleep",
+    "BILD_HOTEL_2": "hotel lobby modern interior",
+    "BILD_STADT_GROSS": "city skyline aerial",
+    "BILD_STADT_KLEIN": "city street urban",
 }
 
 PLATZHALTER = {
@@ -228,6 +244,11 @@ PLATZHALTER = {
     "bild_ansicht_1": "", "bild_ansicht_2": "", "bild_we_1": "", "bild_we_2": "",
     "bild_stadt_presse": "", "bild_stadt_branche": "",
     "bild_rechtlich_1": "", "bild_rechtlich_2": "",
+    "bild_collage_1": "", "bild_collage_2": "", "bild_collage_3": "",
+    "bild_collage_4": "", "bild_collage_5": "",
+    "bild_standort_innen": "", "bild_standort_aussen": "",
+    "bild_hotel_1": "", "bild_hotel_2": "",
+    "bild_stadt_gross": "", "bild_stadt_klein": "",
 }
 
 def generate_logo_initial(projekt_name):
@@ -337,6 +358,8 @@ def fill_image_placeholders(data):
         queries["BILD_PROJEKT_AUSSEN"] = f"modern apartment building {stadt} exterior"
         queries["BILD_GREENLIVING_1"] = f"sustainable green building {stadt}"
         queries["BILD_GREENLIVING_2"] = f"modern residential {stadt} facade"
+        queries["BILD_STADT_GROSS"] = f"city skyline aerial {stadt}"
+        queries["BILD_STADT_KLEIN"] = f"city street urban {stadt}"
     for placeholder_key, query in queries.items():
         data_key = placeholder_key.lower()
         if data_key in data:
