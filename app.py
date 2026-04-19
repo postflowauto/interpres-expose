@@ -1,5 +1,8 @@
 import os, io, json, base64, zipfile, requests, re, uuid, shutil
+from copy import deepcopy
 from flask import Flask, request, jsonify, send_file
+from pptx import Presentation
+from lxml import etree
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100 MB pro Chunk (Render Proxy Limit)
@@ -136,6 +139,7 @@ DUMMY_EXPOSE_DATA = {
     "bild_standort_innen": "", "bild_standort_aussen": "",
     "bild_hotel_1": "", "bild_hotel_2": "",
     "bild_stadt_gross": "", "bild_stadt_klein": "",
+    "bild_lageplan": "", "bild_grundriss_intro_3": "",
 }
 
 # Relevante PDF-Typen nach Priorität
@@ -180,16 +184,18 @@ UNSPLASH_QUERIES = {
     "BILD_RECHTLICH_1": "modern residential building exterior",
     "BILD_RECHTLICH_2": "apartment building facade evening",
     "BILD_COLLAGE_1": "modern apartment interior living room",
-    "BILD_COLLAGE_2": "food lifestyle dinner modern",
+    "BILD_COLLAGE_2": "food lifestyle dinner table modern",
     "BILD_COLLAGE_3": "rooftop terrace modern apartment",
     "BILD_COLLAGE_4": "modern kitchen interior design",
     "BILD_COLLAGE_5": "apartment building exterior architecture",
     "BILD_STANDORT_INNEN": "modern bedroom interior minimal",
     "BILD_STANDORT_AUSSEN": "residential building exterior street",
-    "BILD_HOTEL_1": "hotel bedroom luxury sleep",
+    "BILD_HOTEL_1": "hotel bedroom luxury modern",
     "BILD_HOTEL_2": "hotel lobby modern interior",
     "BILD_STADT_GROSS": "city skyline aerial",
     "BILD_STADT_KLEIN": "city street urban",
+    "BILD_LAGEPLAN": "city map urban district aerial overview",
+    "BILD_GRUNDRISS_INTRO_3": "modern apartment interior living space",
 }
 
 PLATZHALTER = {
@@ -249,6 +255,7 @@ PLATZHALTER = {
     "bild_standort_innen": "", "bild_standort_aussen": "",
     "bild_hotel_1": "", "bild_hotel_2": "",
     "bild_stadt_gross": "", "bild_stadt_klein": "",
+    "bild_lageplan": "", "bild_grundriss_intro_3": "",
 }
 
 def generate_logo_initial(projekt_name):
@@ -360,6 +367,7 @@ def fill_image_placeholders(data):
         queries["BILD_GREENLIVING_2"] = f"modern residential {stadt} facade"
         queries["BILD_STADT_GROSS"] = f"city skyline aerial {stadt}"
         queries["BILD_STADT_KLEIN"] = f"city street urban {stadt}"
+        queries["BILD_LAGEPLAN"] = f"city map district aerial {stadt}"
     for placeholder_key, query in queries.items():
         data_key = placeholder_key.lower()
         if data_key in data:
@@ -429,25 +437,171 @@ def generate_expose_with_claude(projektdaten):
                          str(resp.json().get("stop_reason")))
     return json.loads(json_text)
 
+def duplicate_slide(prs, slide_index):
+    """Duplicates the slide at slide_index and inserts the copy at slide_index + 1."""
+    template = prs.slides[slide_index]
+    new_slide = prs.slides.add_slide(template.slide_layout)
+
+    # Replace shape tree with a deep copy of the template's
+    sp_tree = new_slide.shapes._spTree
+    tmpl_sp_tree = template.shapes._spTree
+
+    # Remove all children added by add_slide (keep only nvGrpSpPr + grpSpPr = first 2)
+    for child in list(sp_tree)[2:]:
+        sp_tree.remove(child)
+
+    # Copy shapes from template (skip first 2 as well, copy the rest)
+    for child in list(tmpl_sp_tree)[2:]:
+        sp_tree.append(deepcopy(child))
+
+    # Move new slide (currently last) to position slide_index + 1
+    sldIdLst = prs.slides._sldIdLst
+    moved_el = sldIdLst[-1]
+    sldIdLst.remove(moved_el)
+    sldIdLst.insert(slide_index + 1, moved_el)
+
+    return prs.slides[slide_index + 1]
+
+
+def apply_slide_duplication(prs, data):
+    """
+    Finds the Grundriss template slide (contains {{GRUNDRISS_1_LABEL}}) and
+    duplicates it for each populated grundriss_2/3/4_label field.
+    Replaces _1_ references with _N_ in duplicates via XML string replacement.
+    """
+    grundriss_idx = None
+    for i, slide in enumerate(prs.slides):
+        for shape in slide.shapes:
+            if shape.has_text_frame and "GRUNDRISS_1_LABEL" in shape.text_frame.text.upper():
+                grundriss_idx = i
+                break
+        if grundriss_idx is not None:
+            break
+
+    if grundriss_idx is None:
+        print("apply_slide_duplication: kein Grundriss-Slide gefunden")
+        return
+
+    extra_types = [n for n in range(2, 5) if data.get(f"grundriss_{n}_label")]
+    print(f"Grundriss-Slide bei Index {grundriss_idx}, {len(extra_types)} Duplikate")
+
+    for offset, n in enumerate(extra_types):
+        dup = duplicate_slide(prs, grundriss_idx + offset)
+        sp_tree = dup.shapes._spTree
+
+        # Serialize → string-replace _1_ refs → reparse → repopulate sp_tree
+        xml_str = etree.tostring(sp_tree, encoding="unicode")
+        xml_str = (xml_str
+            .replace("GRUNDRISS_1_LABEL", f"GRUNDRISS_{n}_LABEL")
+            .replace("grundriss_1_label", f"grundriss_{n}_label")
+            .replace("BILD_GRUNDRISS_INTRO_1", f"BILD_GRUNDRISS_INTRO_{n}")
+            .replace("bild_grundriss_intro_1", f"bild_grundriss_intro_{n}")
+        )
+        new_sp_tree = etree.fromstring(xml_str.encode("utf-8"))
+        for child in list(sp_tree):
+            sp_tree.remove(child)
+        for child in list(new_sp_tree):
+            sp_tree.append(child)
+
+
 def fill_pptx(template_bytes, data):
-    input_buf = io.BytesIO(template_bytes)
-    output_buf = io.BytesIO()
-    with zipfile.ZipFile(input_buf, "r") as zin:
-        with zipfile.ZipFile(output_buf, "w", zipfile.ZIP_DEFLATED) as zout:
-            for item in zin.infolist():
-                raw = zin.read(item.filename)
-                if item.filename.endswith(".xml") or item.filename.endswith(".rels"):
-                    try:
-                        content = raw.decode("utf-8")
-                        for key, value in data.items():
-                            safe = str(value or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-                            content = content.replace("{{" + key.upper() + "}}", safe)
-                            content = content.replace("{{" + key + "}}", safe)
-                        raw = content.encode("utf-8")
-                    except Exception:
-                        pass
-                zout.writestr(item, raw)
-    return output_buf.getvalue()
+    """Fill PPTX template using python-pptx: embeds images and replaces text placeholders."""
+
+    prs = Presentation(io.BytesIO(template_bytes))
+
+    # Pre-download all images referenced by bild_* keys
+    image_data = {}
+    for key, value in data.items():
+        if key.startswith("bild_") and isinstance(value, str) and value.startswith("http"):
+            try:
+                resp = requests.get(value, timeout=15)
+                if resp.status_code == 200:
+                    image_data[key] = resp.content
+                    print(f"Bild geladen: {key} ({len(resp.content)//1024} KB)")
+                else:
+                    print(f"Bild HTTP-Fehler {key}: {resp.status_code}")
+            except Exception as e:
+                print(f"Bild Download-Fehler {key}: {e}")
+
+    # Duplicate Grundriss slides before text replacement
+    apply_slide_duplication(prs, data)
+
+    def replace_in_paragraph(para, data):
+        """Replace {{KEY}} placeholders, handling runs that are split across multiple XML nodes."""
+        full_text = "".join(run.text for run in para.runs)
+        needs_replace = any(
+            f"{{{{{k.upper()}}}}}" in full_text or f"{{{{{k}}}}}" in full_text
+            for k in data
+        )
+        if not needs_replace:
+            return
+        new_text = full_text
+        for key, value in data.items():
+            safe = str(value or "")
+            new_text = new_text.replace(f"{{{{{key.upper()}}}}}", safe)
+            new_text = new_text.replace(f"{{{{{key}}}}}", safe)
+        if para.runs:
+            para.runs[0].text = new_text
+            for run in para.runs[1:]:
+                run.text = ""
+
+    def process_shape(slide, shape, data, image_data):
+        """Replace text or embed image for a single shape."""
+        shape_name_lower = (shape.name or "").lower()
+
+        # 1. Image match by shape name
+        if shape_name_lower in image_data and image_data[shape_name_lower]:
+            try:
+                left, top, width, height = shape.left, shape.top, shape.width, shape.height
+                shape._element.getparent().remove(shape._element)
+                slide.shapes.add_picture(
+                    io.BytesIO(image_data[shape_name_lower]), left, top, width, height
+                )
+                return
+            except Exception as e:
+                print(f"Bild-Ersatz Fehler (name) {shape_name_lower}: {e}")
+
+        # 2. Image match by text content (shape text is exactly {{BILD_KEY}})
+        if shape.has_text_frame:
+            full_text = shape.text_frame.text.strip()
+            img_key = None
+            for key in image_data:
+                if full_text in (f"{{{{{key.upper()}}}}}", f"{{{{{key}}}}}"):
+                    img_key = key
+                    break
+            if img_key and image_data.get(img_key):
+                try:
+                    left, top, width, height = shape.left, shape.top, shape.width, shape.height
+                    shape._element.getparent().remove(shape._element)
+                    slide.shapes.add_picture(
+                        io.BytesIO(image_data[img_key]), left, top, width, height
+                    )
+                    return
+                except Exception as e:
+                    print(f"Bild-Ersatz Fehler (text) {img_key}: {e}")
+
+            # 3. Text replacement
+            for para in shape.text_frame.paragraphs:
+                replace_in_paragraph(para, data)
+
+        # 4. Recurse into group shapes
+        try:
+            if shape.shape_type == 6:  # MSO_SHAPE_TYPE.GROUP
+                for s in shape.shapes:
+                    process_shape(slide, s, data, image_data)
+        except Exception:
+            pass
+
+    for slide in prs.slides:
+        for shape in list(slide.shapes):
+            try:
+                process_shape(slide, shape, data, image_data)
+            except Exception as e:
+                print(f"Shape-Fehler: {e}")
+
+    out = io.BytesIO()
+    prs.save(out)
+    return out.getvalue()
 
 def convert_to_pdf(pptx_bytes, filename):
     import time
