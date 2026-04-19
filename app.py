@@ -510,6 +510,90 @@ def apply_slide_duplication(prs, data):
             sp_tree.append(child)
 
 
+def duplicate_we_slides(prs, data):
+    """
+    Finds the WE template slide (contains WE_BEISPIEL_1 or BILD_WE_1),
+    duplicates it for every additional Wohnungstyp found in data,
+    and replaces _1 → _N and letter 'a' → 'b'/'c'/... in each duplicate.
+    Called AFTER text replacement so the originals are already filled.
+    """
+    letters = ['a', 'b', 'c', 'd', 'e', 'f']
+
+    # Count how many WE types are present
+    we_count = 1
+    for n in range(2, 7):
+        if data.get(f"we_beispiel_{n}") or data.get(f"bild_we_{n}"):
+            we_count = n
+
+    if we_count <= 1:
+        print("duplicate_we_slides: nur 1 WE-Typ, kein Duplizieren")
+        return
+
+    # Find WE template slide
+    we_idx = None
+    for i, slide in enumerate(prs.slides):
+        for shape in slide.shapes:
+            if shape.has_text_frame:
+                txt = shape.text_frame.text.upper()
+                if "WE_BEISPIEL_1" in txt or "BILD_WE_1" in txt:
+                    we_idx = i
+                    break
+        if we_idx is not None:
+            break
+
+    if we_idx is None:
+        print("duplicate_we_slides: WE-Template-Slide nicht gefunden")
+        return
+
+    print(f"WE-Slide bei Index {we_idx}, {we_count - 1} Duplikate")
+
+    for offset in range(1, we_count):
+        new_slide = duplicate_slide(prs, we_idx + (offset - 1))
+        n = offset + 1
+        sp_tree = new_slide.shapes._spTree
+        xml_str = etree.tostring(sp_tree, encoding="unicode")
+
+        # Replace _1 field references with _N
+        xml_str = xml_str.replace("WE_BEISPIEL_1", f"WE_BEISPIEL_{n}")
+        xml_str = xml_str.replace("WE_BEREICH_1",  f"WE_BEREICH_{n}")
+        xml_str = xml_str.replace("BILD_WE_1",     f"BILD_WE_{n}")
+        xml_str = xml_str.replace("WE_FLAECHE_1",  f"WE_FLAECHE_{n}")
+        # Replace stand-alone letter label 'a' → 'b'/'c'/... in XML text nodes
+        old_letter = letters[0]        # 'a'
+        new_letter = letters[offset]   # 'b', 'c', …
+        xml_str = xml_str.replace(f">{old_letter}<", f">{new_letter}<")
+
+        new_sp_tree = etree.fromstring(xml_str.encode("utf-8"))
+        for child in list(sp_tree):
+            sp_tree.remove(child)
+        for child in list(new_sp_tree):
+            sp_tree.append(child)
+
+        # Now fill the duplicate's placeholders with actual data
+        for shape in list(new_slide.shapes):
+            try:
+                if shape.has_text_frame:
+                    for para in shape.text_frame.paragraphs:
+                        if not para.runs:
+                            continue
+                        full_text = "".join(r.text for r in para.runs)
+                        modified = full_text
+                        for key, value in data.items():
+                            safe = str(value or "")
+                            modified = modified.replace("{{" + key.upper() + "}}", safe)
+                            modified = modified.replace("{{" + key + "}}", safe)
+                            modified = re.sub(
+                                r'\{\{' + re.escape(key.upper()) + r'\|[^}]+\}\}',
+                                safe, modified
+                            )
+                        if modified != full_text:
+                            para.runs[0].text = modified
+                            for run in para.runs[1:]:
+                                run.text = ""
+            except Exception as e:
+                print(f"WE-Duplikat Shape-Fehler: {e}")
+
+
 def fill_pptx(template_bytes, data):
     """Fill PPTX template using python-pptx: embeds images and replaces text placeholders."""
 
@@ -530,26 +614,26 @@ def fill_pptx(template_bytes, data):
                 print(f"Bild Download-Fehler {key}: {e}")
 
     def replace_in_paragraph(para, data):
-        """Replace {{KEY}} placeholders, handling runs that are split across multiple XML nodes."""
+        """Replace {{KEY}}, {{key}}, {{KEY|suffix}} placeholders.
+        Reassembles all runs into one string first to catch split-run placeholders,
+        then writes the result into runs[0] and clears all other runs.
+        """
         if not para.runs:
             return
-        full_text = "".join(run.text for run in para.runs)
-        needs_replace = any(
-            f"{{{{{k.upper()}}}}}" in full_text or f"{{{{{k}}}}}" in full_text
-            for k in data
-        )
-        if not needs_replace:
-            return
-        new_text = full_text
+        full_text = "".join(r.text for r in para.runs)
+        modified = full_text
         for key, value in data.items():
             safe = str(value or "")
-            new_text = new_text.replace(f"{{{{{key.upper()}}}}}", safe)
-            new_text = new_text.replace(f"{{{{{key}}}}}", safe)
-        # Write into the first non-empty run, or fall back to runs[0]
-        target_run = next((r for r in para.runs if r.text), para.runs[0])
-        target_run.text = new_text
-        for run in para.runs:
-            if run is not target_run:
+            modified = modified.replace("{{" + key.upper() + "}}", safe)
+            modified = modified.replace("{{" + key + "}}", safe)
+            # Handle {{KEY|XXpt}} style suffixes
+            modified = re.sub(
+                r'\{\{' + re.escape(key.upper()) + r'\|[^}]+\}\}',
+                safe, modified
+            )
+        if modified != full_text:
+            para.runs[0].text = modified
+            for run in para.runs[1:]:
                 run.text = ""
 
     def process_shape(slide, shape, data, image_data, is_group_child=False):
@@ -611,6 +695,9 @@ def fill_pptx(template_bytes, data):
                 process_shape(slide, shape, data, image_data)
             except Exception as e:
                 print(f"Shape-Fehler: {e}")
+
+    # Duplicate WE slides after all text/image replacement is done
+    duplicate_we_slides(prs, data)
 
     out = io.BytesIO()
     prs.save(out)
