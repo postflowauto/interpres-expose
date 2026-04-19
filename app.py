@@ -140,6 +140,9 @@ DUMMY_EXPOSE_DATA = {
     "bild_hotel_1": "", "bild_hotel_2": "",
     "bild_stadt_gross": "", "bild_stadt_klein": "",
     "bild_lageplan": "", "bild_grundriss_intro_3": "",
+    "bild_projekt": "",
+    "produkt_beschreibung": "Vollmöblierte Mikro-Apartments mit Smart-Lock",
+    "zitat_intro": "Wohnen neu gedacht.",
 }
 
 # Relevante PDF-Typen nach Priorität
@@ -196,6 +199,7 @@ UNSPLASH_QUERIES = {
     "BILD_STADT_KLEIN": "city street urban",
     "BILD_LAGEPLAN": "city map urban district aerial overview",
     "BILD_GRUNDRISS_INTRO_3": "modern apartment interior living space",
+    "BILD_PROJEKT": "modern luxury apartment building exterior night",
 }
 
 PLATZHALTER = {
@@ -256,6 +260,8 @@ PLATZHALTER = {
     "bild_hotel_1": "", "bild_hotel_2": "",
     "bild_stadt_gross": "", "bild_stadt_klein": "",
     "bild_lageplan": "", "bild_grundriss_intro_3": "",
+    "bild_projekt": "",
+    "zitat_intro": "",
 }
 
 def generate_logo_initial(projekt_name):
@@ -523,11 +529,10 @@ def fill_pptx(template_bytes, data):
             except Exception as e:
                 print(f"Bild Download-Fehler {key}: {e}")
 
-    # Duplicate Grundriss slides before text replacement
-    apply_slide_duplication(prs, data)
-
     def replace_in_paragraph(para, data):
         """Replace {{KEY}} placeholders, handling runs that are split across multiple XML nodes."""
+        if not para.runs:
+            return
         full_text = "".join(run.text for run in para.runs)
         needs_replace = any(
             f"{{{{{k.upper()}}}}}" in full_text or f"{{{{{k}}}}}" in full_text
@@ -540,55 +545,63 @@ def fill_pptx(template_bytes, data):
             safe = str(value or "")
             new_text = new_text.replace(f"{{{{{key.upper()}}}}}", safe)
             new_text = new_text.replace(f"{{{{{key}}}}}", safe)
-        if para.runs:
-            para.runs[0].text = new_text
-            for run in para.runs[1:]:
+        # Write into the first non-empty run, or fall back to runs[0]
+        target_run = next((r for r in para.runs if r.text), para.runs[0])
+        target_run.text = new_text
+        for run in para.runs:
+            if run is not target_run:
                 run.text = ""
 
-    def process_shape(slide, shape, data, image_data):
-        """Replace text or embed image for a single shape."""
+    def process_shape(slide, shape, data, image_data, is_group_child=False):
+        """Replace text or embed image for a single shape.
+
+        is_group_child=True: skip image embedding (coordinates are relative inside group),
+        only do text replacement.
+        """
         shape_name_lower = (shape.name or "").lower()
 
-        # 1. Image match by shape name
-        if shape_name_lower in image_data and image_data[shape_name_lower]:
-            try:
-                left, top, width, height = shape.left, shape.top, shape.width, shape.height
-                shape._element.getparent().remove(shape._element)
-                slide.shapes.add_picture(
-                    io.BytesIO(image_data[shape_name_lower]), left, top, width, height
-                )
-                return
-            except Exception as e:
-                print(f"Bild-Ersatz Fehler (name) {shape_name_lower}: {e}")
-
-        # 2. Image match by text content (shape text is exactly {{BILD_KEY}})
-        if shape.has_text_frame:
-            full_text = shape.text_frame.text.strip()
-            img_key = None
-            for key in image_data:
-                if full_text in (f"{{{{{key.upper()}}}}}", f"{{{{{key}}}}}"):
-                    img_key = key
-                    break
-            if img_key and image_data.get(img_key):
+        if not is_group_child:
+            # 1. Image match by shape name (top-level shapes only)
+            if shape_name_lower in image_data and image_data[shape_name_lower]:
                 try:
                     left, top, width, height = shape.left, shape.top, shape.width, shape.height
                     shape._element.getparent().remove(shape._element)
                     slide.shapes.add_picture(
-                        io.BytesIO(image_data[img_key]), left, top, width, height
+                        io.BytesIO(image_data[shape_name_lower]), left, top, width, height
                     )
                     return
                 except Exception as e:
-                    print(f"Bild-Ersatz Fehler (text) {img_key}: {e}")
+                    print(f"Bild-Ersatz Fehler (name) {shape_name_lower}: {e}")
 
-            # 3. Text replacement
+            # 2. Image match by text content (top-level shapes only)
+            if shape.has_text_frame:
+                full_text = shape.text_frame.text.strip()
+                img_key = None
+                for key in image_data:
+                    if full_text in (f"{{{{{key.upper()}}}}}", f"{{{{{key}}}}}"):
+                        img_key = key
+                        break
+                if img_key and image_data.get(img_key):
+                    try:
+                        left, top, width, height = shape.left, shape.top, shape.width, shape.height
+                        shape._element.getparent().remove(shape._element)
+                        slide.shapes.add_picture(
+                            io.BytesIO(image_data[img_key]), left, top, width, height
+                        )
+                        return
+                    except Exception as e:
+                        print(f"Bild-Ersatz Fehler (text) {img_key}: {e}")
+
+        # 3. Text replacement (always, including group children)
+        if shape.has_text_frame:
             for para in shape.text_frame.paragraphs:
                 replace_in_paragraph(para, data)
 
-        # 4. Recurse into group shapes
+        # 4. Recurse into group shapes, marking children as group members
         try:
             if shape.shape_type == 6:  # MSO_SHAPE_TYPE.GROUP
                 for s in shape.shapes:
-                    process_shape(slide, s, data, image_data)
+                    process_shape(slide, s, data, image_data, is_group_child=True)
         except Exception:
             pass
 
