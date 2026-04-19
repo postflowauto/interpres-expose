@@ -168,55 +168,55 @@ PDF_PRIORITY = [
 ]
 
 UNSPLASH_QUERIES = {
-    "BILD_TITEL": "modern luxury residential building exterior",
-    "BILD_QUARTIER": "city neighborhood street urban architecture",
-    "BILD_PROJEKT_AUSSEN": "modern apartment building exterior architecture",
-    "BILD_AMENITY_1": "car sharing electric vehicle urban",
-    "BILD_AMENITY_2": "solar panels rooftop renewable energy",
-    "BILD_AMENITY_3": "gym fitness weights modern",
-    "BILD_AMENITY_4": "parcel station locker delivery",
-    "BILD_AMENITY_5": "cafe coffee interior modern",
-    "BILD_AMENITY_6": "green roof garden urban",
-    "BILD_AMENITY_7": "district heating pipes infrastructure",
-    "BILD_AMENITY_8": "vintage classic car showroom",
-    "BILD_AMENITY_9": "apartment balcony urban view",
-    "BILD_GREENLIVING_1": "sustainable green building nature",
-    "BILD_GREENLIVING_2": "modern residential building facade",
-    "BILD_INTERIOR": "modern bedroom interior minimal design",
-    "BILD_AUSSTATTUNG_1": "modern living room interior design",
-    "BILD_AUSSTATTUNG_2": "hardwood floor interior",
-    "BILD_AUSSTATTUNG_3": "modern bathroom tiles",
-    "BILD_AUSSTATTUNG_4": "modern kitchen interior",
-    "BILD_AUSSTATTUNG_5": "bedroom furniture design",
-    "BILD_AUSSTATTUNG_6": "apartment interior detail",
-    "BILD_GRUNDRISS_INTRO_1": "modern apartment living room",
-    "BILD_GRUNDRISS_INTRO_2": "modern apartment bedroom",
-    "BILD_ANSICHT_1": "apartment building exterior west",
-    "BILD_ANSICHT_2": "modern residential building south",
-    "BILD_WE_1": "apartment floor plan interior",
-    "BILD_WE_2": "modern apartment bedroom interior",
-    "BILD_STADT_PRESSE": "newspaper article table coffee",
-    "BILD_STADT_BRANCHE": "scientist laboratory research modern",
-    "BILD_RECHTLICH_1": "modern residential building exterior",
-    "BILD_RECHTLICH_2": "apartment building facade evening",
-    "BILD_COLLAGE_1": "modern apartment interior living room",
-    "BILD_COLLAGE_2": "food lifestyle dinner table modern",
-    "BILD_COLLAGE_3": "rooftop terrace modern apartment",
-    "BILD_COLLAGE_4": "modern kitchen interior design",
-    "BILD_COLLAGE_5": "apartment building exterior architecture",
-    "BILD_STANDORT_INNEN": "modern bedroom interior minimal",
-    "BILD_STANDORT_AUSSEN": "residential building exterior street",
-    "BILD_HOTEL_1": "hotel bedroom luxury modern",
-    "BILD_HOTEL_2": "hotel lobby modern interior",
-    "BILD_STADT_GROSS": "city skyline aerial",
-    "BILD_STADT_KLEIN": "city street urban",
-    "BILD_LAGEPLAN": "city map urban district aerial overview",
-    "BILD_GRUNDRISS_INTRO_3": "modern apartment interior living space",
-    "BILD_PROJEKT": "modern luxury apartment building exterior night",
-    "BILD_GRUNDRISS_1": "apartment floor plan architectural drawing",
-    "BILD_GRUNDRISS_2": "apartment floor plan 2 room layout",
-    "BILD_GRUNDRISS_3": "apartment floor plan 3 room layout",
-    "BILD_GRUNDRISS_4": "apartment floor plan large penthouse",
+    "BILD_TITEL":             "modern luxury apartment building facade night",
+    "BILD_QUARTIER":          "european city neighborhood street aerial",
+    "BILD_PROJEKT_AUSSEN":    "modern new residential building exterior",
+    "BILD_AMENITY_1":         "electric bike sharing station urban",
+    "BILD_AMENITY_2":         "solar panels rooftop modern building",
+    "BILD_AMENITY_3":         "modern gym fitness center interior",
+    "BILD_AMENITY_4":         "parcel locker station modern",
+    "BILD_AMENITY_5":         "modern cafe coffee shop interior",
+    "BILD_AMENITY_6":         "rooftop garden terrace urban green",
+    "BILD_AMENITY_7":         "district heating radiator pipes warm",
+    "BILD_AMENITY_8":         "underground parking garage modern",
+    "BILD_AMENITY_9":         "apartment balcony city view modern",
+    "BILD_GREENLIVING_1":     "sustainable green building facade plants",
+    "BILD_GREENLIVING_2":     "modern eco residential building exterior",
+    "BILD_INTERIOR":          "modern minimalist bedroom interior design",
+    "BILD_AUSSTATTUNG_1":     "modern living room interior design bright",
+    "BILD_AUSSTATTUNG_2":     "herringbone hardwood parquet floor",
+    "BILD_AUSSTATTUNG_3":     "modern bathroom white tiles luxury",
+    "BILD_AUSSTATTUNG_4":     "modern fitted kitchen interior design",
+    "BILD_AUSSTATTUNG_5":     "designer bedroom furniture modern",
+    "BILD_AUSSTATTUNG_6":     "apartment interior detail decor",
+    "BILD_GRUNDRISS_INTRO_1": "modern apartment living room bright",
+    "BILD_GRUNDRISS_INTRO_2": "modern apartment bedroom minimal",
+    "BILD_GRUNDRISS_INTRO_3": "modern apartment open plan living",
+    "BILD_GRUNDRISS_1":       "architectural floor plan drawing blueprints",
+    "BILD_GRUNDRISS_2":       "apartment floor plan layout blueprint",
+    "BILD_GRUNDRISS_3":       "floor plan architectural drawing",
+    "BILD_GRUNDRISS_4":       "penthouse floor plan architectural",
+    "BILD_ANSICHT_1":         "modern apartment building west facade",
+    "BILD_ANSICHT_2":         "residential building south facade modern",
+    "BILD_WE_1":              "modern furnished studio apartment interior",
+    "BILD_WE_2":              "modern one bedroom apartment interior",
+    "BILD_STADT_PRESSE":      "newspaper business magazine coffee table",
+    "BILD_STADT_BRANCHE":     "modern office technology business district",
+    "BILD_RECHTLICH_1":       "modern residential building exterior blue sky",
+    "BILD_RECHTLICH_2":       "apartment building facade architecture",
+    "BILD_COLLAGE_1":         "modern apartment living room interior",
+    "BILD_COLLAGE_2":         "lifestyle dinner table food modern",
+    "BILD_COLLAGE_3":         "rooftop terrace urban view sunset",
+    "BILD_COLLAGE_4":         "modern kitchen interior design minimal",
+    "BILD_COLLAGE_5":         "apartment building exterior architecture modern",
+    "BILD_STANDORT_INNEN":    "modern bedroom interior minimal bright",
+    "BILD_STANDORT_AUSSEN":   "european city street residential neighborhood",
+    "BILD_HOTEL_1":           "luxury hotel bedroom modern interior",
+    "BILD_HOTEL_2":           "boutique hotel lobby modern design",
+    "BILD_STADT_GROSS":       "german city skyline aerial panorama",
+    "BILD_STADT_KLEIN":       "european city street urban architecture",
+    "BILD_LAGEPLAN":          "city district aerial map overview",
+    "BILD_PROJEKT":           "luxury apartment building exterior night lights",
 }
 
 PLATZHALTER = {
@@ -388,16 +388,18 @@ def fetch_unsplash_image(query):
 
 def fill_image_placeholders(data):
     stadt = data.get("stadt", "")
+    stadtteil = data.get("stadtteil", "")
     queries = UNSPLASH_QUERIES.copy()
     if stadt:
-        queries["BILD_TITEL"] = f"modern residential building {stadt} urban architecture"
-        queries["BILD_QUARTIER"] = f"{stadt} city neighborhood street"
-        queries["BILD_PROJEKT_AUSSEN"] = f"modern apartment building {stadt} exterior"
-        queries["BILD_GREENLIVING_1"] = f"sustainable green building {stadt}"
-        queries["BILD_GREENLIVING_2"] = f"modern residential {stadt} facade"
-        queries["BILD_STADT_GROSS"] = f"city skyline aerial {stadt}"
-        queries["BILD_STADT_KLEIN"] = f"city street urban {stadt}"
-        queries["BILD_LAGEPLAN"] = f"city map district aerial {stadt}"
+        queries["BILD_TITEL"]          = f"modern luxury apartment building {stadt}"
+        queries["BILD_QUARTIER"]       = f"{stadtteil or stadt} city neighborhood street"
+        queries["BILD_PROJEKT_AUSSEN"] = f"modern new apartment building {stadt} exterior"
+        queries["BILD_GREENLIVING_1"]  = f"sustainable green building {stadt}"
+        queries["BILD_GREENLIVING_2"]  = f"eco modern residential {stadt}"
+        queries["BILD_STADT_GROSS"]    = f"{stadt} city skyline aerial panorama"
+        queries["BILD_STADT_KLEIN"]    = f"{stadt} {stadtteil or ''} street urban"
+        queries["BILD_LAGEPLAN"]       = f"{stadt} {stadtteil or ''} city district aerial"
+        queries["BILD_PROJEKT"]        = f"modern apartment building {stadt} night"
     for placeholder_key, query in queries.items():
         data_key = placeholder_key.lower()
         if data_key in data:
@@ -443,8 +445,53 @@ def generate_expose_with_claude(projektdaten):
         "Du bist ein Immobilien-Exposé-Spezialist bei INTERPRÉS GmbH. "
         "Antworte NUR mit einem validen JSON-Objekt. Kein Text davor oder danach. Keine Markdown-Backticks.\n\n"
         f"## PROJEKTDATEN\n{json.dumps(projektdaten, ensure_ascii=False)}\n\n"
-        f"## AUFGABE\nFülle alle Felder aus. Nutze dein Wissen über {stadt} für Statistiken "
-        "(Einwohner, BIP, Mietsteigerung, Studierende, Top-Arbeitgeber, Freizeiteinrichtungen).\n\n"
+        f"## AUFGABE\nFülle ALLE Felder aus dem JSON-Schema unten aus. "
+        f"Nutze dein Wissen über {stadt} für Statistiken.\n\n"
+
+        "## STANDORT-ANALYSE (wichtig für mehrere Felder)\n"
+        f"Das Projekt liegt in: {projektdaten.get('adresse', '')} - {projektdaten.get('stadtteil', '')} - {projektdaten.get('stadt', '')}\n"
+        "Analysiere den genauen Stadtteil und berechne realistische Entfernungen zu folgenden Zielen.\n"
+        "Nutze für JEDEN Eintrag entweder 'zu Fuß' (unter 15 Min. fußläufig) oder 'mit dem Auto'.\n\n"
+
+        "### Freizeit (freizeit_1_name bis freizeit_4_name + min_freizeit_1 bis min_freizeit_4)\n"
+        "Wähle 4 bekannte Freizeitorte aus dem Stadtteil/der Stadt. "
+        "min_freizeit_X = realistische Minuten von der Projektadresse. "
+        "Verwende NUR Zahlen ohne Einheit (z.B. '8' nicht '8 Min.').\n\n"
+
+        "### Universität/Hochschule (min_uni, label_min_uni)\n"
+        "label_min_uni = Name der nächsten Uni/FH. "
+        "min_uni = Minuten von der Projektadresse.\n\n"
+
+        "### Bahnhof (min_bahnhof, label_min_bahnhof)\n"
+        "label_min_bahnhof = Name des nächsten Bahnhofs/S-Bahn-Haltestelle. "
+        "min_bahnhof = Minuten.\n\n"
+
+        "### Altstadt/Zentrum (min_altstadt, label_min_altstadt)\n"
+        "label_min_altstadt = Name des Zentrums/der Altstadt. "
+        "min_altstadt = Minuten.\n\n"
+
+        "### Stadtstatistiken\n"
+        f"Nutze echte Daten für {stadt}: Einwohnerzahl, BIP des Bundeslandes, "
+        "Mietsteigerung p.a., Studierendenzahl. "
+        "bundesland = Name des Bundeslandes (z.B. 'Niedersachsen').\n\n"
+
+        "### Wohnungstypen (we_beispiel_1/2, we_bereich_1/2, we_flaeche_1-5)\n"
+        "we_beispiel_1 = 'Typ A', we_beispiel_2 = 'Typ B' etc. "
+        "we_flaeche_1-5 = nur die Zahl in m² (z.B. '28'), aufsteigend von klein bis groß.\n\n"
+
+        "### Kapitel-Texte (text_kapitel_invest_1/2, _live_1/2, _stay_1/2, _know_1/2)\n"
+        "Kurze prägnante Sätze (max. 8 Wörter) die zum jeweiligen Kapitel passen.\n\n"
+
+        "### Amenities (amenity_1 bis amenity_9)\n"
+        "Konkrete Annehmlichkeiten des Projekts aus den Besonderheiten. "
+        "Kurze Begriffe, max. 3 Wörter (z.B. 'E-Bike-Sharing', 'Dachterrasse').\n\n"
+
+        "### Grundrisse (grundriss_1_label bis grundriss_4_label)\n"
+        "Format: 'Typ A – 28 m²' (Typ + Fläche).\n\n"
+
+        "### anzahl_barrierefrei\n"
+        "Schätze basierend auf Gesamtzahl WE (ca. 25% barrierefrei).\n\n"
+
         f"## ALLE FELDER AUSFÜLLEN:\n{json.dumps(PLATZHALTER, ensure_ascii=False)}"
     )
     resp = requests.post(
@@ -476,6 +523,23 @@ def _replace_placeholders(text, data):
     def _sub(m):
         return repl_map.get(m.group(1).upper().strip(), m.group(0))
     return _PH_RE.sub(_sub, text)
+
+# Regex für Cross-Paragraph-Splits mit optionalem Bindestrich am Zeilenende
+# z.B. "{{PRODUKT_BESCHREI-\nBUNG}}" → key = "PRODUKT_BESCHREIBUNG"
+_PH_SPLIT_RE = re.compile(
+    r'\{\{\s*([A-Z0-9_]+-?)\n([A-Z0-9_]*)\s*(?:\|[^}]*)?\}\}',
+    re.IGNORECASE
+)
+
+def _replace_split_placeholder(text, data):
+    """Behandelt Platzhalter die mit Bindestrich über zwei Zeilen gesplittet sind."""
+    repl_map = {k.upper(): str(v or "") for k, v in data.items()}
+    def _sub(m):
+        part1 = m.group(1).rstrip('-')
+        part2 = m.group(2)
+        key = (part1 + part2).upper().strip()
+        return repl_map.get(key, m.group(0))
+    return _PH_SPLIT_RE.sub(_sub, text)
 
 
 def duplicate_slide(prs, slide_index):
@@ -614,11 +678,19 @@ def fill_pptx(template_bytes, data):
 
         # Schritt 2: Cross-Paragraph-Split — benachbarte Paragraphen zusammen prüfen
         for i in range(len(paras) - 1):
-            combined = para_texts[i] + para_texts[i + 1]
+            combined = para_texts[i] + "\n" + para_texts[i + 1]
             if "{{" in combined and "}}" in combined:
                 replaced = _replace_placeholders(combined, data)
+                replaced = _replace_split_placeholder(replaced, data)
                 if replaced != combined:
+                    # split_at accounts for the \n separator we joined with
                     split_at = len(para_texts[i])
+                    # replaced may be shorter (placeholder replaced), recalculate split
+                    # by proportion of original lengths
+                    orig_len = len(para_texts[i]) + 1 + len(para_texts[i + 1])
+                    if orig_len > 0:
+                        ratio = len(para_texts[i]) / orig_len
+                        split_at = max(0, min(len(replaced), int(len(replaced) * ratio)))
                     new0 = replaced[:split_at]
                     new1 = replaced[split_at:]
                     if paras[i].runs:
@@ -632,21 +704,78 @@ def fill_pptx(template_bytes, data):
                     para_texts[i] = new0
                     para_texts[i+1] = new1
 
+    def get_group_child_abs_coords(group_shape, child_shape):
+        """
+        Berechnet absolute Slide-Koordinaten eines Child-Shapes innerhalb einer Gruppe.
+
+        In OOXML gilt für Gruppen:
+          grpSpPr/xfrm/off   = absolute Position der Gruppe auf dem Slide (grp_x, grp_y)
+          grpSpPr/xfrm/ext   = absolute Größe der Gruppe (grp_w, grp_h)
+          grpSpPr/xfrm/chOff = Ursprung des internen Koordinatensystems (ch_x, ch_y)
+          grpSpPr/xfrm/chExt = Ausdehnung des internen Koordinatensystems (ch_w, ch_h)
+
+        Formel:
+          scale_x  = grp_w / ch_w
+          scale_y  = grp_h / ch_h
+          abs_left = grp_x + (child.left - ch_x) * scale_x
+          abs_top  = grp_y + (child.top  - ch_y) * scale_y
+          abs_w    = child.width  * scale_x
+          abs_h    = child.height * scale_y
+        """
+        ns = 'http://schemas.openxmlformats.org/drawingml/2006/main'
+        grp_el = group_shape._element
+        xfrm = grp_el.find(f'.//{{{ns}}}grpSpPr/{{{ns}}}xfrm')
+        if xfrm is None:
+            # Fallback: simple addition
+            return (
+                group_shape.left + child_shape.left,
+                group_shape.top  + child_shape.top,
+                child_shape.width,
+                child_shape.height,
+            )
+        off   = xfrm.find(f'{{{ns}}}off')
+        ext   = xfrm.find(f'{{{ns}}}ext')
+        chOff = xfrm.find(f'{{{ns}}}chOff')
+        chExt = xfrm.find(f'{{{ns}}}chExt')
+        if None in (off, ext, chOff, chExt):
+            return (
+                group_shape.left + child_shape.left,
+                group_shape.top  + child_shape.top,
+                child_shape.width,
+                child_shape.height,
+            )
+        grp_x = int(off.get('x', 0));  grp_y = int(off.get('y', 0))
+        grp_w = int(ext.get('cx', 1)); grp_h = int(ext.get('cy', 1))
+        ch_x  = int(chOff.get('x', 0)); ch_y = int(chOff.get('y', 0))
+        ch_w  = int(chExt.get('cx', 1)); ch_h = int(chExt.get('cy', 1))
+        scale_x = grp_w / ch_w if ch_w else 1
+        scale_y = grp_h / ch_h if ch_h else 1
+        c_left = child_shape.left  or 0; c_top = child_shape.top    or 0
+        c_w    = child_shape.width or 0; c_h   = child_shape.height or 0
+        abs_left = int(grp_x + (c_left - ch_x) * scale_x)
+        abs_top  = int(grp_y + (c_top  - ch_y) * scale_y)
+        abs_w    = int(c_w * scale_x)
+        abs_h    = int(c_h * scale_y)
+        return abs_left, abs_top, abs_w, abs_h
+
     def embed_image_in_group(slide, group_shape, child_shape, img_bytes):
-        """Fügt Bild auf Slide-Ebene an absoluter Position der child_shape in group ein."""
+        """Fügt Bild auf Slide-Ebene an korrekter absoluter Position ein."""
         try:
-            abs_left = group_shape.left + child_shape.left
-            abs_top  = group_shape.top  + child_shape.top
-            width    = child_shape.width
-            height   = child_shape.height
-            slide.shapes.add_picture(io.BytesIO(img_bytes), abs_left, abs_top, width, height)
+            abs_left, abs_top, abs_w, abs_h = get_group_child_abs_coords(
+                group_shape, child_shape
+            )
+            slide.shapes.add_picture(
+                io.BytesIO(img_bytes), abs_left, abs_top, abs_w, abs_h
+            )
             if child_shape.has_text_frame:
                 for para in child_shape.text_frame.paragraphs:
                     for r in para.runs:
                         r.text = ""
-            print(f"Bild eingesetzt bei {abs_left//914400*2.54:.1f},{abs_top//914400*2.54:.1f}cm {width//914400*2.54:.1f}x{height//914400*2.54:.1f}cm")
+            print(f"  Bild eingesetzt: {abs_left//914400*2.54:.1f},{abs_top//914400*2.54:.1f}cm "
+                  f"{abs_w//914400*2.54:.1f}x{abs_h//914400*2.54:.1f}cm")
         except Exception as e:
             print(f"embed_image_in_group Fehler: {e}")
+            import traceback; traceback.print_exc()
 
     def embed_image_toplevel(slide, shape, img_bytes):
         """Ersetzt ein Top-Level-Shape durch ein Bild gleicher Position/Größe."""
