@@ -143,6 +143,19 @@ DUMMY_EXPOSE_DATA = {
     "bild_projekt": "",
     "produkt_beschreibung": "Vollmöblierte Mikro-Apartments mit Smart-Lock",
     "zitat_intro": "Wohnen neu gedacht.",
+    "bundesland": "Niedersachsen",
+    "bild_grundriss_1": "", "bild_grundriss_2": "", "bild_grundriss_3": "", "bild_grundriss_4": "",
+    "text_kapitel_invest_1": "Nachhaltig investieren in Hannover.",
+    "text_kapitel_invest_2": "Maximale Förderung, stabile Rendite.",
+    "text_kapitel_live_1": "Die Stadt. Der Standort. Das Quartier.",
+    "text_kapitel_live_2": "Hannover – Wirtschaftsmotor Niedersachsens.",
+    "text_kapitel_stay_1": "Vollmöbliert. Nachhaltig. Bezugsfertig.",
+    "text_kapitel_stay_2": "Design trifft Funktion in Hannover-Linden.",
+    "text_kapitel_know_1": "Transparenz und Rechtssicherheit.",
+    "text_kapitel_know_2": "Alle Fakten auf einen Blick.",
+    "text_stadt_stat_1_detail": "Hannover wächst kontinuierlich.",
+    "text_stadt_stat_2_detail": "Universitätsstadt mit hoher Nachfrage.",
+    "text_stadt_stat_3_detail": "Stabile Mietsteigerungen über dem Bundesschnitt.",
 }
 
 # Relevante PDF-Typen nach Priorität
@@ -200,6 +213,10 @@ UNSPLASH_QUERIES = {
     "BILD_LAGEPLAN": "city map urban district aerial overview",
     "BILD_GRUNDRISS_INTRO_3": "modern apartment interior living space",
     "BILD_PROJEKT": "modern luxury apartment building exterior night",
+    "BILD_GRUNDRISS_1": "apartment floor plan architectural drawing",
+    "BILD_GRUNDRISS_2": "apartment floor plan 2 room layout",
+    "BILD_GRUNDRISS_3": "apartment floor plan 3 room layout",
+    "BILD_GRUNDRISS_4": "apartment floor plan large penthouse",
 }
 
 PLATZHALTER = {
@@ -262,6 +279,13 @@ PLATZHALTER = {
     "bild_lageplan": "", "bild_grundriss_intro_3": "",
     "bild_projekt": "",
     "zitat_intro": "",
+    "bundesland": "",
+    "bild_grundriss_1": "", "bild_grundriss_2": "", "bild_grundriss_3": "", "bild_grundriss_4": "",
+    "text_kapitel_invest_1": "", "text_kapitel_invest_2": "",
+    "text_kapitel_live_1": "", "text_kapitel_live_2": "",
+    "text_kapitel_stay_1": "", "text_kapitel_stay_2": "",
+    "text_kapitel_know_1": "", "text_kapitel_know_2": "",
+    "text_stadt_stat_1_detail": "", "text_stadt_stat_2_detail": "", "text_stadt_stat_3_detail": "",
 }
 
 def generate_logo_initial(projekt_name):
@@ -443,6 +467,17 @@ def generate_expose_with_claude(projektdaten):
                          str(resp.json().get("stop_reason")))
     return json.loads(json_text)
 
+# Regex: matcht {{KEY}}, {{KEY|suffix}}, {{KEY | suffix}}
+_PH_RE = re.compile(r'\{\{\s*([A-Z0-9_]+)\s*(?:\|[^}]*)?\}\}', re.IGNORECASE)
+
+def _replace_placeholders(text, data):
+    """Ersetzt alle {{KEY}} und {{KEY|suffix}} Platzhalter. Case-insensitiv."""
+    repl_map = {k.upper(): str(v or "") for k, v in data.items()}
+    def _sub(m):
+        return repl_map.get(m.group(1).upper().strip(), m.group(0))
+    return _PH_RE.sub(_sub, text)
+
+
 def duplicate_slide(prs, slide_index):
     """Duplicates the slide at slide_index and inserts the copy at slide_index + 1."""
     template = prs.slides[slide_index]
@@ -468,46 +503,6 @@ def duplicate_slide(prs, slide_index):
 
     return prs.slides[slide_index + 1]
 
-
-def apply_slide_duplication(prs, data):
-    """
-    Finds the Grundriss template slide (contains {{GRUNDRISS_1_LABEL}}) and
-    duplicates it for each populated grundriss_2/3/4_label field.
-    Replaces _1_ references with _N_ in duplicates via XML string replacement.
-    """
-    grundriss_idx = None
-    for i, slide in enumerate(prs.slides):
-        for shape in slide.shapes:
-            if shape.has_text_frame and "GRUNDRISS_1_LABEL" in shape.text_frame.text.upper():
-                grundriss_idx = i
-                break
-        if grundriss_idx is not None:
-            break
-
-    if grundriss_idx is None:
-        print("apply_slide_duplication: kein Grundriss-Slide gefunden")
-        return
-
-    extra_types = [n for n in range(2, 5) if data.get(f"grundriss_{n}_label")]
-    print(f"Grundriss-Slide bei Index {grundriss_idx}, {len(extra_types)} Duplikate")
-
-    for offset, n in enumerate(extra_types):
-        dup = duplicate_slide(prs, grundriss_idx + offset)
-        sp_tree = dup.shapes._spTree
-
-        # Serialize → string-replace _1_ refs → reparse → repopulate sp_tree
-        xml_str = etree.tostring(sp_tree, encoding="unicode")
-        xml_str = (xml_str
-            .replace("GRUNDRISS_1_LABEL", f"GRUNDRISS_{n}_LABEL")
-            .replace("grundriss_1_label", f"grundriss_{n}_label")
-            .replace("BILD_GRUNDRISS_INTRO_1", f"BILD_GRUNDRISS_INTRO_{n}")
-            .replace("bild_grundriss_intro_1", f"bild_grundriss_intro_{n}")
-        )
-        new_sp_tree = etree.fromstring(xml_str.encode("utf-8"))
-        for child in list(sp_tree):
-            sp_tree.remove(child)
-        for child in list(new_sp_tree):
-            sp_tree.append(child)
 
 
 def duplicate_we_slides(prs, data):
@@ -569,37 +564,26 @@ def duplicate_we_slides(prs, data):
         for child in list(new_sp_tree):
             sp_tree.append(child)
 
-        # Now fill the duplicate's placeholders with actual data
         for shape in list(new_slide.shapes):
             try:
                 if shape.has_text_frame:
                     for para in shape.text_frame.paragraphs:
                         if not para.runs:
                             continue
-                        full_text = "".join(r.text for r in para.runs)
-                        modified = full_text
-                        for key, value in data.items():
-                            safe = str(value or "")
-                            modified = modified.replace("{{" + key.upper() + "}}", safe)
-                            modified = modified.replace("{{" + key + "}}", safe)
-                            modified = re.sub(
-                                r'\{\{' + re.escape(key.upper()) + r'\|[^}]+\}\}',
-                                safe, modified
-                            )
-                        if modified != full_text:
-                            para.runs[0].text = modified
-                            for run in para.runs[1:]:
-                                run.text = ""
+                        full = "".join(r.text for r in para.runs)
+                        replaced = _replace_placeholders(full, data)
+                        if replaced != full:
+                            para.runs[0].text = replaced
+                            for r in para.runs[1:]:
+                                r.text = ""
             except Exception as e:
-                print(f"WE-Duplikat Shape-Fehler: {e}")
+                print(f"WE-Duplikat Fehler: {e}")
 
 
 def fill_pptx(template_bytes, data):
-    """Fill PPTX template using python-pptx: embeds images and replaces text placeholders."""
-
     prs = Presentation(io.BytesIO(template_bytes))
 
-    # Pre-download all images referenced by bild_* keys
+    # Bilder vorab herunterladen
     image_data = {}
     for key, value in data.items():
         if key.startswith("bild_") and isinstance(value, str) and value.startswith("http"):
@@ -608,95 +592,107 @@ def fill_pptx(template_bytes, data):
                 if resp.status_code == 200:
                     image_data[key] = resp.content
                     print(f"Bild geladen: {key} ({len(resp.content)//1024} KB)")
-                else:
-                    print(f"Bild HTTP-Fehler {key}: {resp.status_code}")
             except Exception as e:
-                print(f"Bild Download-Fehler {key}: {e}")
+                print(f"Bild Fehler {key}: {e}")
 
-    def replace_in_paragraph(para, data):
-        """Replace {{KEY}}, {{key}}, {{KEY|suffix}} placeholders.
-        Reassembles all runs into one string first to catch split-run placeholders,
-        then writes the result into runs[0] and clears all other runs.
-        """
-        if not para.runs:
-            return
-        full_text = "".join(r.text for r in para.runs)
-        modified = full_text
-        for key, value in data.items():
-            safe = str(value or "")
-            modified = modified.replace("{{" + key.upper() + "}}", safe)
-            modified = modified.replace("{{" + key + "}}", safe)
-            # Handle {{KEY|XXpt}} style suffixes
-            modified = re.sub(
-                r'\{\{' + re.escape(key.upper()) + r'\|[^}]+\}\}',
-                safe, modified
-            )
-        if modified != full_text:
-            para.runs[0].text = modified
-            for run in para.runs[1:]:
-                run.text = ""
+    def replace_tf(tf):
+        """Text-Replacement in einem TextFrame — handelt Split-Runs und Split-Paragraphen."""
+        paras = tf.paragraphs
+        # Schritt 1: Pro Paragraph Runs zusammenbauen und ersetzen
+        para_texts = []
+        for para in paras:
+            if not para.runs:
+                para_texts.append("")
+                continue
+            full = "".join(r.text for r in para.runs)
+            replaced = _replace_placeholders(full, data)
+            if replaced != full:
+                para.runs[0].text = replaced
+                for r in para.runs[1:]:
+                    r.text = ""
+            para_texts.append(replaced)
 
-    def process_shape(slide, shape, data, image_data, is_group_child=False):
-        """Replace text or embed image for a single shape.
+        # Schritt 2: Cross-Paragraph-Split — benachbarte Paragraphen zusammen prüfen
+        for i in range(len(paras) - 1):
+            combined = para_texts[i] + para_texts[i + 1]
+            if "{{" in combined and "}}" in combined:
+                replaced = _replace_placeholders(combined, data)
+                if replaced != combined:
+                    split_at = len(para_texts[i])
+                    new0 = replaced[:split_at]
+                    new1 = replaced[split_at:]
+                    if paras[i].runs:
+                        paras[i].runs[0].text = new0
+                        for r in paras[i].runs[1:]:
+                            r.text = ""
+                    if paras[i+1].runs:
+                        paras[i+1].runs[0].text = new1
+                        for r in paras[i+1].runs[1:]:
+                            r.text = ""
+                    para_texts[i] = new0
+                    para_texts[i+1] = new1
 
-        is_group_child=True: skip image embedding (coordinates are relative inside group),
-        only do text replacement.
-        """
-        shape_name_lower = (shape.name or "").lower()
-
-        if not is_group_child:
-            # 1. Image match by shape name (top-level shapes only)
-            if shape_name_lower in image_data and image_data[shape_name_lower]:
-                try:
-                    left, top, width, height = shape.left, shape.top, shape.width, shape.height
-                    shape._element.getparent().remove(shape._element)
-                    slide.shapes.add_picture(
-                        io.BytesIO(image_data[shape_name_lower]), left, top, width, height
-                    )
-                    return
-                except Exception as e:
-                    print(f"Bild-Ersatz Fehler (name) {shape_name_lower}: {e}")
-
-            # 2. Image match by text content (top-level shapes only)
-            if shape.has_text_frame:
-                full_text = shape.text_frame.text.strip()
-                img_key = None
-                for key in image_data:
-                    if full_text in (f"{{{{{key.upper()}}}}}", f"{{{{{key}}}}}"):
-                        img_key = key
-                        break
-                if img_key and image_data.get(img_key):
-                    try:
-                        left, top, width, height = shape.left, shape.top, shape.width, shape.height
-                        shape._element.getparent().remove(shape._element)
-                        slide.shapes.add_picture(
-                            io.BytesIO(image_data[img_key]), left, top, width, height
-                        )
-                        return
-                    except Exception as e:
-                        print(f"Bild-Ersatz Fehler (text) {img_key}: {e}")
-
-        # 3. Text replacement (always, including group children)
-        if shape.has_text_frame:
-            for para in shape.text_frame.paragraphs:
-                replace_in_paragraph(para, data)
-
-        # 4. Recurse into group shapes, marking children as group members
+    def embed_image_in_group(slide, group_shape, child_shape, img_bytes):
+        """Fügt Bild auf Slide-Ebene an absoluter Position der child_shape in group ein."""
         try:
-            if shape.shape_type == 6:  # MSO_SHAPE_TYPE.GROUP
-                for s in shape.shapes:
-                    process_shape(slide, s, data, image_data, is_group_child=True)
-        except Exception:
-            pass
+            abs_left = group_shape.left + child_shape.left
+            abs_top  = group_shape.top  + child_shape.top
+            width    = child_shape.width
+            height   = child_shape.height
+            slide.shapes.add_picture(io.BytesIO(img_bytes), abs_left, abs_top, width, height)
+            if child_shape.has_text_frame:
+                for para in child_shape.text_frame.paragraphs:
+                    for r in para.runs:
+                        r.text = ""
+            print(f"Bild eingesetzt bei {abs_left//914400*2.54:.1f},{abs_top//914400*2.54:.1f}cm {width//914400*2.54:.1f}x{height//914400*2.54:.1f}cm")
+        except Exception as e:
+            print(f"embed_image_in_group Fehler: {e}")
+
+    def embed_image_toplevel(slide, shape, img_bytes):
+        """Ersetzt ein Top-Level-Shape durch ein Bild gleicher Position/Größe."""
+        try:
+            left, top, width, height = shape.left, shape.top, shape.width, shape.height
+            shape._element.getparent().remove(shape._element)
+            slide.shapes.add_picture(io.BytesIO(img_bytes), left, top, width, height)
+        except Exception as e:
+            print(f"embed_image_toplevel Fehler: {e}")
 
     for slide in prs.slides:
         for shape in list(slide.shapes):
             try:
-                process_shape(slide, shape, data, image_data)
+                if shape.shape_type == 6:  # Group
+                    for child in list(shape.shapes):
+                        if child.has_text_frame:
+                            txt = child.text_frame.text.strip()
+                            m = _PH_RE.match(txt)
+                            if m:
+                                key = m.group(1).lower()
+                                if key in image_data and image_data[key]:
+                                    embed_image_in_group(slide, shape, child, image_data[key])
+                                    continue
+                        if child.has_text_frame:
+                            replace_tf(child.text_frame)
+                    if shape.has_text_frame:
+                        replace_tf(shape.text_frame)
+                else:
+                    shape_key = (shape.name or "").lower()
+                    if shape_key in image_data and image_data[shape_key]:
+                        embed_image_toplevel(slide, shape, image_data[shape_key])
+                        continue
+                    if shape.has_text_frame:
+                        txt = shape.text_frame.text.strip()
+                        m = _PH_RE.match(txt)
+                        if m:
+                            key = m.group(1).lower()
+                            if key in image_data and image_data[key]:
+                                embed_image_toplevel(slide, shape, image_data[key])
+                                continue
+                    if shape.has_text_frame:
+                        replace_tf(shape.text_frame)
             except Exception as e:
-                print(f"Shape-Fehler: {e}")
+                print(f"Shape-Fehler slide {slide.slide_id} shape {shape.name}: {e}")
 
-    # Duplicate WE slides after all text/image replacement is done
+    # WE-Seiten duplizieren NACH Text/Bild-Replacement
     duplicate_we_slides(prs, data)
 
     out = io.BytesIO()
