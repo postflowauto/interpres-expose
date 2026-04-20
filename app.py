@@ -659,6 +659,10 @@ def fill_pptx(template_bytes, data):
             except Exception as e:
                 print(f"Bild Fehler {key}: {e}")
 
+    print(f"=== image_data geladen: {len(image_data)} Bilder ===")
+    for k, v in image_data.items():
+        print(f"  {k}: {len(v)//1024} KB")
+
     def replace_tf(tf):
         """Text-Replacement in einem TextFrame — handelt Split-Runs und Split-Paragraphen."""
         paras = tf.paragraphs
@@ -707,59 +711,64 @@ def fill_pptx(template_bytes, data):
     def get_group_child_abs_coords(group_shape, child_shape):
         """
         Berechnet absolute Slide-Koordinaten eines Child-Shapes innerhalb einer Gruppe.
-
-        In OOXML gilt für Gruppen:
-          grpSpPr/xfrm/off   = absolute Position der Gruppe auf dem Slide (grp_x, grp_y)
-          grpSpPr/xfrm/ext   = absolute Größe der Gruppe (grp_w, grp_h)
-          grpSpPr/xfrm/chOff = Ursprung des internen Koordinatensystems (ch_x, ch_y)
-          grpSpPr/xfrm/chExt = Ausdehnung des internen Koordinatensystems (ch_w, ch_h)
-
-        Formel:
-          scale_x  = grp_w / ch_w
-          scale_y  = grp_h / ch_h
-          abs_left = grp_x + (child.left - ch_x) * scale_x
-          abs_top  = grp_y + (child.top  - ch_y) * scale_y
-          abs_w    = child.width  * scale_x
-          abs_h    = child.height * scale_y
+        grpSpPr liegt im p:-Namespace (presentationml), xfrm/off/ext/chOff/chExt im a:-Namespace.
         """
-        ns = 'http://schemas.openxmlformats.org/drawingml/2006/main'
-        grp_el = group_shape._element
-        xfrm = grp_el.find(f'.//{{{ns}}}grpSpPr/{{{ns}}}xfrm')
-        if xfrm is None:
-            # Fallback: simple addition
+        NS_A = 'http://schemas.openxmlformats.org/drawingml/2006/main'
+        NS_P = 'http://schemas.openxmlformats.org/presentationml/2006/main'
+
+        grp_el  = group_shape._element
+        grpSpPr = grp_el.find(f'{{{NS_P}}}grpSpPr')
+        if grpSpPr is None:
+            grpSpPr = grp_el.find('grpSpPr')  # fallback ohne namespace
+
+        if grpSpPr is None:
             return (
-                group_shape.left + child_shape.left,
-                group_shape.top  + child_shape.top,
-                child_shape.width,
-                child_shape.height,
+                (group_shape.left or 0) + (child_shape.left or 0),
+                (group_shape.top  or 0) + (child_shape.top  or 0),
+                child_shape.width  or 0,
+                child_shape.height or 0,
             )
-        off   = xfrm.find(f'{{{ns}}}off')
-        ext   = xfrm.find(f'{{{ns}}}ext')
-        chOff = xfrm.find(f'{{{ns}}}chOff')
-        chExt = xfrm.find(f'{{{ns}}}chExt')
+
+        xfrm = grpSpPr.find(f'{{{NS_A}}}xfrm')
+        if xfrm is None:
+            return (
+                (group_shape.left or 0) + (child_shape.left or 0),
+                (group_shape.top  or 0) + (child_shape.top  or 0),
+                child_shape.width  or 0,
+                child_shape.height or 0,
+            )
+
+        off   = xfrm.find(f'{{{NS_A}}}off')
+        ext   = xfrm.find(f'{{{NS_A}}}ext')
+        chOff = xfrm.find(f'{{{NS_A}}}chOff')
+        chExt = xfrm.find(f'{{{NS_A}}}chExt')
+
         if None in (off, ext, chOff, chExt):
             return (
-                group_shape.left + child_shape.left,
-                group_shape.top  + child_shape.top,
-                child_shape.width,
-                child_shape.height,
+                (group_shape.left or 0) + (child_shape.left or 0),
+                (group_shape.top  or 0) + (child_shape.top  or 0),
+                child_shape.width  or 0,
+                child_shape.height or 0,
             )
-        grp_x = int(off.get('x', 0));  grp_y = int(off.get('y', 0))
+
+        grp_x = int(off.get('x',  0)); grp_y = int(off.get('y',  0))
         grp_w = int(ext.get('cx', 1)); grp_h = int(ext.get('cy', 1))
-        ch_x  = int(chOff.get('x', 0)); ch_y = int(chOff.get('y', 0))
+        ch_x  = int(chOff.get('x',  0)); ch_y = int(chOff.get('y',  0))
         ch_w  = int(chExt.get('cx', 1)); ch_h = int(chExt.get('cy', 1))
+
         scale_x = grp_w / ch_w if ch_w else 1
         scale_y = grp_h / ch_h if ch_h else 1
-        c_left = child_shape.left  or 0; c_top = child_shape.top    or 0
-        c_w    = child_shape.width or 0; c_h   = child_shape.height or 0
-        abs_left = int(grp_x + (c_left - ch_x) * scale_x)
-        abs_top  = int(grp_y + (c_top  - ch_y) * scale_y)
-        abs_w    = int(c_w * scale_x)
-        abs_h    = int(c_h * scale_y)
+
+        abs_left = int(grp_x + ((child_shape.left or 0) - ch_x) * scale_x)
+        abs_top  = int(grp_y + ((child_shape.top  or 0) - ch_y) * scale_y)
+        abs_w    = int((child_shape.width  or 0) * scale_x)
+        abs_h    = int((child_shape.height or 0) * scale_y)
+
         return abs_left, abs_top, abs_w, abs_h
 
     def embed_image_in_group(slide, group_shape, child_shape, img_bytes):
         """Fügt Bild auf Slide-Ebene an korrekter absoluter Position ein."""
+        print(f"  → embed_image_in_group: key gefunden, Gruppe={group_shape.name}, Child={child_shape.name}")
         try:
             abs_left, abs_top, abs_w, abs_h = get_group_child_abs_coords(
                 group_shape, child_shape
