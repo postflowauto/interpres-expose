@@ -728,24 +728,41 @@ def fill_pptx(template_bytes, data):
         abs_h    = int((child_shape.height or 0) * scale_y)
         return abs_left, abs_top, abs_w, abs_h
 
+    def move_to_back(slide, pic_element):
+        """Verschiebt ein neu eingefügtes Bild hinter alle anderen Shapes (niedrigste Z-Order)."""
+        spTree = slide.shapes._spTree
+        spTree.remove(pic_element)
+        # Einfügen nach den ersten 2 Elementen (nvGrpSpPr + grpSpPr)
+        spTree.insert(2, pic_element)
+
     def process_shape(slide, shape, image_data):
         """Ersetzt Text oder bettet Bild ein. Gruppen werden korrekt mit absoluten Coords behandelt."""
+        SLIDE_W = 12192000  # EMU für 33.87cm (widescreen)
+        SLIDE_H = 6858000   # EMU für 19.05cm
+
         # Gruppe: Kinder einzeln verarbeiten
         if shape.shape_type == 6:
             for child in list(shape.shapes):
                 try:
                     if child.has_text_frame:
                         txt = child.text_frame.text.strip()
-                        m = PLACEHOLDER_RE.search(txt)  # search statt match — findet auch mit Whitespace davor
-                        if m and len(txt) < 60:  # kurzer Text → reiner Placeholder
+                        m = PLACEHOLDER_RE.search(txt)
+                        if m and len(txt) < 60:
                             key = m.group(1).lower()
                             if key in image_data and image_data[key]:
-                                # Bild mit korrekten absoluten Koordinaten einfügen
                                 abs_left, abs_top, abs_w, abs_h = get_abs_coords(shape, child)
-                                slide.shapes.add_picture(
+                                # Mindestgröße sicherstellen
+                                if abs_w < 10000: abs_w = child.width or 500000
+                                if abs_h < 10000: abs_h = child.height or 500000
+                                # Clamp auf Slide-Grenzen
+                                abs_left = max(-500000, abs_left)
+                                abs_top  = max(-500000, abs_top)
+                                pic = slide.shapes.add_picture(
                                     io.BytesIO(image_data[key]),
                                     abs_left, abs_top, abs_w, abs_h
                                 )
+                                # Bild hinter alle anderen Shapes schieben
+                                move_to_back(slide, pic._element)
                                 # Placeholder-Text leeren
                                 for para in child.text_frame.paragraphs:
                                     for r in para.runs:
@@ -757,7 +774,6 @@ def fill_pptx(template_bytes, data):
                         replace_in_textframe(child.text_frame)
                 except Exception as e:
                     print(f"  Gruppen-Child Fehler {child.name}: {e}")
-            # Auch Text direkt auf der Gruppe ersetzen (selten)
             if shape.has_text_frame:
                 replace_in_textframe(shape.text_frame)
             return
@@ -769,10 +785,13 @@ def fill_pptx(template_bytes, data):
         if shape_name_lower in image_data and image_data[shape_name_lower]:
             try:
                 left, top, width, height = shape.left, shape.top, shape.width, shape.height
+                if width < 10000: width = 1000000
+                if height < 10000: height = 800000
                 shape._element.getparent().remove(shape._element)
-                slide.shapes.add_picture(
+                pic = slide.shapes.add_picture(
                     io.BytesIO(image_data[shape_name_lower]), left, top, width, height
                 )
+                move_to_back(slide, pic._element)
                 return
             except Exception as e:
                 print(f"Bild-Ersatz Fehler (name) {shape_name_lower}: {e}")
@@ -780,16 +799,19 @@ def fill_pptx(template_bytes, data):
         # 2. Bild per Text-Inhalt
         if shape.has_text_frame:
             txt = shape.text_frame.text.strip()
-            m = PLACEHOLDER_RE.match(txt)
-            if m:
+            m = PLACEHOLDER_RE.search(txt)
+            if m and len(txt) < 60:
                 key = m.group(1).lower()
                 if key in image_data and image_data[key]:
                     try:
                         left, top, width, height = shape.left, shape.top, shape.width, shape.height
+                        if width < 10000: width = 1000000
+                        if height < 10000: height = 800000
                         shape._element.getparent().remove(shape._element)
-                        slide.shapes.add_picture(
+                        pic = slide.shapes.add_picture(
                             io.BytesIO(image_data[key]), left, top, width, height
                         )
+                        move_to_back(slide, pic._element)
                         return
                     except Exception as e:
                         print(f"Bild-Ersatz Fehler (text) {key}: {e}")
