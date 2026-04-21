@@ -26,6 +26,7 @@ def add_cors(response):
 
 @app.route("/generate-expose", methods=["OPTIONS"])
 @app.route("/fill-pptx", methods=["OPTIONS"])
+@app.route("/debug-images", methods=["OPTIONS"])
 @app.route("/health", methods=["OPTIONS"])
 def options():
     return make_response("", 204)
@@ -65,6 +66,7 @@ DUMMY_EXPOSE_DATA = {
     "prospekt_datum": "April 2026",
     "text_kapitel_invest": "INVEST", "text_kapitel_live": "LIVE",
     "text_kapitel_stay": "STAY", "text_kapitel_know": "KNOW",
+    "text_kapitel_hotel": "HOTEL",
     "text_intro": "Hannover wächst – und Linden ist mittendrin.",
     "text_investment_pitch": "Solide Rendite in einem der dynamischsten Stadtteile Hannovers.",
     "text_hotel": "Möbliert, flexibel, sofort vermietbar – ideal für Kurzzeitvermietung.",
@@ -233,7 +235,7 @@ PLATZHALTER = {
     "energieversorgung": "", "besonderheiten": "",
     "steuerliche_moeglichkeiten": "Dreifach AfA - 5% degressiv §7 Abs.5a EStG + 5% Sonder-AfA §7b EStG + 10% Möbel-AfA",
     "prospekt_datum": "", "text_kapitel_invest": "", "text_kapitel_live": "",
-    "text_kapitel_stay": "", "text_kapitel_know": "", "text_intro": "",
+    "text_kapitel_stay": "", "text_kapitel_know": "", "text_kapitel_hotel": "", "text_intro": "",
     "text_investment_pitch": "", "text_hotel": "", "text_projekt_nachhaltig_1": "",
     "text_projekt_nachhaltig_2": "", "text_greenliving_intro": "", "text_greenliving_1": "",
     "text_greenliving_2": "", "text_ausstattung_intro": "", "text_ausstattung_detail": "",
@@ -379,20 +381,32 @@ def extract_pdfs_from_zip(zip_bytes):
     return selected
 
 def fetch_unsplash_image(query):
-    if not UNSPLASH_ACCESS_KEY:
-        return ""
-    try:
-        resp = requests.get(
-            "https://api.unsplash.com/photos/random",
-            params={"query": query, "orientation": "landscape"},
-            headers={"Authorization": f"Client-ID {UNSPLASH_ACCESS_KEY}"},
-            timeout=10
-        )
-        if resp.status_code == 200:
-            return resp.json()["urls"]["regular"]
-    except Exception as e:
-        print(f"Unsplash Fehler für '{query}': {e}")
-    return ""
+    """Holt Bild-URL von Unsplash. Bei fehlendem/ungültigem Key → Picsum-Fallback."""
+    if UNSPLASH_ACCESS_KEY:
+        try:
+            resp = requests.get(
+                "https://api.unsplash.com/photos/random",
+                params={"query": query, "orientation": "landscape"},
+                headers={"Authorization": f"Client-ID {UNSPLASH_ACCESS_KEY}"},
+                timeout=10
+            )
+            print(f"  Unsplash [{resp.status_code}] query={query!r}")
+            if resp.status_code == 200:
+                url = resp.json()["urls"]["regular"]
+                print(f"    → {url[:80]}")
+                return url
+            else:
+                print(f"    Fehler-Body: {resp.text[:120]}")
+        except Exception as e:
+            print(f"  Unsplash Exception für '{query}': {e}")
+    else:
+        print(f"  UNSPLASH_ACCESS_KEY fehlt – Picsum-Fallback für '{query}'")
+
+    # Picsum-Fallback: deterministisches Bild anhand des Query-Hashes
+    seed = abs(hash(query)) % 1000
+    url = f"https://picsum.photos/seed/{seed}/1200/800"
+    print(f"  Picsum-Fallback → {url}")
+    return url
 
 def fill_image_placeholders(data):
     stadt = data.get("stadt", "")
@@ -406,12 +420,15 @@ def fill_image_placeholders(data):
         queries["BILD_STADT_GROSS"] = f"city skyline aerial {stadt}"
         queries["BILD_STADT_KLEIN"] = f"city street urban {stadt}"
         queries["BILD_LAGEPLAN"] = f"city map district aerial {stadt}"
+    filled = 0
     for placeholder_key, query in queries.items():
         data_key = placeholder_key.lower()
         if data_key in data:
             url = fetch_unsplash_image(query)
             if url:
                 data[data_key] = url
+                filled += 1
+    print(f"fill_image_placeholders: {filled}/{len(queries)} Bilder befüllt")
     return data
 
 def analyze_pdfs_with_claude(pdfs):
@@ -475,14 +492,36 @@ def generate_expose_with_claude(projektdaten):
                          str(resp.json().get("stop_reason")))
     return json.loads(json_text)
 
+# Regex: matcht {{KEY}}, {{KEY-SPLIT}}, {{KEY|suffix}}, {{KEY | suffix}}
+# Bindestriche im Key werden beim Lookup entfernt (z.B. {{PRODUKT_BESCHREI-BUNG}})
+_PH_RE = re.compile(r'\{\{\s*([A-Z0-9_-]+)\s*(?:\|[^}]*)?\}\}', re.IGNORECASE)
+
 def _replace_placeholders(text, data):
-    """Replace {{KEY}}, {{KEY|suffix}}, {{KEY | suffix}} in text using data dict.
-    Case-insensitive key matching. Returns replaced string."""
+    """Ersetzt alle {{KEY}} und {{KEY|suffix}} Platzhalter. Case-insensitiv.
+    Bindestriche im Key werden vor dem Lookup entfernt (für Template-Zeilenumbrüche).
+    """
     repl_map = {k.upper(): str(v or "") for k, v in data.items()}
-    pattern = re.compile(r'\{\{\s*([A-Z0-9_]+)\s*(?:\|[^}]*)?\}\}', re.IGNORECASE)
     def _sub(m):
-        return repl_map.get(m.group(1).upper().strip(), m.group(0))
-    return pattern.sub(_sub, text)
+        key = m.group(1).upper().strip().replace('-', '')
+        return repl_map.get(key, m.group(0))
+    return _PH_RE.sub(_sub, text)
+
+# Regex für Cross-Paragraph-Splits mit optionalem Bindestrich am Zeilenende
+# z.B. "{{PRODUKT_BESCHREI-\nBUNG}}" → key = "PRODUKT_BESCHREIBUNG"
+_PH_SPLIT_RE = re.compile(
+    r'\{\{\s*([A-Z0-9_]+-?)\n([A-Z0-9_]*)\s*(?:\|[^}]*)?\}\}',
+    re.IGNORECASE
+)
+
+def _replace_split_placeholder(text, data):
+    """Behandelt Platzhalter die mit Bindestrich über zwei Zeilen gesplittet sind."""
+    repl_map = {k.upper(): str(v or "") for k, v in data.items()}
+    def _sub(m):
+        part1 = m.group(1).rstrip('-')
+        part2 = m.group(2)
+        key = (part1 + part2).upper().strip()
+        return repl_map.get(key, m.group(0))
+    return _PH_SPLIT_RE.sub(_sub, text)
 
 
 def duplicate_slide(prs, slide_index):
@@ -593,6 +632,12 @@ def fill_pptx(template_bytes, data):
     prs = Presentation(io.BytesIO(template_bytes))
 
     # Pre-download all images referenced by bild_* keys
+    bild_keys_total = [k for k in data if k.startswith("bild_")]
+    bild_keys_with_url = [k for k in bild_keys_total if isinstance(data[k], str) and data[k].startswith("http")]
+    print(f"fill_pptx: {len(bild_keys_total)} bild_* Keys, davon {len(bild_keys_with_url)} mit URL")
+    if not bild_keys_with_url:
+        print("  WARNUNG: Keine bild_* URLs vorhanden – keine Bilder werden eingefügt!")
+
     image_data = {}
     for key, value in data.items():
         if key.startswith("bild_") and isinstance(value, str) and value.startswith("http"):
@@ -600,11 +645,13 @@ def fill_pptx(template_bytes, data):
                 resp = requests.get(value, timeout=15)
                 if resp.status_code == 200:
                     image_data[key] = resp.content
-                    print(f"Bild geladen: {key} ({len(resp.content)//1024} KB)")
+                    print(f"  ✓ Bild geladen: {key} ({len(resp.content)//1024} KB)")
                 else:
-                    print(f"Bild HTTP-Fehler {key}: {resp.status_code}")
+                    print(f"  ✗ Bild HTTP-Fehler {key}: {resp.status_code}  URL={value[:80]}")
             except Exception as e:
-                print(f"Bild Download-Fehler {key}: {e}")
+                print(f"  ✗ Bild Download-Fehler {key}: {e}")
+
+    print(f"  image_data: {len(image_data)} Bilder erfolgreich heruntergeladen")
 
     def make_replacement_map(data):
         """Build a case-insensitive lookup: UPPER_KEY -> value."""
@@ -728,57 +775,178 @@ def fill_pptx(template_bytes, data):
         abs_h    = int((child_shape.height or 0) * scale_y)
         return abs_left, abs_top, abs_w, abs_h
 
+    # Mindestgröße in EMU: nur für echte Null-/Winzig-Shapes als Fallback
+    # (10 000 EMU ≈ 0,028 cm – alles darunter gilt als fehlende Dimension)
+    MIN_IMG_SIZE = 10_000
 
-    def move_to_back(slide, pic_element):
-        spTree = slide.shapes._spTree
-        spTree.remove(pic_element)
-        spTree.insert(2, pic_element)
+    def insert_at_z(slide, pic_element, z_index):
+        """Setzt pic_element an Position z_index im spTree (preserviert Z-Order des Originals).
+        Indices 0+1 sind nvGrpSpPr/grpSpPr → min. Index 2.
+        """
+        sp_tree = slide.shapes._spTree
+        sp_tree.remove(pic_element)
+        sp_tree.insert(max(2, z_index), pic_element)
 
     def process_shape(slide, shape, image_data):
-        """Ersetzt Text oder bettet Bild ein. Gruppen werden korrekt mit absoluten Coords behandelt."""
-        # Gruppe: Kinder einzeln verarbeiten
+        """Ersetzt Text oder bettet Bild via blipFill ein.
+        Das Template nutzt zwei Gruppen pro Bildslot:
+          - Placeholder-Gruppe: solidFill Freeform + TextBox {{BILD_X}} (sichtbar, oben)
+          - Target-Gruppe:      blipFill Freeform, kein Text (dahinter, wartet auf rId)
+        Strategie:
+          Case A (Target existiert): rId in Target-blipFill eintragen → Placeholder-Gruppe entfernen
+          Case B (kein Target):      solidFill der Freeform im Placeholder durch blipFill ersetzen,
+                                     TextBox-Kind entfernen
+        """
+        from lxml import etree
+
+        _NS_A = 'http://schemas.openxmlformats.org/drawingml/2006/main'
+        _NS_P = 'http://schemas.openxmlformats.org/presentationml/2006/main'
+        _NS_R = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
+
+        # ── Gruppe ──────────────────────────────────────────────────────────────
         if shape.shape_type == 6:
+            # Suche TextBox-Kind mit BILD_-Placeholder
+            bild_child = None
+            for child in shape.shapes:
+                if child.has_text_frame:
+                    txt = child.text_frame.text.strip()
+                    m = PLACEHOLDER_RE.match(txt)
+                    if m:
+                        key = m.group(1).lower()
+                        if key in image_data and image_data[key]:
+                            bild_child = (child, key)
+                            break
+
+            if bild_child is not None:
+                child, key = bild_child
+                try:
+                    print(f"  → blipFill: key={key!r} in Gruppe {shape.name!r}")
+
+                    # ── Schritt 1: Bild einbetten → rId holen ─────────────────
+                    temp_pic = slide.shapes.add_picture(
+                        io.BytesIO(image_data[key]), 0, 0, 914400, 914400
+                    )
+                    temp_el = temp_pic._element
+                    blip_in_temp = temp_el.find(f'.//{{{_NS_A}}}blip')
+                    new_rid = blip_in_temp.get(f'{{{_NS_R}}}embed') if blip_in_temp is not None else None
+                    temp_el.getparent().remove(temp_el)   # p:pic entfernen; Relation bleibt
+
+                    if not new_rid:
+                        print(f"  FEHLER: kein rId für {key!r}")
+                        return
+
+                    print(f"    rId={new_rid!r}")
+
+                    # ── Schritt 2: Position der Placeholder-Gruppe ─────────────
+                    ph_grpSpPr = shape._element.find(f'{{{_NS_P}}}grpSpPr')
+                    ph_xfrm    = ph_grpSpPr.find(f'{{{_NS_A}}}xfrm') if ph_grpSpPr is not None else None
+                    ph_off     = ph_xfrm.find(f'{{{_NS_A}}}off')     if ph_xfrm    is not None else None
+                    ph_x = ph_off.get('x', '0') if ph_off is not None else '0'
+                    ph_y = ph_off.get('y', '0') if ph_off is not None else '0'
+
+                    # ── Schritt 3: Target-Gruppe (blipFill, gleiche Position) suchen ──
+                    target_info = None   # (target_group_shape, freeform_spPr, blipFill_el)
+                    for other in slide.shapes:
+                        if other.shape_id == shape.shape_id or other.shape_type != 6:
+                            continue
+                        o_grpSpPr = other._element.find(f'{{{_NS_P}}}grpSpPr')
+                        o_xfrm    = o_grpSpPr.find(f'{{{_NS_A}}}xfrm') if o_grpSpPr is not None else None
+                        o_off     = o_xfrm.find(f'{{{_NS_A}}}off')     if o_xfrm    is not None else None
+                        if o_off is None:
+                            continue
+                        if o_off.get('x') != ph_x or o_off.get('y') != ph_y:
+                            continue
+                        # Gleiche Position → hat diese Gruppe eine blipFill-Freeform?
+                        for grp_child_o in other.shapes:
+                            sp_pr_o = grp_child_o._element.find(f'{{{_NS_P}}}spPr')
+                            if sp_pr_o is None:
+                                continue
+                            bf = sp_pr_o.find(f'{{{_NS_A}}}blipFill')
+                            if bf is not None:
+                                target_info = (other, sp_pr_o, bf)
+                                break
+                        if target_info is not None:
+                            break
+
+                    if target_info is not None:
+                        # ── Case A: Target-Gruppe aktualisieren ────────────────
+                        tgt_grp, tgt_spPr, tgt_blipFill = target_info
+                        existing_blip = tgt_blipFill.find(f'{{{_NS_A}}}blip')
+                        if existing_blip is not None:
+                            existing_blip.set(f'{{{_NS_R}}}embed', new_rid)
+                            print(f"  Case A ✓ blip.r:embed={new_rid!r} in {tgt_grp.name!r}")
+                        else:
+                            # Kein a:blip → neu anlegen
+                            new_blip = etree.SubElement(tgt_blipFill, f'{{{_NS_A}}}blip')
+                            new_blip.set(f'{{{_NS_R}}}embed', new_rid)
+                            print(f"  Case A ✓ neues a:blip in {tgt_grp.name!r}")
+                        # Placeholder-Gruppe entfernen (solidFill+TextBox waren oben drüber)
+                        shape._element.getparent().remove(shape._element)
+
+                    else:
+                        # ── Case B: solidFill in eigener Freeform → blipFill ──
+                        print(f"  Case B: kein Target für {key!r} @ ({ph_x},{ph_y})")
+                        # TextBox-Placeholder-Kind entfernen
+                        for grp_child_b in list(shape.shapes):
+                            if grp_child_b.has_text_frame:
+                                txt_b = grp_child_b.text_frame.text.strip()
+                                if PLACEHOLDER_RE.match(txt_b):
+                                    grp_child_b._element.getparent().remove(grp_child_b._element)
+                                    break
+                        # solidFill in der Freeform durch blipFill ersetzen
+                        for grp_child_b in list(shape.shapes):
+                            sp_pr_b = grp_child_b._element.find(f'{{{_NS_P}}}spPr')
+                            if sp_pr_b is None:
+                                continue
+                            solid = sp_pr_b.find(f'{{{_NS_A}}}solidFill')
+                            if solid is None:
+                                continue
+                            idx = list(sp_pr_b).index(solid)
+                            sp_pr_b.remove(solid)
+                            bf_el = etree.Element(f'{{{_NS_A}}}blipFill')
+                            bl_el = etree.SubElement(bf_el, f'{{{_NS_A}}}blip')
+                            bl_el.set(f'{{{_NS_R}}}embed', new_rid)
+                            st_el = etree.SubElement(bf_el, f'{{{_NS_A}}}stretch')
+                            etree.SubElement(st_el, f'{{{_NS_A}}}fillRect')
+                            sp_pr_b.insert(idx, bf_el)
+                            print(f"  Case B ✓ solidFill→blipFill in {grp_child_b.name!r}")
+                            break
+
+                except Exception as e:
+                    print(f"  blipFill Fehler {shape.name!r}/{key!r}: {e}")
+                    import traceback; traceback.print_exc()
+                return
+
+            # Keine BILD_-Gruppe → Text in allen Kindern ersetzen
             for child in list(shape.shapes):
                 try:
-                    if child.has_text_frame:
-                        txt = child.text_frame.text.strip()
-                        m = PLACEHOLDER_RE.match(txt)
-                        if m:
-                            key = m.group(1).lower()
-                            if key in image_data and image_data[key]:
-                                # Bild mit korrekten absoluten Koordinaten einfügen
-                                abs_left, abs_top, abs_w, abs_h = get_abs_coords(shape, child)
-                                _pic=slide.shapes.add_picture(
-                                    io.BytesIO(image_data[key]),
-                                    abs_left, abs_top, abs_w, abs_h
-                                ); move_to_back(slide, _pic._element)
-                                # Placeholder-Text leeren
-                                for para in child.text_frame.paragraphs:
-                                    for r in para.runs:
-                                        r.text = ""
-                                print(f"  Bild eingesetzt: {key} @ {abs_left//914400*2.54:.1f},{abs_top//914400*2.54:.1f}cm {abs_w//914400*2.54:.1f}x{abs_h//914400*2.54:.1f}cm")
-                                continue
-                    # Kein Bild → Text ersetzen
                     if child.has_text_frame:
                         replace_in_textframe(child.text_frame)
                 except Exception as e:
                     print(f"  Gruppen-Child Fehler {child.name}: {e}")
-            # Auch Text direkt auf der Gruppe ersetzen (selten)
             if shape.has_text_frame:
                 replace_in_textframe(shape.text_frame)
             return
 
-        # Top-Level Non-Group Shape
+        # ── Top-Level Non-Group Shape ────────────────────────────────────────
+        sp_tree = slide.shapes._spTree
         shape_name_lower = (shape.name or "").lower()
 
         # 1. Bild per Shape-Name
         if shape_name_lower in image_data and image_data[shape_name_lower]:
             try:
-                left, top, width, height = shape.left, shape.top, shape.width, shape.height
+                left   = shape.left   or 0
+                top    = shape.top    or 0
+                width  = shape.width  or 0
+                height = shape.height or 0
+                if width  < MIN_IMG_SIZE: width  = 3_000_000
+                if height < MIN_IMG_SIZE: height = 2_400_000
+                shape_z = list(sp_tree).index(shape._element)
                 shape._element.getparent().remove(shape._element)
-                _pic=slide.shapes.add_picture(
+                _pic = slide.shapes.add_picture(
                     io.BytesIO(image_data[shape_name_lower]), left, top, width, height
-                ); move_to_back(slide, _pic._element)
+                )
+                insert_at_z(slide, _pic._element, shape_z)
                 return
             except Exception as e:
                 print(f"Bild-Ersatz Fehler (name) {shape_name_lower}: {e}")
@@ -791,11 +959,18 @@ def fill_pptx(template_bytes, data):
                 key = m.group(1).lower()
                 if key in image_data and image_data[key]:
                     try:
-                        left, top, width, height = shape.left, shape.top, shape.width, shape.height
+                        left   = shape.left   or 0
+                        top    = shape.top    or 0
+                        width  = shape.width  or 0
+                        height = shape.height or 0
+                        if width  < MIN_IMG_SIZE: width  = 3_000_000
+                        if height < MIN_IMG_SIZE: height = 2_400_000
+                        shape_z = list(sp_tree).index(shape._element)
                         shape._element.getparent().remove(shape._element)
-                        _pic=slide.shapes.add_picture(
+                        _pic = slide.shapes.add_picture(
                             io.BytesIO(image_data[key]), left, top, width, height
-                        ); move_to_back(slide, _pic._element)
+                        )
+                        insert_at_z(slide, _pic._element, shape_z)
                         return
                     except Exception as e:
                         print(f"Bild-Ersatz Fehler (text) {key}: {e}")
@@ -968,12 +1143,18 @@ def generate_expose():
         if TEST_MODE:
             print("TEST_MODE aktiv – überspringe Claude API")
             expose_data = DUMMY_EXPOSE_DATA.copy()
-            expose_data = fill_image_placeholders(expose_data)
         else:
             projektdaten = analyze_pdfs_with_claude(pdfs)
-            expose_data = generate_expose_with_claude(projektdaten)
+            raw_expose = generate_expose_with_claude(projektdaten)
+            # Merge: PLATZHALTER-Defaults sicherstellen, damit alle bild_* Keys existieren
+            expose_data = {**PLATZHALTER, **raw_expose}
             expose_data["logo_initial"] = generate_logo_initial(expose_data.get("projekt_name", ""))
-            expose_data = fill_image_placeholders(expose_data)
+
+        # Bilder holen (Unsplash oder Picsum-Fallback)
+        expose_data = fill_image_placeholders(expose_data)
+        bild_count = sum(1 for k, v in expose_data.items()
+                         if k.startswith("bild_") and isinstance(v, str) and v.startswith("http"))
+        print(f"generate_expose: {bild_count} bild_* URLs vor fill_pptx")
 
         tmpl_bytes = requests.get(TEMPLATE_URL, timeout=30).content
         pptx_bytes = fill_pptx(tmpl_bytes, expose_data)
@@ -987,6 +1168,94 @@ def generate_expose():
     except Exception as e:
         import traceback
         return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+
+
+@app.route("/debug-images", methods=["GET"])
+def debug_images():
+    """Testet den kompletten Bild-Pipeline ohne Upload: Unsplash → Download → PPTX.
+    Gibt JSON-Bericht zurück. Nur mit korrektem API-Token aufrufbar."""
+    if request.headers.get("X-API-Token") != API_TOKEN:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    report = {
+        "unsplash_key_set": bool(UNSPLASH_ACCESS_KEY),
+        "unsplash_key_len": len(UNSPLASH_ACCESS_KEY) if UNSPLASH_ACCESS_KEY else 0,
+        "unsplash_test": None,
+        "picsum_test": None,
+        "image_urls_count": 0,
+        "image_downloads_ok": 0,
+        "image_downloads_fail": 0,
+    }
+
+    # Unsplash Test
+    try:
+        r = requests.get(
+            "https://api.unsplash.com/photos/random",
+            params={"query": "modern apartment", "orientation": "landscape"},
+            headers={"Authorization": f"Client-ID {UNSPLASH_ACCESS_KEY}"},
+            timeout=10
+        )
+        report["unsplash_test"] = {"status": r.status_code, "body_preview": r.text[:200]}
+        if r.status_code == 200:
+            report["unsplash_sample_url"] = r.json()["urls"]["regular"]
+    except Exception as e:
+        report["unsplash_test"] = {"error": str(e)}
+
+    # Picsum Test
+    try:
+        r = requests.get("https://picsum.photos/seed/42/200/150", timeout=10)
+        report["picsum_test"] = {"status": r.status_code, "size_kb": len(r.content) // 1024}
+    except Exception as e:
+        report["picsum_test"] = {"error": str(e)}
+
+    # Voller Image-Flow mit Dummy-Daten
+    data = DUMMY_EXPOSE_DATA.copy()
+    data = fill_image_placeholders(data)
+    urls = {k: v for k, v in data.items() if k.startswith("bild_") and isinstance(v, str) and v.startswith("http")}
+    report["image_urls_count"] = len(urls)
+    report["sample_urls"] = dict(list(urls.items())[:3])
+
+    for key, url in urls.items():
+        try:
+            r = requests.get(url, timeout=10)
+            if r.status_code == 200:
+                report["image_downloads_ok"] += 1
+            else:
+                report["image_downloads_fail"] += 1
+        except Exception:
+            report["image_downloads_fail"] += 1
+
+    return jsonify(report)
+
+
+@app.route("/fill-pptx", methods=["POST"])
+def fill_pptx_endpoint():
+    """Debug-Endpunkt: Gibt das rohe PPTX ohne PDF-Konvertierung zurück.
+    Body: JSON mit optionalem 'data'-Objekt. Ohne 'data' → DUMMY_EXPOSE_DATA + Unsplash."""
+    if request.headers.get("X-API-Token") != API_TOKEN:
+        return jsonify({"error": "Unauthorized"}), 401
+    try:
+        body = request.get_json(force=True) or {}
+        data = body.get("data") or DUMMY_EXPOSE_DATA.copy()
+        data = {**PLATZHALTER, **data}
+        data = fill_image_placeholders(data)
+
+        bild_count = sum(1 for k, v in data.items()
+                         if k.startswith("bild_") and isinstance(v, str) and v.startswith("http"))
+        print(f"fill-pptx endpoint: {bild_count} bild_* URLs")
+
+        tmpl_bytes = requests.get(TEMPLATE_URL, timeout=30).content
+        pptx_bytes = fill_pptx(tmpl_bytes, data)
+
+        projekt_name = data.get("projekt_name", "Debug").replace(" ", "_")
+        return send_file(io.BytesIO(pptx_bytes),
+                         mimetype="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                         as_attachment=True,
+                         download_name=f"{projekt_name}_debug.pptx")
+    except Exception as e:
+        import traceback
+        return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
