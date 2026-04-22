@@ -120,10 +120,12 @@ DUMMY_EXPOSE_DATA = {
     "grundriss_3_label": "Typ C – 55 m²", "grundriss_4_label": "Typ D – 67 m²",
     "ansicht_1_label": "Westfassade", "ansicht_2_label": "Südfassade",
     "we_bereich_1": "Wohnen & Schlafen", "we_bereich_2": "Bad & Küche",
+    "we_bereich_3": "", "we_bereich_4": "", "we_bereich_5": "", "we_bereich_6": "",
     "we_beispiel_1": "Typ A", "we_beispiel_2": "Typ B",
+    "we_beispiel_3": "", "we_beispiel_4": "", "we_beispiel_5": "", "we_beispiel_6": "",
     "we_typ_beschreibung": "Kompakte Grundrisse, maximale Funktionalität.",
     "we_flaeche_1": "28", "we_flaeche_2": "35", "we_flaeche_3": "42",
-    "we_flaeche_4": "55", "we_flaeche_5": "67",
+    "we_flaeche_4": "55", "we_flaeche_5": "67", "we_flaeche_6": "",
     "logo_initial": "S",
     # Kapitel-Seiten Subtext
     "text_kapitel_invest_1": "Nachhaltig investieren in Hannover.",
@@ -150,7 +152,8 @@ DUMMY_EXPOSE_DATA = {
     "bild_interior": "", "bild_ausstattung_1": "", "bild_ausstattung_2": "",
     "bild_ausstattung_3": "", "bild_ausstattung_4": "", "bild_ausstattung_5": "",
     "bild_ausstattung_6": "", "bild_grundriss_intro_1": "", "bild_grundriss_intro_2": "",
-    "bild_ansicht_1": "", "bild_ansicht_2": "", "bild_we_1": "", "bild_we_2": "",
+    "bild_ansicht_1": "", "bild_ansicht_2": "",
+    "bild_we_1": "", "bild_we_2": "", "bild_we_3": "", "bild_we_4": "", "bild_we_5": "", "bild_we_6": "",
     "bild_stadt_presse": "", "bild_stadt_branche": "",
     "bild_rechtlich_1": "", "bild_rechtlich_2": "",
     "bild_collage_1": "", "bild_collage_2": "", "bild_collage_3": "",
@@ -201,6 +204,10 @@ UNSPLASH_QUERIES = {
     "BILD_ANSICHT_2": "modern residential building south",
     "BILD_WE_1": "apartment floor plan interior",
     "BILD_WE_2": "modern apartment bedroom interior",
+    "BILD_WE_3": "modern studio apartment interior design",
+    "BILD_WE_4": "bright apartment living room interior",
+    "BILD_WE_5": "penthouse apartment interior luxury",
+    "BILD_WE_6": "compact apartment smart design interior",
     "BILD_STADT_PRESSE": "newspaper article table coffee",
     "BILD_STADT_BRANCHE": "scientist laboratory research modern",
     "BILD_RECHTLICH_1": "modern residential building exterior",
@@ -263,9 +270,12 @@ PLATZHALTER = {
     "amenity_6": "", "amenity_7": "", "amenity_8": "", "amenity_9": "",
     "grundriss_1_label": "", "grundriss_2_label": "", "grundriss_3_label": "", "grundriss_4_label": "",
     "ansicht_1_label": "", "ansicht_2_label": "",
-    "we_bereich_1": "", "we_bereich_2": "", "we_beispiel_1": "", "we_beispiel_2": "",
+    "we_bereich_1": "", "we_bereich_2": "", "we_bereich_3": "", "we_bereich_4": "",
+    "we_bereich_5": "", "we_bereich_6": "",
+    "we_beispiel_1": "", "we_beispiel_2": "", "we_beispiel_3": "", "we_beispiel_4": "",
+    "we_beispiel_5": "", "we_beispiel_6": "",
     "we_typ_beschreibung": "", "we_flaeche_1": "", "we_flaeche_2": "",
-    "we_flaeche_3": "", "we_flaeche_4": "", "we_flaeche_5": "",
+    "we_flaeche_3": "", "we_flaeche_4": "", "we_flaeche_5": "", "we_flaeche_6": "",
     "logo_initial": "",
     # Kapitel-Seiten Subtext (2 Zeilen pro Kapitel)
     "text_kapitel_invest_1": "", "text_kapitel_invest_2": "",
@@ -285,7 +295,9 @@ PLATZHALTER = {
     "bild_interior": "", "bild_ausstattung_1": "", "bild_ausstattung_2": "", "bild_ausstattung_3": "",
     "bild_ausstattung_4": "", "bild_ausstattung_5": "", "bild_ausstattung_6": "",
     "bild_grundriss_intro_1": "", "bild_grundriss_intro_2": "",
-    "bild_ansicht_1": "", "bild_ansicht_2": "", "bild_we_1": "", "bild_we_2": "",
+    "bild_ansicht_1": "", "bild_ansicht_2": "",
+    "bild_we_1": "", "bild_we_2": "", "bild_we_3": "", "bild_we_4": "",
+    "bild_we_5": "", "bild_we_6": "",
     "bild_stadt_presse": "", "bild_stadt_branche": "",
     "bild_rechtlich_1": "", "bild_rechtlich_2": "",
     "bild_collage_1": "", "bild_collage_2": "", "bild_collage_3": "",
@@ -609,7 +621,10 @@ def duplicate_we_slides(prs, data):
         for child in list(new_sp_tree):
             sp_tree.append(child)
 
-        # Now fill the duplicate's placeholders with actual data
+        # Now fill the duplicate's TEXT placeholders with actual data.
+        # Skip bild_* keys – image insertion is handled later by process_shape
+        # so that blipFill groups are correctly detected.
+        non_img_data = {k: v for k, v in data.items() if not k.startswith("bild_")}
         for shape in list(new_slide.shapes):
             try:
                 if shape.has_text_frame:
@@ -617,11 +632,25 @@ def duplicate_we_slides(prs, data):
                         if not para.runs:
                             continue
                         full_text = "".join(r.text for r in para.runs)
-                        modified = _replace_placeholders(full_text, data)
+                        modified = _replace_placeholders(full_text, non_img_data)
                         if modified != full_text:
                             para.runs[0].text = modified
                             for run in para.runs[1:]:
                                 run.text = ""
+                # Also handle group children text
+                elif shape.shape_type == 6:
+                    for child in shape.shapes:
+                        if not child.has_text_frame:
+                            continue
+                        for para in child.text_frame.paragraphs:
+                            if not para.runs:
+                                continue
+                            full_text = "".join(r.text for r in para.runs)
+                            modified = _replace_placeholders(full_text, non_img_data)
+                            if modified != full_text:
+                                para.runs[0].text = modified
+                                for run in para.runs[1:]:
+                                    run.text = ""
             except Exception as e:
                 print(f"WE-Duplikat Shape-Fehler: {e}")
 
@@ -979,15 +1008,15 @@ def fill_pptx(template_bytes, data):
         if shape.has_text_frame:
             replace_in_textframe(shape.text_frame)
 
+    # Duplicate WE slides BEFORE text/image replacement so placeholders are still intact
+    duplicate_we_slides(prs, data)
+
     for slide in prs.slides:
         for shape in list(slide.shapes):
             try:
                 process_shape(slide, shape, image_data)
             except Exception as e:
                 print(f"Shape-Fehler slide={slide.slide_id} shape={shape.name}: {e}")
-
-    # Duplicate WE slides after all text/image replacement is done
-    duplicate_we_slides(prs, data)
 
     out = io.BytesIO()
     prs.save(out)
