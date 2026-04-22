@@ -615,7 +615,11 @@ def duplicate_we_slides(prs, data):
         new_letter = letters[offset]   # 'b', 'c', …
         xml_str = xml_str.replace(f">{old_letter}<", f">{new_letter}<")
 
-        new_sp_tree = etree.fromstring(xml_str.encode("utf-8"))
+        # Use python-pptx's own parser so elements get the correct custom-class
+        # bindings (has_ph_elm etc.). Plain etree.fromstring() returns raw
+        # _Element objects which break python-pptx's shape introspection.
+        from pptx.oxml import parse_xml
+        new_sp_tree = parse_xml(xml_str.encode("utf-8"))
         for child in list(sp_tree):
             sp_tree.remove(child)
         for child in list(new_sp_tree):
