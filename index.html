@@ -5,85 +5,525 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>INTERPRÉS — Exposé Generator</title>
 <style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { background: #0d1b2a; font-family: 'Georgia', serif; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 2rem; }
-  .card { background: #111e2e; border: 1px solid #2a3a4a; border-radius: 12px; padding: 3rem; max-width: 560px; width: 100%; }
-  h1 { color: #C8A96E; font-size: 2rem; letter-spacing: 0.15em; text-align: center; font-weight: 400; margin-bottom: 0.4rem; }
-  .sub { color: #8a9ab0; font-size: 0.75rem; letter-spacing: 0.2em; text-align: center; margin-bottom: 2.5rem; font-family: Arial, sans-serif; }
-  .desc { color: #7a8a9a; font-size: 0.85rem; line-height: 1.6; margin-bottom: 2rem; font-family: Arial, sans-serif; text-align: center; }
-  .drop-zone { border: 2px dashed #2a3a4a; border-radius: 8px; padding: 2.5rem; text-align: center; cursor: pointer; transition: all 0.2s; position: relative; }
-  .drop-zone:hover, .drop-zone.dragover { border-color: #C8A96E; background: rgba(200,169,110,0.05); }
-  .drop-zone input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; }
-  .drop-icon { font-size: 2.5rem; margin-bottom: 1rem; }
-  .drop-text { color: #7a8a9a; font-size: 0.9rem; font-family: Arial, sans-serif; line-height: 1.6; }
-  .drop-text strong { color: #C8A96E; }
-  .file-list { margin-top: 1rem; max-height: 160px; overflow-y: auto; }
-  .file-item { display: flex; align-items: center; justify-content: space-between; padding: 6px 10px; background: rgba(200,169,110,0.08); border-radius: 4px; margin-bottom: 4px; font-size: 0.8rem; font-family: Arial, sans-serif; color: #C8A96E; }
-  .file-size { color: #5a6a7a; font-size: 0.75rem; }
-  .btn { width: 100%; padding: 1rem; background: transparent; border: 1px solid #C8A96E; color: #C8A96E; font-family: Arial, sans-serif; font-size: 0.8rem; letter-spacing: 0.15em; cursor: pointer; border-radius: 4px; margin-top: 1.5rem; transition: all 0.2s; }
-  .btn:hover:not(:disabled) { background: rgba(200,169,110,0.1); }
-  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
-  .status { margin-top: 1.5rem; padding: 1.2rem; border-radius: 8px; font-family: Arial, sans-serif; font-size: 0.85rem; display: none; line-height: 1.6; }
-  .status.loading { background: rgba(200,169,110,0.08); border: 1px solid rgba(200,169,110,0.2); color: #C8A96E; display: block; }
-  .status.success { background: rgba(39,174,96,0.1); border: 1px solid rgba(39,174,96,0.3); color: #27ae60; display: block; }
-  .status.error { background: rgba(231,76,60,0.1); border: 1px solid rgba(231,76,60,0.3); color: #e74c3c; display: block; }
-  .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(200,169,110,0.3); border-top-color: #C8A96E; border-radius: 50%; animation: spin 0.8s linear infinite; margin-right: 8px; vertical-align: middle; }
-  @keyframes spin { to { transform: rotate(360deg); } }
-  .progress { margin-top: 8px; font-size: 0.8rem; color: #8a9ab0; }
-  .download-btn { display: block; width: 100%; padding: 1rem; background: #C8A96E; color: #0d1b2a; font-family: Arial, sans-serif; font-size: 0.8rem; letter-spacing: 0.15em; text-align: center; text-decoration: none; border-radius: 4px; margin-top: 1rem; font-weight: 600; }
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #08111e;
+    font-family: -apple-system, 'Helvetica Neue', Arial, sans-serif;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+    background-image:
+      radial-gradient(ellipse at 20% 50%, rgba(200,169,110,0.04) 0%, transparent 60%),
+      radial-gradient(ellipse at 80% 20%, rgba(200,169,110,0.03) 0%, transparent 50%);
+  }
+
+  .container {
+    width: 100%;
+    max-width: 580px;
+  }
+
+  /* ── Header ── */
+  .header {
+    text-align: center;
+    margin-bottom: 3rem;
+  }
+  .logo {
+    color: #C8A96E;
+    font-family: 'Georgia', 'Times New Roman', serif;
+    font-size: 2.4rem;
+    letter-spacing: 0.2em;
+    font-weight: 400;
+    line-height: 1;
+  }
+  .logo-divider {
+    width: 40px;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, #C8A96E, transparent);
+    margin: 1rem auto;
+  }
+  .logo-sub {
+    color: #4a6080;
+    font-size: 0.65rem;
+    letter-spacing: 0.35em;
+    text-transform: uppercase;
+  }
+
+  /* ── Card ── */
+  .card {
+    background: #0d1b2e;
+    border: 1px solid #1a2d45;
+    border-radius: 16px;
+    overflow: hidden;
+  }
+
+  .card-body {
+    padding: 2.5rem;
+  }
+
+  .card-hint {
+    color: #3a5270;
+    font-size: 0.8rem;
+    line-height: 1.7;
+    text-align: center;
+    margin-bottom: 2rem;
+  }
+
+  /* ── Drop Zone ── */
+  .drop-zone {
+    border: 1.5px dashed #1e3450;
+    border-radius: 12px;
+    padding: 2.5rem 1.5rem;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.25s ease;
+    position: relative;
+    background: rgba(13,27,46,0.5);
+  }
+  .drop-zone:hover, .drop-zone.dragover {
+    border-color: #C8A96E;
+    background: rgba(200,169,110,0.04);
+  }
+  .drop-zone input {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    cursor: pointer;
+    width: 100%;
+    height: 100%;
+  }
+  .drop-icon {
+    width: 52px;
+    height: 52px;
+    margin: 0 auto 1.2rem;
+    background: rgba(200,169,110,0.08);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .drop-icon svg { width: 24px; height: 24px; }
+  .drop-title { color: #C8A96E; font-size: 0.9rem; letter-spacing: 0.08em; margin-bottom: 0.4rem; }
+  .drop-sub { color: #3a5270; font-size: 0.78rem; line-height: 1.5; }
+
+  /* ── File List ── */
+  .file-list {
+    margin-top: 1.2rem;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 140px;
+    overflow-y: auto;
+  }
+  .file-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    background: rgba(200,169,110,0.06);
+    border: 1px solid rgba(200,169,110,0.12);
+    border-radius: 8px;
+    font-size: 0.8rem;
+  }
+  .file-item-icon { color: #C8A96E; flex-shrink: 0; }
+  .file-item-name { color: #8a9eb8; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .file-item-size { color: #3a5270; flex-shrink: 0; font-size: 0.73rem; }
+
+  /* ── Button ── */
+  .btn-generate {
+    width: 100%;
+    margin-top: 1.5rem;
+    padding: 1rem 1.5rem;
+    background: transparent;
+    border: 1px solid rgba(200,169,110,0.35);
+    color: #C8A96E;
+    font-size: 0.72rem;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    cursor: pointer;
+    border-radius: 8px;
+    transition: all 0.2s ease;
+    font-family: inherit;
+  }
+  .btn-generate:hover:not(:disabled) {
+    background: rgba(200,169,110,0.08);
+    border-color: #C8A96E;
+  }
+  .btn-generate:disabled { opacity: 0.3; cursor: not-allowed; }
+
+  /* ── Progress Panel ── */
+  .progress-panel {
+    display: none;
+    padding: 2rem 2.5rem 2.5rem;
+    border-top: 1px solid #1a2d45;
+  }
+  .progress-panel.active { display: block; }
+
+  /* Steps */
+  .steps {
+    display: flex;
+    align-items: center;
+    margin-bottom: 2rem;
+  }
+  .step {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    flex: 1;
+    position: relative;
+  }
+  .step:not(:last-child)::after {
+    content: '';
+    position: absolute;
+    top: 14px;
+    left: calc(50% + 14px);
+    right: calc(-50% + 14px);
+    height: 1px;
+    background: #1a2d45;
+    transition: background 0.4s;
+  }
+  .step.done:not(:last-child)::after { background: #C8A96E; }
+
+  .step-circle {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    border: 1.5px solid #1a2d45;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.65rem;
+    color: #3a5270;
+    background: #0d1b2e;
+    transition: all 0.3s ease;
+    position: relative;
+    z-index: 1;
+  }
+  .step.active .step-circle {
+    border-color: #C8A96E;
+    color: #C8A96E;
+    box-shadow: 0 0 0 4px rgba(200,169,110,0.1);
+  }
+  .step.done .step-circle {
+    border-color: #C8A96E;
+    background: #C8A96E;
+    color: #08111e;
+  }
+  .step-label {
+    margin-top: 6px;
+    font-size: 0.62rem;
+    letter-spacing: 0.06em;
+    color: #3a5270;
+    text-align: center;
+    transition: color 0.3s;
+  }
+  .step.active .step-label { color: #C8A96E; }
+  .step.done .step-label { color: #7a8a9a; }
+
+  /* Active Step Detail */
+  .step-detail {
+    background: rgba(200,169,110,0.04);
+    border: 1px solid rgba(200,169,110,0.1);
+    border-radius: 10px;
+    padding: 1.5rem;
+  }
+  .step-detail-title {
+    color: #C8A96E;
+    font-size: 0.85rem;
+    letter-spacing: 0.05em;
+    margin-bottom: 0.5rem;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .step-detail-sub {
+    color: #4a6080;
+    font-size: 0.75rem;
+    line-height: 1.6;
+  }
+
+  /* Progress Bar */
+  .progress-bar-wrap {
+    margin-top: 1rem;
+    height: 3px;
+    background: #1a2d45;
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .progress-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #C8A96E, #e8c98e);
+    border-radius: 2px;
+    transition: width 0.3s ease;
+    width: 0%;
+  }
+  .progress-bar-fill.indeterminate {
+    width: 40%;
+    animation: slide 1.5s ease-in-out infinite;
+  }
+  @keyframes slide {
+    0%   { transform: translateX(-100%); }
+    100% { transform: translateX(350%); }
+  }
+
+  /* Pulse dot */
+  .pulse-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: #C8A96E;
+    display: inline-block;
+    animation: pulse 1.4s ease-in-out infinite;
+    flex-shrink: 0;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50%       { opacity: 0.4; transform: scale(0.7); }
+  }
+
+  /* ── Success Panel ── */
+  .success-panel {
+    display: none;
+    padding: 2.5rem;
+    text-align: center;
+    border-top: 1px solid #1a2d45;
+  }
+  .success-panel.active { display: block; }
+  .success-icon {
+    width: 56px; height: 56px;
+    background: rgba(200,169,110,0.1);
+    border: 1px solid rgba(200,169,110,0.3);
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    margin: 0 auto 1.2rem;
+    font-size: 1.4rem;
+  }
+  .success-title { color: #C8A96E; font-size: 0.9rem; letter-spacing: 0.1em; margin-bottom: 0.4rem; }
+  .success-sub { color: #3a5270; font-size: 0.75rem; margin-bottom: 1.5rem; }
+  .btn-download {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0.9rem 2rem;
+    background: #C8A96E;
+    color: #08111e;
+    font-size: 0.72rem;
+    letter-spacing: 0.18em;
+    font-weight: 700;
+    text-decoration: none;
+    border-radius: 8px;
+    transition: background 0.2s;
+  }
+  .btn-download:hover { background: #d4b87a; }
+
+  /* ── Error ── */
+  .error-panel {
+    display: none;
+    padding: 1.2rem 2.5rem 2rem;
+    border-top: 1px solid #1a2d45;
+  }
+  .error-panel.active { display: block; }
+  .error-box {
+    background: rgba(220,53,69,0.07);
+    border: 1px solid rgba(220,53,69,0.2);
+    border-radius: 8px;
+    padding: 1rem 1.2rem;
+    color: #e05060;
+    font-size: 0.78rem;
+    line-height: 1.6;
+  }
+  .btn-retry {
+    margin-top: 1rem;
+    background: none;
+    border: 1px solid rgba(220,53,69,0.3);
+    color: #e05060;
+    font-size: 0.7rem;
+    letter-spacing: 0.12em;
+    padding: 0.6rem 1.2rem;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-family: inherit;
+  }
+  .btn-retry:hover { background: rgba(220,53,69,0.08); }
 </style>
 </head>
 <body>
-<div class="card">
-  <h1>INTERPRÉS</h1>
-  <div class="sub">EXPOSÉ GENERATOR</div>
-  <p class="desc">Lade den gesamten Projektdatenraum hoch — alle Häuser als ZIP-Dateien. Claude analysiert automatisch alle Unterlagen und erstellt das Exposé.</p>
+<div class="container">
 
-  <div class="drop-zone" id="dropZone">
-    <input type="file" id="fileInput" accept=".zip" multiple>
-    <div class="drop-icon">📁</div>
-    <div class="drop-text">
-      <strong>ZIPs hier ablegen</strong><br>
-      oder klicken zum Auswählen<br>
-      <span style="font-size:0.8rem; margin-top:4px; display:block; color:#5a6a7a;">Mehrere ZIPs gleichzeitig möglich (Haus A, B, C...)</span>
-    </div>
-    <div class="file-list" id="fileList"></div>
+  <!-- Header -->
+  <div class="header">
+    <div class="logo">INTERPRÉS</div>
+    <div class="logo-divider"></div>
+    <div class="logo-sub">Exposé Generator</div>
   </div>
 
-  <button class="btn" id="generateBtn" disabled>EXPOSÉ GENERIEREN</button>
-  <div class="status" id="status"></div>
+  <!-- Card -->
+  <div class="card">
+    <div class="card-body" id="uploadPanel">
+      <p class="card-hint">Lade den Projektdatenraum hoch. Claude analysiert alle Unterlagen und erstellt das Exposé automatisch.</p>
+
+      <div class="drop-zone" id="dropZone">
+        <input type="file" id="fileInput" accept=".zip" multiple>
+        <div class="drop-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="#C8A96E" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 7a2 2 0 0 1 2-2h3l2 3h9a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/>
+          </svg>
+        </div>
+        <div class="drop-title">ZIP-Dateien hier ablegen</div>
+        <div class="drop-sub">oder klicken zum Auswählen<br><span style="font-size:0.73rem;color:#2a4060;margin-top:2px;display:block;">Mehrere ZIPs möglich (Haus A, B, C …)</span></div>
+        <div class="file-list" id="fileList"></div>
+      </div>
+
+      <button class="btn-generate" id="generateBtn" disabled>Exposé generieren</button>
+    </div>
+
+    <!-- Progress -->
+    <div class="progress-panel" id="progressPanel">
+      <div class="steps" id="stepsRow">
+        <div class="step" id="step1">
+          <div class="step-circle" id="sc1">1</div>
+          <div class="step-label">Upload</div>
+        </div>
+        <div class="step" id="step2">
+          <div class="step-circle" id="sc2">2</div>
+          <div class="step-label">Analyse</div>
+        </div>
+        <div class="step" id="step3">
+          <div class="step-circle" id="sc3">3</div>
+          <div class="step-label">Generierung</div>
+        </div>
+        <div class="step" id="step4">
+          <div class="step-circle" id="sc4">4</div>
+          <div class="step-label">Fertig</div>
+        </div>
+      </div>
+
+      <div class="step-detail" id="stepDetail">
+        <div class="step-detail-title">
+          <span class="pulse-dot" id="pulseDot"></span>
+          <span id="stepTitle">Dateien werden hochgeladen …</span>
+        </div>
+        <div class="step-detail-sub" id="stepSub">Bitte warten.</div>
+        <div class="progress-bar-wrap" id="progressBarWrap" style="display:none">
+          <div class="progress-bar-fill" id="progressBarFill"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Success -->
+    <div class="success-panel" id="successPanel">
+      <div class="success-icon">✓</div>
+      <div class="success-title">Exposé bereit</div>
+      <div class="success-sub" id="successSub"></div>
+      <a class="btn-download" id="downloadLink" href="#" download="INTERPRÉS_Expose.pdf">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        PDF herunterladen
+      </a>
+    </div>
+
+    <!-- Error -->
+    <div class="error-panel" id="errorPanel">
+      <div class="error-box" id="errorText"></div>
+      <button class="btn-retry" id="retryBtn">Erneut versuchen</button>
+    </div>
+  </div>
+
 </div>
 
 <script>
-const BASE_URL    = '';  // Gleicher Server — relative URLs
-const RENDER_URL  = '/generate-expose';
-const CHUNK_URL   = '/upload-chunk';
-const API_TOKEN   = 'interpres-secret-2026';
-const CHUNK_SIZE  = 80 * 1024 * 1024; // 80 MB — sicher unter Render's 100 MB Proxy-Limit
+const RENDER_URL = '/generate-expose';
+const CHUNK_URL  = '/upload-chunk';
+const API_TOKEN  = 'interpres-secret-2026';
+const CHUNK_SIZE = 80 * 1024 * 1024;
 
-const dropZone   = document.getElementById('dropZone');
-const fileInput  = document.getElementById('fileInput');
-const fileList   = document.getElementById('fileList');
+const dropZone    = document.getElementById('dropZone');
+const fileInput   = document.getElementById('fileInput');
+const fileList    = document.getElementById('fileList');
 const generateBtn = document.getElementById('generateBtn');
-const status     = document.getElementById('status');
+const uploadPanel = document.getElementById('uploadPanel');
+const progressPanel = document.getElementById('progressPanel');
+const successPanel  = document.getElementById('successPanel');
+const errorPanel    = document.getElementById('errorPanel');
+
 let selectedFiles = [];
 
-function formatSize(bytes) {
-  return bytes > 1048576 ? (bytes/1048576).toFixed(1) + ' MB' : (bytes/1024).toFixed(0) + ' KB';
+// ── Helpers ──────────────────────────────────────────────────────────────────
+function fmt(bytes) {
+  return bytes >= 1048576 ? (bytes/1048576).toFixed(1) + ' MB' : (bytes/1024).toFixed(0) + ' KB';
 }
 
-function setStatus(type, html) {
-  status.className = 'status ' + type;
-  status.innerHTML = html;
+function checkSvg() {
+  return `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
 }
 
+// ── Steps UI ─────────────────────────────────────────────────────────────────
+function setStep(active /* 1-4 */) {
+  for (let i = 1; i <= 4; i++) {
+    const el  = document.getElementById('step' + i);
+    const sc  = document.getElementById('sc' + i);
+    el.className = 'step';
+    if (i < active)  { el.classList.add('done');   sc.innerHTML = checkSvg(); }
+    else if (i === active) { el.classList.add('active'); sc.textContent = i; }
+    else               { sc.textContent = i; }
+  }
+}
+
+function setStepDetail(title, sub, barMode /* 'none'|'progress'|'indeterminate' */, pct) {
+  document.getElementById('stepTitle').textContent = title;
+  document.getElementById('stepSub').textContent   = sub;
+  const wrap = document.getElementById('progressBarWrap');
+  const fill = document.getElementById('progressBarFill');
+  if (barMode === 'none') {
+    wrap.style.display = 'none';
+  } else {
+    wrap.style.display = 'block';
+    fill.className = 'progress-bar-fill' + (barMode === 'indeterminate' ? ' indeterminate' : '');
+    if (barMode === 'progress') fill.style.width = (pct || 0) + '%';
+  }
+}
+
+function showProgress() {
+  uploadPanel.style.display    = 'none';
+  progressPanel.classList.add('active');
+  successPanel.classList.remove('active');
+  errorPanel.classList.remove('active');
+}
+
+function showSuccess(blob) {
+  progressPanel.classList.remove('active');
+  successPanel.classList.add('active');
+  setStep(4);
+  // mark step 4 done manually
+  const s4 = document.getElementById('step4');
+  const sc4 = document.getElementById('sc4');
+  s4.classList.remove('active'); s4.classList.add('done');
+  sc4.innerHTML = checkSvg();
+
+  document.getElementById('successSub').textContent =
+    `${(blob.size/1048576).toFixed(1)} MB · Erstellt in wenigen Minuten`;
+  const url = URL.createObjectURL(blob);
+  document.getElementById('downloadLink').href = url;
+}
+
+function showError(msg) {
+  progressPanel.classList.remove('active');
+  errorPanel.classList.add('active');
+  document.getElementById('errorText').textContent = msg;
+  generateBtn.disabled = false;
+}
+
+// ── File Selection ────────────────────────────────────────────────────────────
 function updateFileList() {
   fileList.innerHTML = '';
   selectedFiles.forEach(f => {
-    const div = document.createElement('div');
-    div.className = 'file-item';
-    div.innerHTML = `<span>📦 ${f.name}</span><span class="file-size">${formatSize(f.size)}</span>`;
-    fileList.appendChild(div);
+    const d = document.createElement('div');
+    d.className = 'file-item';
+    d.innerHTML = `<span class="file-item-icon">📦</span>
+                   <span class="file-item-name">${f.name}</span>
+                   <span class="file-item-size">${fmt(f.size)}</span>`;
+    fileList.appendChild(d);
   });
   generateBtn.disabled = selectedFiles.length === 0;
 }
@@ -101,102 +541,141 @@ dropZone.addEventListener('drop', e => {
   updateFileList();
 });
 
-// Datei in Chunks hochladen → gibt session_id zurück
-async function uploadFileChunked(file, fileIndex, totalFiles) {
-  const sessionId = crypto.randomUUID();
-  const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+// ── Upload (chunked) ──────────────────────────────────────────────────────────
+async function uploadAllFiles() {
+  const totalBytes   = selectedFiles.reduce((s, f) => s + f.size, 0);
+  let   uploadedBytes = 0;
+  const sessionIds   = [];
 
-  for (let i = 0; i < totalChunks; i++) {
-    const start = i * CHUNK_SIZE;
-    const end   = Math.min(start + CHUNK_SIZE, file.size);
-    const chunk = file.slice(start, end);
+  for (let fi = 0; fi < selectedFiles.length; fi++) {
+    const file        = selectedFiles[fi];
+    const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+    const sessionId   = crypto.randomUUID();
 
-    const fd = new FormData();
-    fd.append('chunk', chunk, file.name);
-    fd.append('session_id', sessionId);
-    fd.append('chunk_index', i);
-    fd.append('total_chunks', totalChunks);
-    fd.append('filename', file.name);
+    for (let ci = 0; ci < totalChunks; ci++) {
+      const start = ci * CHUNK_SIZE;
+      const end   = Math.min(start + CHUNK_SIZE, file.size);
+      const chunk = file.slice(start, end);
 
-    const pct = Math.round(((i + 1) / totalChunks) * 100);
-    setStatus('loading',
-      `<span class="spinner"></span> Lade Datei ${fileIndex + 1}/${totalFiles} hoch… ${pct}%` +
-      `<div class="progress">${file.name} · Chunk ${i+1}/${totalChunks} · ${formatSize(file.size)}</div>`);
+      const fd = new FormData();
+      fd.append('chunk', chunk, file.name);
+      fd.append('session_id', sessionId);
+      fd.append('chunk_index', ci);
+      fd.append('total_chunks', totalChunks);
+      fd.append('filename', file.name);
 
-    const resp = await fetch(CHUNK_URL, {
-      method: 'POST',
-      headers: { 'X-API-Token': API_TOKEN },
-      body: fd
-    });
+      const resp = await fetch(CHUNK_URL, {
+        method: 'POST',
+        headers: { 'X-API-Token': API_TOKEN },
+        body: fd
+      });
+      if (!resp.ok) {
+        const raw = await resp.text();
+        let msg = raw;
+        try { msg = JSON.parse(raw).error || raw; } catch(_) {}
+        throw new Error('Upload fehlgeschlagen: ' + msg.substring(0, 200));
+      }
 
-    if (!resp.ok) {
-      const raw = await resp.text();
-      let errText = raw;
-      try { const j = JSON.parse(raw); errText = j.error || raw; } catch(_) {}
-      throw new Error(`Upload-Fehler Chunk ${i}: ${errText.substring(0, 200)}`);
+      uploadedBytes += (end - start);
+      const pct = Math.round((uploadedBytes / totalBytes) * 100);
+
+      // Nur 1 Datei: simpler Hinweis; mehrere: "Datei X von Y"
+      const fileHint = selectedFiles.length > 1
+        ? `Datei ${fi + 1} von ${selectedFiles.length} · ${file.name}`
+        : file.name;
+
+      setStepDetail(
+        'Dateien werden hochgeladen …',
+        `${fileHint} · ${fmt(uploadedBytes)} von ${fmt(totalBytes)}`,
+        'progress', pct
+      );
     }
+    sessionIds.push(sessionId);
   }
-  return sessionId;
+  return sessionIds;
 }
 
+// ── Generate ──────────────────────────────────────────────────────────────────
 generateBtn.addEventListener('click', async () => {
   if (!selectedFiles.length) return;
   generateBtn.disabled = true;
+  showProgress();
+  setStep(1);
 
-  const totalMB = (selectedFiles.reduce((s, f) => s + f.size, 0) / 1048576).toFixed(0);
-  const needsChunking = selectedFiles.some(f => f.size > CHUNK_SIZE);
+  const totalMB     = (selectedFiles.reduce((s, f) => s + f.size, 0) / 1048576).toFixed(0);
+  const needsChunks = selectedFiles.some(f => f.size > CHUNK_SIZE);
 
   try {
-    let formData = new FormData();
+    const formData = new FormData();
 
-    if (needsChunking) {
-      // --- Chunked Upload für große Dateien ---
-      const sessionIds = [];
-      for (let i = 0; i < selectedFiles.length; i++) {
-        const sid = await uploadFileChunked(selectedFiles[i], i, selectedFiles.length);
-        sessionIds.push(sid);
-      }
-      setStatus('loading',
-        `<span class="spinner"></span> Upload abgeschlossen – Analysiere mit Claude…` +
-        `<div class="progress">${selectedFiles.length} ZIP(s) · ${totalMB} MB · Bitte 3–5 Minuten warten</div>`);
-      sessionIds.forEach(sid => formData.append('session_ids', sid));
+    if (needsChunks) {
+      // ── Phase 1: Upload ──────────────────────────────────────────────────
+      setStepDetail('Dateien werden hochgeladen …', 'Einen Moment bitte …', 'progress', 0);
+      const sids = await uploadAllFiles();
+
+      // ── Phase 2: Analyse ─────────────────────────────────────────────────
+      setStep(2);
+      setStepDetail(
+        'Dokumente werden analysiert …',
+        'Claude liest alle Unterlagen aus dem Projektdatenraum.',
+        'indeterminate'
+      );
+      sids.forEach(s => formData.append('session_ids', s));
+
     } else {
-      // --- Direkter Upload für kleine Dateien (<80 MB) ---
-      setStatus('loading',
-        `<span class="spinner"></span> Datenraum wird analysiert…` +
-        `<div class="progress">${selectedFiles.length} ZIP(s) · ${totalMB} MB · Bitte 3–5 Minuten warten</div>`);
+      // Kleine Dateien: direkter Upload + Analyse gleichzeitig kommunizieren
+      setStep(1);
+      setStepDetail('Dateien werden hochgeladen …', `${selectedFiles.length} ZIP(s) · ${totalMB} MB`, 'progress', 100);
+      setStep(2);
+      setStepDetail('Dokumente werden analysiert …', 'Claude liest alle Unterlagen aus dem Projektdatenraum.', 'indeterminate');
       selectedFiles.forEach(f => formData.append('files', f, f.name));
     }
 
-    const resp = await fetch(RENDER_URL, {
+    // ── Phase 3: Generierung ─────────────────────────────────────────────────
+    const fetchPromise = fetch(RENDER_URL, {
       method: 'POST',
       headers: { 'X-API-Token': API_TOKEN },
       body: formData
     });
 
+    // Nach ~5 s auf "Generierung" wechseln (Claude ist fertig mit Analyse, baut jetzt die Präsentation)
+    const phaseTimer = setTimeout(() => {
+      setStep(3);
+      setStepDetail(
+        'Exposé wird erstellt …',
+        'Die Präsentation wird befüllt, Bilder werden eingebettet.',
+        'indeterminate'
+      );
+    }, 5000);
+
+    const resp = await fetchPromise;
+    clearTimeout(phaseTimer);
+
     if (!resp.ok) {
-      // Body einmal als Text lesen, dann JSON versuchen — verhindert "Body disturbed"
       const raw = await resp.text();
-      let errText = raw;
-      try { const j = JSON.parse(raw); errText = j.error || raw; } catch(_) {}
-      throw new Error(`Fehler ${resp.status}: ${errText.substring(0, 400)}`);
+      let msg = raw;
+      try { msg = JSON.parse(raw).error || raw; } catch(_) {}
+      throw new Error(`Fehler ${resp.status}: ${msg.substring(0, 400)}`);
     }
 
     const blob = await resp.blob();
     if (blob.size < 1000) {
-      const text = await blob.text();
-      throw new Error('Leere Antwort: ' + text.substring(0, 200));
+      const t = await blob.text();
+      throw new Error('Unerwartete Antwort: ' + t.substring(0, 200));
     }
 
-    const url = URL.createObjectURL(blob);
-    setStatus('success',
-      `✓ Exposé generiert! (${(blob.size/1048576).toFixed(1)} MB)<br>` +
-      `<a class="download-btn" href="${url}" download="INTERPRÉS_Expose.pdf">PDF HERUNTERLADEN</a>`);
+    showSuccess(blob);
 
   } catch(e) {
-    setStatus('error', '✗ ' + e.message);
-    generateBtn.disabled = false;
+    showError(e.message);
   }
+});
+
+// ── Retry ─────────────────────────────────────────────────────────────────────
+document.getElementById('retryBtn').addEventListener('click', () => {
+  errorPanel.classList.remove('active');
+  uploadPanel.style.display = 'block';
+  generateBtn.disabled = selectedFiles.length === 0;
 });
 </script>
 </body>
