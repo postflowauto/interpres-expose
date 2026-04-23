@@ -103,50 +103,30 @@ DUMMY_EXPOSE_DATA = {
     "text_stadt_branche_2": "Automobil & Logistik",
     "quelle_1": "Statistik Hannover 2024", "quelle_2": "IHK Hannover 2024",
     "quelle_3": "Wohnmarktreport 2024", "quelle_4": "Bundesagentur für Arbeit 2024",
-    # ── Alles ganz nah: 5 Kategorien × 4 Einträge (Fußminuten) ─────────────
-    "einkaufen_1_name": "Bäckerei", "einkaufen_1_min": "2",
-    "einkaufen_2_name": "Supermarkt", "einkaufen_2_min": "1",
-    "einkaufen_3_name": "Getränkemarkt", "einkaufen_3_min": "3",
-    "einkaufen_4_name": "Drogerie", "einkaufen_4_min": "2",
-    "freizeit_1_name": "Maschsee", "freizeit_1_min": "8",
-    "freizeit_2_name": "Eilenriede", "freizeit_2_min": "12",
-    "freizeit_3_name": "Innenstadt", "freizeit_3_min": "15",
-    "freizeit_4_name": "Herrenhäuser Gärten", "freizeit_4_min": "20",
-    "aerzte_1_name": "Arzt", "aerzte_1_min": "5",
-    "aerzte_2_name": "Kinderarzt", "aerzte_2_min": "5",
-    "aerzte_3_name": "Apotheke", "aerzte_3_min": "2",
-    "aerzte_4_name": "Krankenhaus", "aerzte_4_min": "10",
-    "sport_1_name": "Schwimmbad", "sport_1_min": "10",
-    "sport_2_name": "Fitnessstudio", "sport_2_min": "5",
-    "sport_3_name": "Segeln, Kanu", "sport_3_min": "10",
-    "sport_4_name": "Golf", "sport_4_min": "14",
-    "bildung_1_name": "Leibniz Universität", "bildung_1_min": "18",
-    "bildung_2_name": "Gymnasium", "bildung_2_min": "8",
-    "bildung_3_name": "Grundschule", "bildung_3_min": "5",
-    "bildung_4_name": "Kita", "bildung_4_min": "4",
-    # ── WE-Typen (bis zu 6 Typen, je mit vollem Datensatz) ───────────────────
-    "we_1_buchstabe": "a", "we_1_beschreibung": "1-Zimmer-Wohnung mit Balkon",
-    "we_1_flaeche": "32,02", "we_1_beispiel_we": "WE 02",
-    "we_1_geschoss": "EG–4.OG", "we_1_nummern": "02, 24, 46",
-    "we_1_raum_1": "Wohnen/Schlafen – 23,99 m²", "we_1_raum_2": "Bad – 5,36 m²",
-    "we_1_raum_3": "Balkon – 5,34 m²", "we_1_raum_4": "", "we_1_raum_5": "",
-    "we_2_buchstabe": "b", "we_2_beschreibung": "1-Zimmer-Wohnung mit Balkon, Bad rechts",
-    "we_2_flaeche": "35,50", "we_2_beispiel_we": "WE 07",
-    "we_2_geschoss": "1.–4.OG", "we_2_nummern": "07, 29, 51",
-    "we_2_raum_1": "Wohnen/Schlafen – 26,00 m²", "we_2_raum_2": "Bad – 5,36 m²",
-    "we_2_raum_3": "Balkon – 5,34 m²", "we_2_raum_4": "", "we_2_raum_5": "",
-    "we_3_buchstabe": "", "we_3_beschreibung": "", "we_3_flaeche": "",
-    "we_3_beispiel_we": "", "we_3_geschoss": "", "we_3_nummern": "",
-    "we_3_raum_1": "", "we_3_raum_2": "", "we_3_raum_3": "", "we_3_raum_4": "", "we_3_raum_5": "",
-    "we_4_buchstabe": "", "we_4_beschreibung": "", "we_4_flaeche": "",
-    "we_4_beispiel_we": "", "we_4_geschoss": "", "we_4_nummern": "",
-    "we_4_raum_1": "", "we_4_raum_2": "", "we_4_raum_3": "", "we_4_raum_4": "", "we_4_raum_5": "",
-    "we_5_buchstabe": "", "we_5_beschreibung": "", "we_5_flaeche": "",
-    "we_5_beispiel_we": "", "we_5_geschoss": "", "we_5_nummern": "",
-    "we_5_raum_1": "", "we_5_raum_2": "", "we_5_raum_3": "", "we_5_raum_4": "", "we_5_raum_5": "",
-    "we_6_buchstabe": "", "we_6_beschreibung": "", "we_6_flaeche": "",
-    "we_6_beispiel_we": "", "we_6_geschoss": "", "we_6_nummern": "",
-    "we_6_raum_1": "", "we_6_raum_2": "", "we_6_raum_3": "", "we_6_raum_4": "", "we_6_raum_5": "",
+    # ── Standort-Minuten (Slide 5) ────────────────────────────────────────────
+    "min_uni": "18", "label_min_uni": "Leibniz Universität",
+    "min_bahnhof": "12", "label_min_bahnhof": "Hauptbahnhof",
+    "min_altstadt": "15", "label_min_altstadt": "Altstadt",
+    # ── Alles ganz nah (Slide 14): 4 Freizeit-Einträge ───────────────────────
+    "freizeit_1_name": "Maschsee", "min_freizeit_1": "8",
+    "freizeit_2_name": "Eilenriede", "min_freizeit_2": "12",
+    "freizeit_3_name": "Innenstadt", "min_freizeit_3": "15",
+    "freizeit_4_name": "Herrenhäuser Gärten", "min_freizeit_4": "20",
+    # ── WE-Typen: Original-Slide (Typen 1+2 nebeneinander) ───────────────────
+    "we_beispiel_1": "WE 02", "we_bereich_1": "Wohnen & Schlafen",
+    "we_beispiel_2": "WE 07", "we_bereich_2": "Wohnen & Schlafen",
+    "we_flaeche_1": "Wohnen/Schlafen – 23,99 m²",
+    "we_flaeche_2": "Bad – 5,36 m²",
+    "we_flaeche_3": "Balkon – 5,34 m²",
+    "we_flaeche_4": "Flur – 2,33 m²",
+    "we_flaeche_5": "Gesamt – 32,02 m²",
+    "we_typ_beschreibung": "1-Zimmer-Wohnung mit Balkon. Optimal für Studierende und Berufspendler.",
+    # Duplikat-Slide (Typen 3+4), leer = kein Duplikat
+    "we_beispiel_3": "", "we_bereich_3": "",
+    "we_beispiel_4": "", "we_bereich_4": "",
+    # Duplikat-Slide 2 (Typen 5+6), leer = kein zweites Duplikat
+    "we_beispiel_5": "", "we_bereich_5": "",
+    "we_beispiel_6": "", "we_bereich_6": "",
     "feature_1_zahl": "48", "feature_1_label": "Wohneinheiten",
     "feature_2_zahl": "100", "feature_2_label": "Prozent möbliert",
     "feature_3_zahl": "24", "feature_3_label": "Stunden Zugang per Smart-Lock-System",
@@ -290,46 +270,25 @@ PLATZHALTER = {
     "stadt_stat_2_label": "", "stadt_stat_3_zahl": "", "stadt_stat_3_label": "",
     "stadt_branche_titel": "", "text_stadt_branche_1": "", "text_stadt_branche_2": "",
     "quelle_1": "", "quelle_2": "", "quelle_3": "", "quelle_4": "",
-    # ── Alles ganz nah: 5 Kategorien × 4 Einträge (Fußminuten) ─────────────
-    "einkaufen_1_name": "", "einkaufen_1_min": "",
-    "einkaufen_2_name": "", "einkaufen_2_min": "",
-    "einkaufen_3_name": "", "einkaufen_3_min": "",
-    "einkaufen_4_name": "", "einkaufen_4_min": "",
-    "freizeit_1_name": "", "freizeit_1_min": "",
-    "freizeit_2_name": "", "freizeit_2_min": "",
-    "freizeit_3_name": "", "freizeit_3_min": "",
-    "freizeit_4_name": "", "freizeit_4_min": "",
-    "aerzte_1_name": "", "aerzte_1_min": "",
-    "aerzte_2_name": "", "aerzte_2_min": "",
-    "aerzte_3_name": "", "aerzte_3_min": "",
-    "aerzte_4_name": "", "aerzte_4_min": "",
-    "sport_1_name": "", "sport_1_min": "",
-    "sport_2_name": "", "sport_2_min": "",
-    "sport_3_name": "", "sport_3_min": "",
-    "sport_4_name": "", "sport_4_min": "",
-    "bildung_1_name": "", "bildung_1_min": "",
-    "bildung_2_name": "", "bildung_2_min": "",
-    "bildung_3_name": "", "bildung_3_min": "",
-    "bildung_4_name": "", "bildung_4_min": "",
-    # ── WE-Typen (bis zu 6 Typen, je mit vollem Datensatz) ───────────────────
-    "we_1_buchstabe": "", "we_1_beschreibung": "", "we_1_flaeche": "",
-    "we_1_beispiel_we": "", "we_1_geschoss": "", "we_1_nummern": "",
-    "we_1_raum_1": "", "we_1_raum_2": "", "we_1_raum_3": "", "we_1_raum_4": "", "we_1_raum_5": "",
-    "we_2_buchstabe": "", "we_2_beschreibung": "", "we_2_flaeche": "",
-    "we_2_beispiel_we": "", "we_2_geschoss": "", "we_2_nummern": "",
-    "we_2_raum_1": "", "we_2_raum_2": "", "we_2_raum_3": "", "we_2_raum_4": "", "we_2_raum_5": "",
-    "we_3_buchstabe": "", "we_3_beschreibung": "", "we_3_flaeche": "",
-    "we_3_beispiel_we": "", "we_3_geschoss": "", "we_3_nummern": "",
-    "we_3_raum_1": "", "we_3_raum_2": "", "we_3_raum_3": "", "we_3_raum_4": "", "we_3_raum_5": "",
-    "we_4_buchstabe": "", "we_4_beschreibung": "", "we_4_flaeche": "",
-    "we_4_beispiel_we": "", "we_4_geschoss": "", "we_4_nummern": "",
-    "we_4_raum_1": "", "we_4_raum_2": "", "we_4_raum_3": "", "we_4_raum_4": "", "we_4_raum_5": "",
-    "we_5_buchstabe": "", "we_5_beschreibung": "", "we_5_flaeche": "",
-    "we_5_beispiel_we": "", "we_5_geschoss": "", "we_5_nummern": "",
-    "we_5_raum_1": "", "we_5_raum_2": "", "we_5_raum_3": "", "we_5_raum_4": "", "we_5_raum_5": "",
-    "we_6_buchstabe": "", "we_6_beschreibung": "", "we_6_flaeche": "",
-    "we_6_beispiel_we": "", "we_6_geschoss": "", "we_6_nummern": "",
-    "we_6_raum_1": "", "we_6_raum_2": "", "we_6_raum_3": "", "we_6_raum_4": "", "we_6_raum_5": "",
+    # ── Standort-Minuten (Slide 5) ────────────────────────────────────────────
+    "min_uni": "", "label_min_uni": "",
+    "min_bahnhof": "", "label_min_bahnhof": "",
+    "min_altstadt": "", "label_min_altstadt": "",
+    # ── Alles ganz nah (Slide 14): 4 Freizeit-Einträge ───────────────────────
+    "freizeit_1_name": "", "min_freizeit_1": "",
+    "freizeit_2_name": "", "min_freizeit_2": "",
+    "freizeit_3_name": "", "min_freizeit_3": "",
+    "freizeit_4_name": "", "min_freizeit_4": "",
+    # ── WE-Typen ──────────────────────────────────────────────────────────────
+    "we_beispiel_1": "", "we_bereich_1": "",
+    "we_beispiel_2": "", "we_bereich_2": "",
+    "we_flaeche_1": "", "we_flaeche_2": "", "we_flaeche_3": "",
+    "we_flaeche_4": "", "we_flaeche_5": "",
+    "we_typ_beschreibung": "",
+    "we_beispiel_3": "", "we_bereich_3": "",
+    "we_beispiel_4": "", "we_bereich_4": "",
+    "we_beispiel_5": "", "we_bereich_5": "",
+    "we_beispiel_6": "", "we_bereich_6": "",
     "feature_1_zahl": "", "feature_1_label": "",
     "feature_2_zahl": "100", "feature_2_label": "Prozent möbliert",
     "feature_3_zahl": "24", "feature_3_label": "Stunden Zugang per Smart-Lock-System",
@@ -549,23 +508,22 @@ def generate_expose_with_claude(projektdaten):
         f"- Fließtexte: 3-5 Sätze, sachlich-emotional, Zielgruppen nennen (Studierende, Berufstätige, Pendler)\n"
         f"- Key-Facts mit großer Zahl: '3 Fahrradminuten zur Uni', '100 Prozent möbliert'\n"
         f"- Keine Du/Sie-Ansprache in Texten\n\n"
-        f"## ALLES GANZ NAH (5 Kategorien, je 4 realistische Einträge für {stadt}):\n"
-        f"Verwende ECHTE Orte/Einrichtungen in der Nähe des Projektstandorts. Zeitangaben in Fußminuten.\n"
-        f"einkaufen_N_name/min: Bäckerei, Supermarkt, Getränkemarkt, Drogerie (oder je nach Lage)\n"
-        f"freizeit_N_name/min: Parks, Seen, Stadtzentrum, Sehenswürdigkeiten in der Nähe\n"
-        f"aerzte_N_name/min: Arzt, Kinderarzt, Apotheke, Krankenhaus\n"
-        f"sport_N_name/min: Schwimmbad, Fitnessstudio, und lokale Sportangebote\n"
-        f"bildung_N_name/min: Uni/FH, Gymnasium, Grundschule, Kita\n\n"
-        f"## WOHNUNGSTYPEN (basierend auf Projektdaten):\n"
-        f"Fülle we_1_ bis we_6_ aus soweit Typen vorhanden. Für jeden Typ:\n"
-        f"- we_N_buchstabe: Kleinbuchstabe (a, b, c...)\n"
-        f"- we_N_beschreibung: z.B. '1-Zimmer-Wohnung mit Balkon' oder '2-Zimmer-Wohnung mit Terrasse, barrierefrei'\n"
-        f"- we_N_flaeche: Gesamtfläche als Zahl+Komma z.B. '32,02'\n"
-        f"- we_N_beispiel_we: z.B. 'WE 01'\n"
-        f"- we_N_geschoss: z.B. 'EG–4.OG' oder '1.–3.OG' oder 'DG'\n"
-        f"- we_N_nummern: Zugehörige WE-Nummern z.B. '01, 23, 45, 67'\n"
-        f"- we_N_raum_1 bis we_N_raum_5: Format 'Raumname – XX,XX m²', z.B. 'Wohnen/Schlafen – 23,99 m²'\n"
-        f"  Leere Räume als leerer String ''\n\n"
+        f"## STANDORT-MINUTEN (Slide 5 – 3 Distanz-Angaben für {stadt}):\n"
+        f"min_uni + label_min_uni: Gehminuten + Name der nächsten Universität/FH\n"
+        f"min_bahnhof + label_min_bahnhof: Gehminuten + Name des nächsten Hauptbahnhofs\n"
+        f"min_altstadt + label_min_altstadt: Gehminuten + Name der Altstadt/Stadtzentrum\n\n"
+        f"## ALLES GANZ NAH (Slide 14 – 4 Freizeit-Einträge für {stadt}):\n"
+        f"Verwende ECHTE Sehenswürdigkeiten, Parks, Seen in der Nähe. Zeitangaben in Fußminuten.\n"
+        f"freizeit_N_name + min_freizeit_N (N = 1 bis 4): z.B. 'Maschsee' + '8'\n\n"
+        f"## WOHNUNGSTYPEN (Slide 24 – basierend auf Projektdaten):\n"
+        f"Das Template zeigt zwei WE-Varianten nebeneinander (linke + rechte Spalte):\n"
+        f"- we_beispiel_1 / we_beispiel_2: Beispiel-WE-Nummern links/rechts, z.B. 'WE 02'\n"
+        f"- we_bereich_1 / we_bereich_2: Bereich/Lage z.B. 'Wohnen & Schlafen'\n"
+        f"- we_flaeche_1 bis we_flaeche_5: Raum-Flächen-Aufstellung Format 'Raumname – XX,XX m²'\n"
+        f"  z.B. 'Wohnen/Schlafen – 23,99 m²', letzte Zeile 'Gesamt – XX,XX m²'\n"
+        f"- we_typ_beschreibung: 1–2 Sätze Beschreibung des Typs\n"
+        f"Falls Projektdaten mehr als einen Grundrisstyp enthalten: fülle auch\n"
+        f"we_beispiel_3/4, we_bereich_3/4 für einen zweiten WE-Slide aus.\n\n"
         f"## ALLE FELDER AUSFÜLLEN:\n{json.dumps(PLATZHALTER, ensure_ascii=False)}"
     )
     resp = requests.post(
@@ -659,17 +617,12 @@ def duplicate_we_slides(prs, data):
     """
     from pptx.oxml import parse_xml
 
-    letters = ['a','b','c','d','e','f','g','h','i','j','k','l']
-
-    # Höchsten vorhandenen WE-Index ermitteln (max. 6)
-    max_we = 2
-    for n in range(3, 7):
-        if data.get(f"we_{n}_buchstabe") or data.get(f"bild_we_{n}"):
-            max_we = n
-
-    # Anzahl extra Slides: je 2 Typen pro Slide, Original deckt 1+2
-    import math
-    extra_slides = max(0, math.ceil((max_we - 2) / 2))
+    # Detect extra slides: original covers types 1+2, duplicate 1 → 3+4, duplicate 2 → 5+6
+    extra_slides = 0
+    if data.get("we_beispiel_3") or data.get("bild_we_3"):
+        extra_slides = 1
+    if data.get("we_beispiel_5") or data.get("bild_we_5"):
+        extra_slides = 2
 
     if extra_slides == 0:
         print("duplicate_we_slides: ≤ 2 WE-Typen, kein Duplizieren nötig")
@@ -686,7 +639,7 @@ def duplicate_we_slides(prs, data):
                 for c in shape.shapes:
                     if c.has_text_frame:
                         txt += c.text_frame.text.upper()
-            if "WE_1_" in txt or "BILD_WE_1" in txt:
+            if "WE_BEISPIEL_1" in txt or "WE_BEREICH_1" in txt or "BILD_WE_1" in txt:
                 we_idx = i
                 break
         if we_idx is not None:
@@ -696,7 +649,7 @@ def duplicate_we_slides(prs, data):
         print("duplicate_we_slides: WE-Template-Slide nicht gefunden")
         return
 
-    print(f"WE-Slide bei Index {we_idx} → {extra_slides} extra Slide(s) für {max_we} WE-Typen")
+    print(f"WE-Slide bei Index {we_idx} → {extra_slides} extra Slide(s)")
 
     non_img_data = {k: v for k, v in data.items() if not k.startswith("bild_")}
 
@@ -705,25 +658,18 @@ def duplicate_we_slides(prs, data):
         sp_tree = new_slide.shapes._spTree
         xml_str = etree.tostring(sp_tree, encoding="unicode")
 
-        # Linkes Panel: Typen 1→left_n, 2→right_n
-        left_n  = 1 + slide_offset * 2   # 3, 5, 7 …
-        right_n = 2 + slide_offset * 2   # 4, 6, 8 …
+        # Original slide: left=1, right=2 → duplicate 1: left=3, right=4 → duplicate 2: left=5, right=6
+        left_n  = 1 + slide_offset * 2   # 3, 5
+        right_n = 2 + slide_offset * 2   # 4, 6
 
-        # Reihenfolge wichtig: erst _2_ ersetzen (sonst wird _2_ durch _left_n_-Ersetzung überschrieben)
-        # Rechtes Panel: _2_ → _right_n_
-        xml_str = xml_str.replace(f"WE_2_", f"WE_{right_n}_")
-        xml_str = xml_str.replace(f"BILD_WE_2", f"BILD_WE_{right_n}")
-        # Linkes Panel: _1_ → _left_n_
-        xml_str = xml_str.replace(f"WE_1_", f"WE_{left_n}_")
-        xml_str = xml_str.replace(f"BILD_WE_1", f"BILD_WE_{left_n}")
-
-        # Buchstaben im XML (>a< → >left_letter<, >b< → >right_letter<)
-        left_letter  = letters[left_n  - 1]
-        right_letter = letters[right_n - 1]
-        xml_str = xml_str.replace(">b<", f">{right_letter}<")
-        xml_str = xml_str.replace(">a<", f">{left_letter}<")
-        xml_str = xml_str.replace(">B<", f">{right_letter.upper()}<")
-        xml_str = xml_str.replace(">A<", f">{left_letter.upper()}<")
+        # Replace column-specific placeholders (right before left to avoid prefix collision)
+        xml_str = xml_str.replace("WE_BEISPIEL_2", f"WE_BEISPIEL_{right_n}")
+        xml_str = xml_str.replace("WE_BEISPIEL_1", f"WE_BEISPIEL_{left_n}")
+        xml_str = xml_str.replace("WE_BEREICH_2",  f"WE_BEREICH_{right_n}")
+        xml_str = xml_str.replace("WE_BEREICH_1",  f"WE_BEREICH_{left_n}")
+        xml_str = xml_str.replace("BILD_WE_2",     f"BILD_WE_{right_n}")
+        xml_str = xml_str.replace("BILD_WE_1",     f"BILD_WE_{left_n}")
+        # WE_FLAECHE_1-5 and WE_TYP_BESCHREIBUNG are shared values → unchanged
 
         new_sp_tree = parse_xml(xml_str.encode("utf-8"))
         for child in list(sp_tree):
