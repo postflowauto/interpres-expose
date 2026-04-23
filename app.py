@@ -36,7 +36,7 @@ CLAUDE_API_KEY = os.environ.get("CLAUDE_API_KEY", "")
 CLOUDCONVERT_KEY = os.environ.get("CLOUDCONVERT_KEY", "")
 UNSPLASH_ACCESS_KEY = os.environ.get("UNSPLASH_ACCESS_KEY", "")
 TEST_MODE = os.environ.get("TEST_MODE", "false").lower() == "true"
-TEMPLATE_URL = "https://raw.githubusercontent.com/postflowauto/interpres-expose/main/urbanunits_Marketing_Expose_v3.pdf-11.pptx"
+TEMPLATE_URL = "https://raw.githubusercontent.com/postflowauto/interpres-expose/main/urbanunits_Marketing_Expose_v3.pdf-12.pptx"
 
 # Dummy-Daten für TEST_MODE (kein Claude-API-Call)
 DUMMY_PROJEKTDATEN = {
