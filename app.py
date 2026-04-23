@@ -36,7 +36,7 @@ CLAUDE_API_KEY = os.environ.get("CLAUDE_API_KEY", "")
 CLOUDCONVERT_KEY = os.environ.get("CLOUDCONVERT_KEY", "")
 UNSPLASH_ACCESS_KEY = os.environ.get("UNSPLASH_ACCESS_KEY", "")
 TEST_MODE = os.environ.get("TEST_MODE", "false").lower() == "true"
-TEMPLATE_URL = "https://raw.githubusercontent.com/postflowauto/interpres-expose/main/urbanunits_Marketing_Expose_v3.pdf-8.pptx"
+TEMPLATE_URL = "https://raw.githubusercontent.com/postflowauto/interpres-expose/main/urbanunits_Marketing_Expose_v3.pdf-11.pptx"
 
 # Dummy-Daten für TEST_MODE (kein Claude-API-Call)
 DUMMY_PROJEKTDATEN = {
@@ -564,32 +564,47 @@ def duplicate_slide(prs, slide_index):
 
 def duplicate_we_slides(prs, data):
     """
-    Finds the WE template slide (contains WE_BEISPIEL_1 or BILD_WE_1),
-    duplicates it for every additional Wohnungstyp found in data,
-    and replaces _1 → _N and letter 'a' → 'b'/'c'/... in each duplicate.
-    Called AFTER text replacement so the originals are already filled.
+    Das WE-Template-Slide hat ZWEI Wohnungstypen nebeneinander:
+      Links  = _1 / Buchstabe 'a'
+      Rechts = _2 / Buchstabe 'b'
+    Für je 2 weitere Typen wird eine neue Seite dupliziert:
+      Duplikat 1 → Links=_3/'c', Rechts=_4/'d'
+      Duplikat 2 → Links=_5/'e', Rechts=_6/'f'
+      ...
+    Wird VOR der Text/Bild-Ersetzung aufgerufen (Placeholders noch intakt).
     """
-    letters = ['a', 'b', 'c', 'd', 'e', 'f']
+    from pptx.oxml import parse_xml
 
-    # Count how many WE types are present
-    we_count = 1
-    for n in range(2, 7):
+    letters = ['a','b','c','d','e','f','g','h','i','j','k','l']
+
+    # Höchsten vorhandenen WE-Index ermitteln (max. 12)
+    max_we = 2
+    for n in range(3, 13):
         if data.get(f"we_beispiel_{n}") or data.get(f"bild_we_{n}"):
-            we_count = n
+            max_we = n
 
-    if we_count <= 1:
-        print("duplicate_we_slides: nur 1 WE-Typ, kein Duplizieren")
+    # Anzahl extra Slides: je 2 Typen pro Slide, Original deckt 1+2
+    import math
+    extra_slides = max(0, math.ceil((max_we - 2) / 2))
+
+    if extra_slides == 0:
+        print("duplicate_we_slides: ≤ 2 WE-Typen, kein Duplizieren nötig")
         return
 
-    # Find WE template slide
+    # WE-Template-Slide finden (noch mit Placeholders)
     we_idx = None
     for i, slide in enumerate(prs.slides):
         for shape in slide.shapes:
+            txt = ""
             if shape.has_text_frame:
                 txt = shape.text_frame.text.upper()
-                if "WE_BEISPIEL_1" in txt or "BILD_WE_1" in txt:
-                    we_idx = i
-                    break
+            elif shape.shape_type == 6:
+                for c in shape.shapes:
+                    if c.has_text_frame:
+                        txt += c.text_frame.text.upper()
+            if "WE_BEISPIEL_1" in txt or "BILD_WE_1" in txt:
+                we_idx = i
+                break
         if we_idx is not None:
             break
 
@@ -597,42 +612,52 @@ def duplicate_we_slides(prs, data):
         print("duplicate_we_slides: WE-Template-Slide nicht gefunden")
         return
 
-    print(f"WE-Slide bei Index {we_idx}, {we_count - 1} Duplikate")
+    print(f"WE-Slide bei Index {we_idx} → {extra_slides} extra Slide(s) für {max_we} WE-Typen")
 
-    for offset in range(1, we_count):
-        new_slide = duplicate_slide(prs, we_idx + (offset - 1))
-        n = offset + 1
+    non_img_data = {k: v for k, v in data.items() if not k.startswith("bild_")}
+
+    for slide_offset in range(1, extra_slides + 1):
+        new_slide = duplicate_slide(prs, we_idx + (slide_offset - 1))
         sp_tree = new_slide.shapes._spTree
         xml_str = etree.tostring(sp_tree, encoding="unicode")
 
-        # Replace _1 field references with _N
-        xml_str = xml_str.replace("WE_BEISPIEL_1", f"WE_BEISPIEL_{n}")
-        xml_str = xml_str.replace("WE_BEREICH_1",  f"WE_BEREICH_{n}")
-        xml_str = xml_str.replace("BILD_WE_1",     f"BILD_WE_{n}")
-        xml_str = xml_str.replace("WE_FLAECHE_1",  f"WE_FLAECHE_{n}")
-        # Replace stand-alone letter label 'a' → 'b'/'c'/... in XML text nodes
-        old_letter = letters[0]        # 'a'
-        new_letter = letters[offset]   # 'b', 'c', …
-        xml_str = xml_str.replace(f">{old_letter}<", f">{new_letter}<")
+        # Linkes Panel: Typen 1→left_n, 2→right_n
+        left_n  = 1 + slide_offset * 2   # 3, 5, 7 …
+        right_n = 2 + slide_offset * 2   # 4, 6, 8 …
 
-        # Use python-pptx's own parser so elements get the correct custom-class
-        # bindings (has_ph_elm etc.). Plain etree.fromstring() returns raw
-        # _Element objects which break python-pptx's shape introspection.
-        from pptx.oxml import parse_xml
+        # Reihenfolge wichtig: erst _2 ersetzen (sonst wird _2 durch _3-Ersetzung überschrieben)
+        # Rechtes Panel: _2 → _right_n
+        for field in ["WE_BEISPIEL_2", "WE_BEREICH_2", "BILD_WE_2", "WE_FLAECHE_2"]:
+            xml_str = xml_str.replace(field, field[:-1] + str(right_n))
+        # Linkes Panel: _1 → _left_n
+        for field in ["WE_BEISPIEL_1", "WE_BEREICH_1", "BILD_WE_1", "WE_FLAECHE_1"]:
+            xml_str = xml_str.replace(field, field[:-1] + str(left_n))
+
+        # Buchstaben-Labels ersetzen: 'a'→links-Buchstabe, 'b'→rechts-Buchstabe
+        left_letter  = letters[left_n  - 1]   # c, e, g …
+        right_letter = letters[right_n - 1]   # d, f, h …
+        # Nur isolierte Text-Nodes (>a< bzw >b<) ersetzen – kein Risiko für Wörter
+        xml_str = xml_str.replace(">b<", f">{right_letter}<")  # erst 'b', dann 'a'
+        xml_str = xml_str.replace(">a<", f">{left_letter}<")
+        xml_str = xml_str.replace(">B<", f">{right_letter.upper()}<")
+        xml_str = xml_str.replace(">A<", f">{left_letter.upper()}<")
+
         new_sp_tree = parse_xml(xml_str.encode("utf-8"))
         for child in list(sp_tree):
             sp_tree.remove(child)
         for child in list(new_sp_tree):
             sp_tree.append(child)
 
-        # Now fill the duplicate's TEXT placeholders with actual data.
-        # Skip bild_* keys – image insertion is handled later by process_shape
-        # so that blipFill groups are correctly detected.
-        non_img_data = {k: v for k, v in data.items() if not k.startswith("bild_")}
+        # Text-Placeholders befüllen (bild_* weglassen → process_shape übernimmt)
         for shape in list(new_slide.shapes):
             try:
+                shapes_to_process = []
                 if shape.has_text_frame:
-                    for para in shape.text_frame.paragraphs:
+                    shapes_to_process = [shape]
+                elif shape.shape_type == 6:
+                    shapes_to_process = [c for c in shape.shapes if c.has_text_frame]
+                for s in shapes_to_process:
+                    for para in s.text_frame.paragraphs:
                         if not para.runs:
                             continue
                         full_text = "".join(r.text for r in para.runs)
@@ -641,20 +666,6 @@ def duplicate_we_slides(prs, data):
                             para.runs[0].text = modified
                             for run in para.runs[1:]:
                                 run.text = ""
-                # Also handle group children text
-                elif shape.shape_type == 6:
-                    for child in shape.shapes:
-                        if not child.has_text_frame:
-                            continue
-                        for para in child.text_frame.paragraphs:
-                            if not para.runs:
-                                continue
-                            full_text = "".join(r.text for r in para.runs)
-                            modified = _replace_placeholders(full_text, non_img_data)
-                            if modified != full_text:
-                                para.runs[0].text = modified
-                                for run in para.runs[1:]:
-                                    run.text = ""
             except Exception as e:
                 print(f"WE-Duplikat Shape-Fehler: {e}")
 
