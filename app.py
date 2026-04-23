@@ -606,29 +606,23 @@ def duplicate_slide(prs, slide_index):
 
 def duplicate_we_slides(prs, data):
     """
-    Das WE-Template-Slide hat ZWEI Wohnungstypen nebeneinander:
-      Links  = _1 / Buchstabe 'a'
-      Rechts = _2 / Buchstabe 'b'
-    Für je 2 weitere Typen wird eine neue Seite dupliziert:
-      Duplikat 1 → Links=_3/'c', Rechts=_4/'d'
-      Duplikat 2 → Links=_5/'e', Rechts=_6/'f'
-      ...
-    Wird VOR der Text/Bild-Ersetzung aufgerufen (Placeholders noch intakt).
+    Original slide: types 1+2 (letters a/b).
+    Duplicate 1: types 3+4 (letters c/d). Duplicate 2: types 5+6 (letters e/f).
+    Always duplicates from the original template XML, inserts in reverse order
+    so final slide order is correct. Also fixes the original slide's right 'a' → 'b'.
+    Called BEFORE text/image replacement so placeholders are intact.
     """
     from pptx.oxml import parse_xml
 
-    # Detect extra slides: original covers types 1+2, duplicate 1 → 3+4, duplicate 2 → 5+6
+    letters = 'abcdefghijklmnopqrstuvwxyz'
+
     extra_slides = 0
     if data.get("we_beispiel_3") or data.get("bild_we_3"):
         extra_slides = 1
     if data.get("we_beispiel_5") or data.get("bild_we_5"):
         extra_slides = 2
 
-    if extra_slides == 0:
-        print("duplicate_we_slides: ≤ 2 WE-Typen, kein Duplizieren nötig")
-        return
-
-    # WE-Template-Slide finden (noch mit Placeholders)
+    # Find original WE slide
     we_idx = None
     for i, slide in enumerate(prs.slides):
         for shape in slide.shapes:
@@ -646,30 +640,58 @@ def duplicate_we_slides(prs, data):
             break
 
     if we_idx is None:
-        print("duplicate_we_slides: WE-Template-Slide nicht gefunden")
+        print("duplicate_we_slides: WE-Slide nicht gefunden – überspringe Buchstaben-Fix")
         return
 
     print(f"WE-Slide bei Index {we_idx} → {extra_slides} extra Slide(s)")
 
-    non_img_data = {k: v for k, v in data.items() if not k.startswith("bild_")}
+    def _fix_we_letters(xml_str, left_letter, right_letter):
+        """Replace the two hardcoded 'a' decorative letters (left then right column)."""
+        tag = '<a:t>a</a:t>'
+        first_pos = xml_str.find(tag)
+        if first_pos < 0:
+            return xml_str
+        last_pos = xml_str.rfind(tag)
+        rep_left  = f'<a:t>{left_letter}</a:t>'
+        rep_right = f'<a:t>{right_letter}</a:t>'
+        if first_pos == last_pos:
+            return xml_str[:first_pos] + rep_left + xml_str[first_pos + len(tag):]
+        # Replace last (right) first so first_pos index stays valid
+        result = xml_str[:last_pos] + rep_right + xml_str[last_pos + len(tag):]
+        fp = result.find(tag)
+        if fp >= 0:
+            result = result[:fp] + rep_left + result[fp + len(tag):]
+        return result
 
-    for slide_offset in range(1, extra_slides + 1):
-        new_slide = duplicate_slide(prs, we_idx + (slide_offset - 1))
-        sp_tree = new_slide.shapes._spTree
-        xml_str = etree.tostring(sp_tree, encoding="unicode")
+    # Save original sp_tree XML BEFORE any modifications
+    orig_xml = etree.tostring(prs.slides[we_idx].shapes._spTree, encoding="unicode")
 
-        # Original slide: left=1, right=2 → duplicate 1: left=3, right=4 → duplicate 2: left=5, right=6
-        left_n  = 1 + slide_offset * 2   # 3, 5
-        right_n = 2 + slide_offset * 2   # 4, 6
+    # Create duplicates in REVERSE order: each is inserted at we_idx+1,
+    # pushing previous ones forward → final order is correct (dup1 at we_idx+1, dup2 at we_idx+2)
+    for slide_offset in range(extra_slides, 0, -1):
+        left_n       = 1 + slide_offset * 2        # 3, 5
+        right_n      = 2 + slide_offset * 2        # 4, 6
+        left_letter  = letters[left_n  - 1]        # c, e
+        right_letter = letters[right_n - 1]        # d, f
 
-        # Replace column-specific placeholders (right before left to avoid prefix collision)
+        # Duplicate from original and get the new slide
+        new_slide = duplicate_slide(prs, we_idx)
+        sp_tree   = new_slide.shapes._spTree
+
+        # Start from ORIGINAL template XML each iteration
+        xml_str = orig_xml
+
+        # Rename column-specific placeholders (right before left to avoid prefix collision)
         xml_str = xml_str.replace("WE_BEISPIEL_2", f"WE_BEISPIEL_{right_n}")
         xml_str = xml_str.replace("WE_BEISPIEL_1", f"WE_BEISPIEL_{left_n}")
         xml_str = xml_str.replace("WE_BEREICH_2",  f"WE_BEREICH_{right_n}")
         xml_str = xml_str.replace("WE_BEREICH_1",  f"WE_BEREICH_{left_n}")
         xml_str = xml_str.replace("BILD_WE_2",     f"BILD_WE_{right_n}")
         xml_str = xml_str.replace("BILD_WE_1",     f"BILD_WE_{left_n}")
-        # WE_FLAECHE_1-5 and WE_TYP_BESCHREIBUNG are shared values → unchanged
+        # WE_FLAECHE_1-5 and WE_TYP_BESCHREIBUNG are shared per-slide → unchanged
+
+        # Fix decorative letters
+        xml_str = _fix_we_letters(xml_str, left_letter, right_letter)
 
         new_sp_tree = parse_xml(xml_str.encode("utf-8"))
         for child in list(sp_tree):
@@ -677,26 +699,16 @@ def duplicate_we_slides(prs, data):
         for child in list(new_sp_tree):
             sp_tree.append(child)
 
-        # Text-Placeholders befüllen (bild_* weglassen → process_shape übernimmt)
-        for shape in list(new_slide.shapes):
-            try:
-                shapes_to_process = []
-                if shape.has_text_frame:
-                    shapes_to_process = [shape]
-                elif shape.shape_type == 6:
-                    shapes_to_process = [c for c in shape.shapes if c.has_text_frame]
-                for s in shapes_to_process:
-                    for para in s.text_frame.paragraphs:
-                        if not para.runs:
-                            continue
-                        full_text = "".join(r.text for r in para.runs)
-                        modified = _replace_placeholders(full_text, non_img_data)
-                        if modified != full_text:
-                            para.runs[0].text = modified
-                            for run in para.runs[1:]:
-                                run.text = ""
-            except Exception as e:
-                print(f"WE-Duplikat Shape-Fehler: {e}")
+    # Fix original slide: right decorative 'a' → 'b'  (left stays 'a')
+    orig_sp_tree = prs.slides[we_idx].shapes._spTree
+    fixed_xml    = _fix_we_letters(
+        etree.tostring(orig_sp_tree, encoding="unicode"), 'a', 'b'
+    )
+    new_orig_sp_tree = parse_xml(fixed_xml.encode("utf-8"))
+    for child in list(orig_sp_tree):
+        orig_sp_tree.remove(child)
+    for child in list(new_orig_sp_tree):
+        orig_sp_tree.append(child)
 
 
 def fill_pptx(template_bytes, data):
@@ -927,7 +939,8 @@ def fill_pptx(template_bytes, data):
                         o_off     = o_xfrm.find(f'{{{_NS_A}}}off')     if o_xfrm    is not None else None
                         if o_off is None:
                             continue
-                        if o_off.get('x') != ph_x or o_off.get('y') != ph_y:
+                        if (abs(int(o_off.get('x', 0)) - int(ph_x)) > 50000 or
+                                abs(int(o_off.get('y', 0)) - int(ph_y)) > 50000):
                             continue
                         # Gleiche Position → hat diese Gruppe eine blipFill-Freeform?
                         for grp_child_o in other.shapes:
