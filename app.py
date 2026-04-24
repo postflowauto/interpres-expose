@@ -164,7 +164,7 @@ DUMMY_EXPOSE_DATA = {
     "bild_ausstattung_3": "", "bild_ausstattung_4": "", "bild_ausstattung_5": "",
     "bild_ausstattung_6": "", "bild_grundriss_intro_1": "", "bild_grundriss_intro_2": "",
     "bild_ansicht_1": "", "bild_ansicht_2": "",
-    "bild_we_1": "", "bild_we_2": "", "bild_we_3": "", "bild_we_4": "", "bild_we_5": "", "bild_we_6": "",
+    **{f"bild_we_{n}": "" for n in range(1, 21)},   # bild_we_1 … bild_we_20 für DUMMY
     "bild_stadt_presse": "", "bild_stadt_branche": "",
     "bild_rechtlich_1": "", "bild_rechtlich_2": "",
     "bild_collage_1": "", "bild_collage_2": "", "bild_collage_3": "",
@@ -213,12 +213,26 @@ UNSPLASH_QUERIES = {
     "BILD_GRUNDRISS_INTRO_2": "modern apartment bedroom",
     "BILD_ANSICHT_1": "apartment building exterior west",
     "BILD_ANSICHT_2": "modern residential building south",
-    "BILD_WE_1": "modern apartment interior design minimal furnished",
-    "BILD_WE_2": "studio apartment interior furnished modern design",
-    "BILD_WE_3": "cozy apartment living room interior design",
-    "BILD_WE_4": "modern apartment bedroom minimalist design",
-    "BILD_WE_5": "luxury apartment interior penthouse design",
-    "BILD_WE_6": "compact apartment smart interior design",
+    "BILD_WE_1":  "modern apartment interior design minimal furnished",
+    "BILD_WE_2":  "studio apartment interior furnished modern design",
+    "BILD_WE_3":  "cozy apartment living room interior design",
+    "BILD_WE_4":  "modern apartment bedroom minimalist design",
+    "BILD_WE_5":  "luxury apartment interior penthouse design",
+    "BILD_WE_6":  "compact apartment smart interior design",
+    "BILD_WE_7":  "modern apartment open plan living design",
+    "BILD_WE_8":  "bright apartment interior contemporary",
+    "BILD_WE_9":  "minimalist apartment interior Scandinavian",
+    "BILD_WE_10": "modern apartment kitchen dining area",
+    "BILD_WE_11": "studio loft apartment modern design",
+    "BILD_WE_12": "apartment terrace balcony modern",
+    "BILD_WE_13": "penthouse apartment interior luxury",
+    "BILD_WE_14": "duplex apartment interior design",
+    "BILD_WE_15": "modern apartment bathroom interior",
+    "BILD_WE_16": "cozy apartment bedroom interior",
+    "BILD_WE_17": "open plan apartment living dining",
+    "BILD_WE_18": "modern apartment hallway entrance",
+    "BILD_WE_19": "contemporary apartment interior style",
+    "BILD_WE_20": "bright apartment modern interior design",
     "BILD_STADT_PRESSE": "newspaper article table coffee",
     "BILD_STADT_BRANCHE": "scientist laboratory research modern",
     "BILD_RECHTLICH_1": "modern residential building exterior",
@@ -316,8 +330,7 @@ PLATZHALTER = {
     "bild_ausstattung_4": "", "bild_ausstattung_5": "", "bild_ausstattung_6": "",
     "bild_grundriss_intro_1": "", "bild_grundriss_intro_2": "",
     "bild_ansicht_1": "", "bild_ansicht_2": "",
-    "bild_we_1": "", "bild_we_2": "", "bild_we_3": "", "bild_we_4": "",
-    "bild_we_5": "", "bild_we_6": "",
+    **{f"bild_we_{n}": "" for n in range(1, 21)},   # bild_we_1 … bild_we_20
     "bild_stadt_presse": "", "bild_stadt_branche": "",
     "bild_rechtlich_1": "", "bild_rechtlich_2": "",
     "bild_collage_1": "", "bild_collage_2": "", "bild_collage_3": "",
@@ -624,12 +637,21 @@ def fill_image_placeholders(data):
         data_key = placeholder_key.lower()
         if data_key not in data:
             continue
-        # Skip WE images for empty WE types to avoid wasting API calls
-        # and to prevent duplicate_we_slides from triggering on bare URLs.
-        if data_key in ('bild_we_3', 'bild_we_4') and not (data.get('we_beispiel_3') or data.get('we_bereich_3')):
-            continue
-        if data_key in ('bild_we_5', 'bild_we_6') and not (data.get('we_beispiel_5') or data.get('we_bereich_5')):
-            continue
+        # Skip bild_we_N für nicht vorhandene WE-Typen:
+        # Paar k (k≥2): left_n = 2k-1, right_n = 2k
+        # Nur laden wenn TEXT-Keys des Paares befüllt sind.
+        import re as _re
+        _m = _re.match(r'^bild_we_(\d+)$', data_key)
+        if _m:
+            n = int(_m.group(1))
+            if n > 2:
+                pair_k    = (n + 1) // 2   # welches Paar: n=3→2, n=4→2, n=5→3, ...
+                left_n    = pair_k * 2 - 1
+                right_n   = pair_k * 2
+                has_text  = (data.get(f"we_beispiel_{left_n}") or data.get(f"we_bereich_{left_n}")
+                             or data.get(f"we_beispiel_{right_n}") or data.get(f"we_bereich_{right_n}"))
+                if not has_text:
+                    continue
         url = fetch_unsplash_image(query)
         if url:
             data[data_key] = url
@@ -790,24 +812,29 @@ def duplicate_slide(prs, slide_index):
 
 def duplicate_we_slides(prs, data):
     """
-    Original slide: types 1+2 (letters a/b).
-    Duplicate 1: types 3+4 (letters c/d). Duplicate 2: types 5+6 (letters e/f).
-    Always duplicates from the original template XML, inserts in reverse order
-    so final slide order is correct. Also fixes the original slide's right 'a' → 'b'.
-    Called BEFORE text/image replacement so placeholders are intact.
+    Dynamisch: Originale Slide hat Typen 1+2 (a/b).
+    Für jedes weitere befüllte Typ-Paar (3+4, 5+6, 7+8, ...) wird ein Duplikat erstellt.
+    Unterstützt beliebig viele WE-Typen (nicht nur bis f).
+    Dupliziert nur wenn TEXT-Keys (we_beispiel_N / we_bereich_N) befüllt sind —
+    Bild-URLs allein triggern keine Duplikation.
     """
     from pptx.oxml import parse_xml
+    import string
 
-    letters = 'abcdefghijklmnopqrstuvwxyz'
-
-    # Only use TEXT keys to decide — image URLs are pre-filled for all slots
-    # regardless of whether the WE type actually exists, so bild_we_N alone
-    # must NOT trigger a duplicate slide.
+    # Ermittle Anzahl extra Slides dynamisch:
+    # Pair 1 (original): types 1+2, Pair 2: 3+4, Pair 3: 5+6, ...
+    # extra_slides = Anzahl der befüllten Paare ab Pair 2
     extra_slides = 0
-    if data.get("we_beispiel_3") or data.get("we_bereich_3"):
-        extra_slides = 1
-    if data.get("we_beispiel_5") or data.get("we_bereich_5"):
-        extra_slides = 2
+    pair = 2
+    while True:
+        left_n  = pair * 2 - 1   # 3, 5, 7, 9, ...
+        right_n = pair * 2        # 4, 6, 8, 10, ...
+        if data.get(f"we_beispiel_{left_n}") or data.get(f"we_bereich_{left_n}") \
+                or data.get(f"we_beispiel_{right_n}") or data.get(f"we_bereich_{right_n}"):
+            extra_slides += 1
+            pair += 1
+        else:
+            break
 
     # Find original WE slide
     we_idx = None
@@ -830,10 +857,15 @@ def duplicate_we_slides(prs, data):
         print("duplicate_we_slides: WE-Slide nicht gefunden – überspringe Buchstaben-Fix")
         return
 
-    print(f"WE-Slide bei Index {we_idx} → {extra_slides} extra Slide(s)")
+    print(f"WE-Slide bei Index {we_idx} → {extra_slides} extra Slide(s) "
+          f"({2 + extra_slides * 2} WE-Typen insgesamt)")
+
+    # Buchstaben für Dekorativ-Beschriftung: a, b, c, d, e, f, g, h, ...
+    # Für Pair k: linker Buchstabe = letters[2*(k-1)], rechter = letters[2*(k-1)+1]
+    all_letters = string.ascii_lowercase  # a-z (genug für 13 WE-Paare)
 
     def _fix_we_letters(xml_str, left_letter, right_letter):
-        """Replace the two hardcoded 'a' decorative letters (left then right column)."""
+        """Ersetzt die zwei dekorativen 'a'-Buchstaben (links/rechts) im XML."""
         tag = '<a:t>a</a:t>'
         first_pos = xml_str.find(tag)
         if first_pos < 0:
@@ -843,41 +875,41 @@ def duplicate_we_slides(prs, data):
         rep_right = f'<a:t>{right_letter}</a:t>'
         if first_pos == last_pos:
             return xml_str[:first_pos] + rep_left + xml_str[first_pos + len(tag):]
-        # Replace last (right) first so first_pos index stays valid
+        # Letzten (rechts) zuerst ersetzen, damit first_pos valide bleibt
         result = xml_str[:last_pos] + rep_right + xml_str[last_pos + len(tag):]
         fp = result.find(tag)
         if fp >= 0:
             result = result[:fp] + rep_left + result[fp + len(tag):]
         return result
 
-    # Save original sp_tree XML BEFORE any modifications
+    # Original-XML VOR jeglicher Modifikation speichern
     orig_xml = etree.tostring(prs.slides[we_idx].shapes._spTree, encoding="unicode")
 
-    # Create duplicates in REVERSE order: each is inserted at we_idx+1,
-    # pushing previous ones forward → final order is correct (dup1 at we_idx+1, dup2 at we_idx+2)
-    for slide_offset in range(extra_slides, 0, -1):
-        left_n       = 1 + slide_offset * 2        # 3, 5
-        right_n      = 2 + slide_offset * 2        # 4, 6
-        left_letter  = letters[left_n  - 1]        # c, e
-        right_letter = letters[right_n - 1]        # d, f
+    # Duplikate in UMGEKEHRTER Reihenfolge erstellen:
+    # Jedes neue Slide wird bei we_idx+1 eingefügt → vorherige rücken vor
+    # → Endergebnis: Pair2 bei we_idx+1, Pair3 bei we_idx+2, ...
+    for offset in range(extra_slides, 0, -1):
+        pair_num    = offset + 1                    # 2, 3, 4, ...
+        left_n      = pair_num * 2 - 1              # 3, 5, 7, ...
+        right_n     = pair_num * 2                  # 4, 6, 8, ...
+        left_letter  = all_letters[(pair_num - 1) * 2]         # c, e, g, ...
+        right_letter = all_letters[(pair_num - 1) * 2 + 1]     # d, f, h, ...
 
-        # Duplicate from original and get the new slide
         new_slide = duplicate_slide(prs, we_idx)
         sp_tree   = new_slide.shapes._spTree
 
-        # Start from ORIGINAL template XML each iteration
+        # Immer vom Original-XML ausgehen
         xml_str = orig_xml
 
-        # Rename column-specific placeholders (right before left to avoid prefix collision)
+        # Platzhalter umbenennen (rechts vor links um Präfix-Kollisionen zu vermeiden)
         xml_str = xml_str.replace("WE_BEISPIEL_2", f"WE_BEISPIEL_{right_n}")
         xml_str = xml_str.replace("WE_BEISPIEL_1", f"WE_BEISPIEL_{left_n}")
         xml_str = xml_str.replace("WE_BEREICH_2",  f"WE_BEREICH_{right_n}")
         xml_str = xml_str.replace("WE_BEREICH_1",  f"WE_BEREICH_{left_n}")
         xml_str = xml_str.replace("BILD_WE_2",     f"BILD_WE_{right_n}")
         xml_str = xml_str.replace("BILD_WE_1",     f"BILD_WE_{left_n}")
-        # WE_FLAECHE_1-5 and WE_TYP_BESCHREIBUNG are shared per-slide → unchanged
+        # WE_FLAECHE_1-5 und WE_TYP_BESCHREIBUNG sind pro Slide geteilt → unverändert
 
-        # Fix decorative letters
         xml_str = _fix_we_letters(xml_str, left_letter, right_letter)
 
         new_sp_tree = parse_xml(xml_str.encode("utf-8"))
@@ -886,7 +918,7 @@ def duplicate_we_slides(prs, data):
         for child in list(new_sp_tree):
             sp_tree.append(child)
 
-    # Fix original slide: right decorative 'a' → 'b'  (left stays 'a')
+    # Original-Slide: rechtes 'a' → 'b' (linkes bleibt 'a')
     orig_sp_tree = prs.slides[we_idx].shapes._spTree
     fixed_xml    = _fix_we_letters(
         etree.tostring(orig_sp_tree, encoding="unicode"), 'a', 'b'
