@@ -692,54 +692,101 @@ def analyze_pdfs_with_claude(pdfs):
 
 def generate_expose_with_claude(projektdaten):
     stadt = projektdaten.get('stadt', 'der Stadt')
+    projekt = projektdaten.get('projektname_roh', 'das Projekt')
+    bautraeger = projektdaten.get('bautraeger', 'urbanunits')
+
     prompt = (
-        "Du bist ein Immobilien-Exposé-Spezialist bei INTERPRÉS GmbH. "
+        "Du bist ein erfahrener Immobilien-Exposé-Texter bei INTERPRÉS GmbH. "
         "Antworte NUR mit einem validen JSON-Objekt. Kein Text davor oder danach. Keine Markdown-Backticks.\n\n"
+
         f"## PROJEKTDATEN\n{json.dumps(projektdaten, ensure_ascii=False)}\n\n"
-        f"## AUFGABE\n"
-        f"Fülle alle Felder für ein Premium-Immobilien-Exposé aus. "
-        f"Nutze dein Wissen über {stadt} für Statistiken (Einwohner, BIP, Mietsteigerung, Studierende, Arbeitgeber, Sehenswürdigkeiten).\n\n"
-        f"## TEXT-STIL (wichtig!):\n"
-        f"- Kurze englische Slogans mit Punkt am Ende: 'feels like a hotel.', 'naturban.', 'think green.'\n"
-        f"- Fließtexte: 3-5 Sätze, sachlich-emotional, Zielgruppen nennen (Studierende, Berufstätige, Pendler)\n"
-        f"- Key-Facts mit großer Zahl: '3 Fahrradminuten zur Uni', '100 Prozent möbliert'\n"
-        f"- Keine Du/Sie-Ansprache in Texten\n\n"
-        f"## STANDORT-MINUTEN (Slide 5 – 3 Distanz-Angaben für {stadt}):\n"
-        f"min_uni + label_min_uni: Gehminuten + Name der nächsten Universität/FH\n"
-        f"min_bahnhof + label_min_bahnhof: Gehminuten + Name des nächsten Hauptbahnhofs\n"
-        f"min_altstadt + label_min_altstadt: Gehminuten + Name der Altstadt/Stadtzentrum\n\n"
-        f"## ALLES GANZ NAH (Slide 14 – 4 Freizeit-Einträge für {stadt}):\n"
-        f"Verwende ECHTE Sehenswürdigkeiten, Parks, Seen in der Nähe. Zeitangaben in Fußminuten.\n"
-        f"freizeit_N_name + min_freizeit_N (N = 1 bis 4): z.B. 'Maschsee' + '8'\n\n"
-        f"## WOHNUNGSTYPEN (Slide 24 – basierend auf Projektdaten):\n"
-        f"Das Template zeigt IMMER zwei WE-Varianten nebeneinander (linke + rechte Spalte).\n"
-        f"Felder pro WE-Paar:\n"
-        f"- we_beispiel_N: Beispiel-WE-Nummer, z.B. 'WE 02', 'WE 07'\n"
-        f"- we_bereich_N: Raumbereich/Lage, z.B. 'Wohnen & Schlafen', 'Wohnen/Kochen'\n"
-        f"- we_flaeche_1 bis we_flaeche_5: NUR die Quadratmeterzahl, z.B. '23,99 m²'\n"
-        f"  Der Raumname steht bereits in der linken Tabellenspalte (hardcoded).\n"
-        f"  Letzte Zeile (we_flaeche_5): Gesamtfläche als 'XX,XX m²'\n"
-        f"- we_typ_beschreibung: 1–2 Sätze Beschreibung des dominanten Typs\n\n"
-        f"PFLICHT – Wohnungstypen-Slides:\n"
-        f"  Slide 1 (immer): we_beispiel_1, we_bereich_1, we_beispiel_2, we_bereich_2\n"
-        f"  Slide 2 (wenn Projekt ≥ 2 verschiedene Wohnungstypen hat):\n"
-        f"    we_beispiel_3, we_bereich_3, we_beispiel_4, we_bereich_4\n"
-        f"  Slide 3 (wenn Projekt ≥ 3 verschiedene Wohnungstypen hat):\n"
-        f"    we_beispiel_5, we_bereich_5, we_beispiel_6, we_bereich_6\n"
-        f"  Leere Strings ('') für Slides die nicht benötigt werden.\n"
-        f"  Beispiel 2 Typen: we_beispiel_3='WE 12', we_bereich_3='Wohnen/Kochen',\n"
-        f"    we_beispiel_4='WE 15', we_bereich_4='Wohnen/Kochen',\n"
-        f"    we_beispiel_5='', we_bereich_5=''\n\n"
-        f"## ALLE FELDER AUSFÜLLEN:\n{json.dumps(PLATZHALTER, ensure_ascii=False)}"
+
+        "## SCHREIBSTIL – REFERENZ (genau so schreiben!)\n"
+        "Das Exposé folgt dem Stil eines Premium-Immobilien-Prospekts. Konkret:\n\n"
+
+        "### Slogans (text_kapitel_*, text_hotel, text_*_kurz):\n"
+        "Kurze englische Phrasen mit Punkt. Maximal 3-4 Wörter. Beispiele:\n"
+        "'feels like a hotel.'  'think green. live smart.'  'naturban.'  'work, life balance.'\n"
+        "'designed to stay.'  'stilvoll. durchdacht.'  'simply more.'\n\n"
+
+        "### Fließtexte (text_intro, text_investment_pitch, text_greenliving_*, text_ausstattung_detail, text_hotel, text_architektur):\n"
+        "LANG und inhaltsstark. Mindestens 4-6 Sätze. Emotionale Einstiegssatz + konkrete Fakten + Zielgruppe + Ausblick.\n"
+        "Beispiel text_intro-Länge:\n"
+        "'Inmitten der geschäftigen Kulisse der Neuen Neustadt, einem aufstrebenden Stadtteil, verbindet "
+        "\"urbanunits – The Central\" auf einzigartige Weise urbanen Komfort mit dem Gefühl von Rückzug und Ruhe. "
+        "Hier entfaltet sich eine grüne Oase, die auf dem südlichen Areal der einstigen Diamant Brauerei entsteht. "
+        "Dieses Projekt ist mehr als nur ein Bauvorhaben – es ist ein Ort mit Charakter, geschaffen für Menschen "
+        "mit einem modernen Lebensstil. \"urbanunits – The Central\" bietet nicht nur gefragten Wohnraum, "
+        "sondern auch eine Verbindung von Stadt und Qualität, die eine besondere Balance schafft. "
+        "Ideal für Studierende, Berufstätige, Zweitwohnsitznutzer – und jeden, der flexibel wohnen möchte.'\n\n"
+
+        "### Key-Facts (feature_N_label, amenity_N):\n"
+        "Kurze prägnante Substantive oder Kurzsätze. Beispiele:\n"
+        "'Fitnessstudio direkt im Quartier'  'E-Bike-Sharing'  'Paketstation'  'Dachbegrünung'\n\n"
+
+        "### Zahlen (feature_N_zahl, min_*, stadtstatistiken):\n"
+        "Nur die Zahl, kein Text. Fahrrad-/Gehminuten realistisch für die Stadt.\n\n"
+
+        "### Stadttext (text_stadt_*, text_einwohner_detail etc.):\n"
+        "Nutze ECHTES Wissen über die Stadt. Nenne echte Unternehmen, Branchen, Hochschulen, Investitionen.\n"
+        "Stil: 'Magdeburg verzeichnet seit Jahren ein kontinuierliches Wachstum: mehr als 245.000 Einwohner, "
+        "über 21.000 Studierende, steigende Mieten im Neubausegment und ein deutlich wachsendes BIP.'\n\n"
+
+        "### Investmenttext (text_investment_pitch, text_kapitel_invest_1/2):\n"
+        "Konkret: Einstiegspreis nennen, KfW-Darlehen, 3-fach AfA erklären, Rendite/Mietperspektive.\n"
+        "Beispiel: 'Kleine Einstiegspreise, attraktive KfW-Förderung und dreifach-AfA bieten ideale "
+        "Voraussetzungen für Kapitalanleger, die Wert auf Effizienz und Stabilität legen.'\n\n"
+
+        "### Nachhaltigkeit (text_greenliving_1, text_greenliving_2, text_projekt_nachhaltig_*):\n"
+        "text_greenliving_1: 5-6 Sätze über Fernwärme, Photovoltaik, Gründach, E-Ladeinfrastruktur.\n"
+        "text_greenliving_2: 4-5 Sätze über Außenbereiche, Bepflanzung, Mikroklima, Lebensqualität.\n\n"
+
+        "### Ausstattung (text_ausstattung_detail, text_ausstattung_intro):\n"
+        "text_ausstattung_detail: 4-5 Sätze. Konkret: Bodenbeläge, Fliesen, Fußbodenheizung, "
+        "Beleuchtung, Barrierefreiheit, Balkone/Terrassen.\n\n"
+
+        f"## STANDORT-MINUTEN ({stadt} – Slide 5):\n"
+        f"min_uni / label_min_uni: Fahrradminuten + Name der nächsten Uni/FH in {stadt}\n"
+        f"min_bahnhof / label_min_bahnhof: Fahrradminuten + Hauptbahnhof\n"
+        f"min_altstadt / label_min_altstadt: Fahrradminuten + Altstadt/Innenstadt\n"
+        f"WICHTIG: 'min_*'-Felder nur die Zahl, z.B. '3'. 'label_min_*' nur den Namen, z.B. 'Leibniz Universität'.\n\n"
+
+        f"## FREIZEIT NAH ({stadt} – Slide 14, 4 Einträge):\n"
+        f"freizeit_N_name: ECHTER Name (Park, See, Sehenswürdigkeit) in {stadt}\n"
+        f"min_freizeit_N: Gehminuten als Zahl\n\n"
+
+        f"## WOHNUNGSTYPEN:\n"
+        f"Analysiere die Grundrisse aus den Projektdaten. Pro WE-Paar (je 2 nebeneinander):\n"
+        f"- we_beispiel_N: 'WE 02' (linke Spalte), we_beispiel_N+1: 'WE 07' (rechte Spalte)\n"
+        f"- we_bereich_N: Hauptbereich des Typs, z.B. 'Wohnen & Schlafen', 'Wohnen/Kochen'\n"
+        f"- we_flaeche_1-5: NUR Quadratmeter als '23,99 m²' (Raumnamen sind hardcoded im Template)\n"
+        f"- we_flaeche_5: Gesamtfläche\n"
+        f"- we_typ_beschreibung: 2-3 Sätze Beschreibung des Wohnungstyps mit Zielgruppe\n"
+        f"Slide 1 (immer): Paar 1 (we_beispiel_1, we_bereich_1, we_beispiel_2, we_bereich_2)\n"
+        f"Slide 2 (wenn ≥2 Typen): Paar 2 (we_beispiel_3..4), leere Strings wenn nicht benötigt\n"
+        f"Slide 3 (wenn ≥3 Typen): Paar 3 (we_beispiel_5..6)\n"
+        f"Und so weiter für weitere Typen.\n\n"
+
+        f"## STADTSTATISTIKEN ({stadt}):\n"
+        f"Verwende echte, aktuelle Zahlen für {stadt}:\n"
+        f"stadt_einwohner: Einwohnerzahl als formatierte Zahl, z.B. '245.279'\n"
+        f"stadt_bip: BIP des Bundeslandes in Mrd. EUR, z.B. '78,4 Mrd.'\n"
+        f"stadt_mietsteigerung: Mietsteigerung seit 2017/2018, z.B. '+31%'\n"
+        f"stadt_studierende: Studierende an Hochschulen, z.B. '21.000'\n\n"
+
+        f"## ALLE FELDER – PFLICHT:\n"
+        f"Jedes Feld MUSS befüllt werden. Leere Strings sind nicht akzeptabel außer bei\n"
+        f"we_beispiel_N/we_bereich_N für nicht vorhandene WE-Typen.\n\n"
+        f"{json.dumps(PLATZHALTER, ensure_ascii=False)}"
     )
     resp = requests.post(
         "https://api.anthropic.com/v1/messages",
         headers={"x-api-key": CLAUDE_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json"},
         json={
-            "model": "claude-sonnet-4-6", "max_tokens": 8000,
+            "model": "claude-sonnet-4-6", "max_tokens": 16000,
             "messages": [{"role": "user", "content": prompt}]
         },
-        timeout=240
+        timeout=300
     )
     resp.raise_for_status()
     json_text = ""
