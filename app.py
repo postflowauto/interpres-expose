@@ -1164,6 +1164,9 @@ def fill_pptx(template_bytes, data):
 
 def convert_to_pdf(pptx_bytes, filename):
     import time
+    if not CLOUDCONVERT_KEY:
+        raise RuntimeError("CLOUDCONVERT_KEY ist nicht gesetzt (leere Umgebungsvariable)")
+    print(f"convert_to_pdf: starte CloudConvert für {filename} ({len(pptx_bytes)//1024} KB)")
     cc_headers = {"Authorization": f"Bearer {CLOUDCONVERT_KEY}", "Content-Type": "application/json"}
 
     # Job erstellen (async API)
@@ -1177,7 +1180,8 @@ def convert_to_pdf(pptx_bytes, filename):
             "export":  {"operation": "export/url", "input": "convert"}
         }}, timeout=30
     )
-    job_resp.raise_for_status()
+    if not job_resp.ok:
+        raise RuntimeError(f"CloudConvert Job-Erstellung fehlgeschlagen: {job_resp.status_code} – {job_resp.text[:300]}")
     job = job_resp.json()["data"]
     job_id = job["id"]
 
