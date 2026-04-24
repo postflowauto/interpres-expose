@@ -962,10 +962,18 @@ def fill_pptx(template_bytes, data):
                             existing_blip.set(f'{{{_NS_R}}}embed', new_rid)
                             print(f"  Case A ✓ blip.r:embed={new_rid!r} in {tgt_grp.name!r}")
                         else:
-                            # Kein a:blip → neu anlegen
                             new_blip = etree.SubElement(tgt_blipFill, f'{{{_NS_A}}}blip')
                             new_blip.set(f'{{{_NS_R}}}embed', new_rid)
                             print(f"  Case A ✓ neues a:blip in {tgt_grp.name!r}")
+                        # Reset fillRect so new image fills the shape without template crop offsets
+                        stretch = tgt_blipFill.find(f'{{{_NS_A}}}stretch')
+                        if stretch is None:
+                            stretch = etree.SubElement(tgt_blipFill, f'{{{_NS_A}}}stretch')
+                        fr = stretch.find(f'{{{_NS_A}}}fillRect')
+                        if fr is None:
+                            etree.SubElement(stretch, f'{{{_NS_A}}}fillRect')
+                        else:
+                            fr.attrib.clear()   # remove l/t/r/b crop offsets → full fill
                         # Placeholder-Gruppe entfernen (solidFill+TextBox waren oben drüber)
                         shape._element.getparent().remove(shape._element)
 
