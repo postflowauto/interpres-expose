@@ -1053,6 +1053,57 @@ def fill_pptx(template_bytes, data):
                 key = m.group(1).lower()
                 if key in image_data and image_data[key]:
                     try:
+                        # Check if this placeholder TextBox sits inside a solidFill group
+                        # (e.g. BILD_LAGEPLAN inside dark left-panel Group) → replace that
+                        # group's solidFill with the image instead of inserting a tiny picture.
+                        ph_cx = (shape.left or 0) + (shape.width or 0) // 2
+                        ph_cy = (shape.top  or 0) + (shape.height or 0) // 2
+                        covering_target = None
+                        for other in slide.shapes:
+                            if other.shape_id == shape.shape_id or other.shape_type != 6:
+                                continue
+                            g_left  = other.left  or 0
+                            g_top   = other.top   or 0
+                            g_right = g_left + (other.width  or 0)
+                            g_bot   = g_top  + (other.height or 0)
+                            if not (g_left <= ph_cx <= g_right and g_top <= ph_cy <= g_bot):
+                                continue
+                            for gc in other.shapes:
+                                sp_pr_gc = gc._element.find(f'{{{_NS_P}}}spPr')
+                                if sp_pr_gc is None:
+                                    continue
+                                solid_gc = sp_pr_gc.find(f'{{{_NS_A}}}solidFill')
+                                if solid_gc is None:
+                                    continue
+                                covering_target = (other, gc, sp_pr_gc, solid_gc)
+                                break
+                            if covering_target:
+                                break
+
+                        if covering_target:
+                            # Embed image → get rId
+                            grp, grp_child, sp_pr_gc, solid_gc = covering_target
+                            temp_pic = slide.shapes.add_picture(
+                                io.BytesIO(image_data[key]), 0, 0, 914400, 914400
+                            )
+                            temp_el = temp_pic._element
+                            blip_in_temp = temp_el.find(f'.//{{{_NS_A}}}blip')
+                            new_rid = blip_in_temp.get(f'{{{_NS_R}}}embed') if blip_in_temp is not None else None
+                            temp_el.getparent().remove(temp_el)
+                            if new_rid:
+                                idx = list(sp_pr_gc).index(solid_gc)
+                                sp_pr_gc.remove(solid_gc)
+                                bf_el = etree.Element(f'{{{_NS_A}}}blipFill')
+                                bl_el = etree.SubElement(bf_el, f'{{{_NS_A}}}blip')
+                                bl_el.set(f'{{{_NS_R}}}embed', new_rid)
+                                st_el = etree.SubElement(bf_el, f'{{{_NS_A}}}stretch')
+                                etree.SubElement(st_el, f'{{{_NS_A}}}fillRect')
+                                sp_pr_gc.insert(idx, bf_el)
+                                shape._element.getparent().remove(shape._element)
+                                print(f"  Panel fill: {key!r} → group {grp.name!r}")
+                                return
+
+                        # Fallback: insert picture at TextBox dimensions
                         left   = shape.left   or 0
                         top    = shape.top    or 0
                         width  = shape.width  or 0
