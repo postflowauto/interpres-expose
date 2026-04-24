@@ -1489,54 +1489,43 @@ def fill_pptx(template_bytes, data, customer_images=None):
     return out.getvalue()
 
 def convert_to_pdf(pptx_bytes, filename):
-    import time
-    if not CLOUDCONVERT_KEY:
-        raise RuntimeError("CLOUDCONVERT_KEY ist nicht gesetzt (leere Umgebungsvariable)")
-    print(f"convert_to_pdf: starte CloudConvert für {filename} ({len(pptx_bytes)//1024} KB)")
-    cc_headers = {"Authorization": f"Bearer {CLOUDCONVERT_KEY}", "Content-Type": "application/json"}
+    """Konvertiert PPTX-Bytes zu PDF via LibreOffice (kein externer Dienst nötig)."""
+    import subprocess, tempfile, glob as _glob
+    print(f"convert_to_pdf: LibreOffice für {filename} ({len(pptx_bytes)//1024} KB)")
 
-    # Job erstellen (async API)
-    job_resp = requests.post(
-        "https://api.cloudconvert.com/v2/jobs",
-        headers=cc_headers,
-        json={"tasks": {
-            "upload":  {"operation": "import/upload"},
-            "convert": {"operation": "convert", "input": "upload",
-                        "input_format": "pptx", "output_format": "pdf", "engine": "office"},
-            "export":  {"operation": "export/url", "input": "convert"}
-        }}, timeout=30
-    )
-    if not job_resp.ok:
-        raise RuntimeError(f"CloudConvert Job-Erstellung fehlgeschlagen: {job_resp.status_code} – {job_resp.text[:300]}")
-    job = job_resp.json()["data"]
-    job_id = job["id"]
+    with tempfile.TemporaryDirectory() as tmpdir:
+        pptx_path = os.path.join(tmpdir, filename)
+        with open(pptx_path, "wb") as f:
+            f.write(pptx_bytes)
 
-    # Datei hochladen
-    upload_task = next(t for t in job["tasks"] if t["name"] == "upload")
-    form = upload_task["result"]["form"]
-    files = {"file": (filename, pptx_bytes,
-                      "application/vnd.openxmlformats-officedocument.presentationml.presentation")}
-    requests.post(form["url"], data=form.get("parameters", {}), files=files, timeout=60).raise_for_status()
+        # LibreOffice headless konvertierung
+        cmd = [
+            "libreoffice", "--headless", "--norestore", "--nofirststartwizard",
+            "--convert-to", "pdf",
+            "--outdir", tmpdir,
+            pptx_path
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        print(f"  soffice returncode={result.returncode}")
+        if result.stdout: print(f"  stdout: {result.stdout[:300]}")
+        if result.stderr: print(f"  stderr: {result.stderr[:300]}")
 
-    # Warten bis Job fertig (max 5 Minuten, alle 5s pollen)
-    for _ in range(60):
-        time.sleep(5)
-        status_resp = requests.get(
-            f"https://api.cloudconvert.com/v2/jobs/{job_id}",
-            headers=cc_headers, timeout=30
-        )
-        status_resp.raise_for_status()
-        job_status = status_resp.json()["data"]["status"]
-        if job_status == "finished":
-            tasks = status_resp.json()["data"]["tasks"]
-            pdf_url = next(t for t in tasks if t["name"] == "export")["result"]["files"][0]["url"]
-            return requests.get(pdf_url, timeout=60).content
-        if job_status == "error":
-            tasks = status_resp.json()["data"]["tasks"]
-            err = next((t.get("message","") for t in tasks if t.get("status") == "error"), "Unbekannter Fehler")
-            raise RuntimeError(f"CloudConvert Fehler: {err}")
+        if result.returncode != 0:
+            raise RuntimeError(f"LibreOffice Fehler (rc={result.returncode}): {result.stderr[:300]}")
 
-    raise RuntimeError("CloudConvert Timeout nach 5 Minuten")
+        # PDF-Datei suchen (LibreOffice benennt sie wie die Eingabedatei)
+        pdf_stem = os.path.splitext(filename)[0]
+        matches = _glob.glob(os.path.join(tmpdir, f"{pdf_stem}.pdf"))
+        if not matches:
+            matches = _glob.glob(os.path.join(tmpdir, "*.pdf"))
+        if not matches:
+            raise RuntimeError("LibreOffice hat keine PDF-Datei erzeugt")
+
+        with open(matches[0], "rb") as f:
+            pdf_bytes = f.read()
+
+    print(f"  PDF erzeugt: {len(pdf_bytes)//1024} KB")
+    return pdf_bytes
 
 def assemble_session(session_id):
     """Liest alle Chunks einer Session von /tmp und gibt die assemblierten Bytes zurück."""
