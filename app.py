@@ -1679,20 +1679,19 @@ def _run_expose_job(job_id, pdfs, customer_image_list):
         expose_data = fill_image_placeholders(expose_data)
 
         _set(status="processing", phase="Präsentation wird erstellt …")
-        print(f"[{job_id}] Schritt 4/4: fill_pptx + PDF-Konvertierung …")
+        print(f"[{job_id}] Schritt 4/4: fill_pptx …")
         tmpl_bytes = requests.get(TEMPLATE_URL, timeout=30).content
         pptx_bytes = fill_pptx(tmpl_bytes, expose_data, customer_images=customer_images)
 
         projekt_name = expose_data.get("projekt_name", "Expose").replace(" ", "_")
-        pdf_bytes = convert_to_pdf(pptx_bytes, f"{projekt_name}.pptx")
 
-        # PDF in /tmp/interpres_jobs/<job_id>.pdf ablegen
-        pdf_path = _job_pdf_path(job_id)
-        with open(pdf_path, "wb") as fh:
-            fh.write(pdf_bytes)
+        # PPTX direkt ablegen (kein externer Konvertierungsdienst nötig)
+        pptx_path = os.path.join(_JOB_DIR, f"{job_id}.pptx")
+        with open(pptx_path, "wb") as fh:
+            fh.write(pptx_bytes)
 
-        _set(status="done", phase="Fertig", pdf_path=pdf_path, name=projekt_name)
-        print(f"[{job_id}] ✓ Fertig: {len(pdf_bytes)//1024} KB")
+        _set(status="done", phase="Fertig", pdf_path=pptx_path, name=projekt_name)
+        print(f"[{job_id}] ✓ Fertig: {len(pptx_bytes)//1024} KB PPTX")
 
     except Exception as e:
         import traceback as tb
@@ -1782,11 +1781,19 @@ def job_status(job_id):
         pdf_path = job.get("pdf_path")
         if not pdf_path or not os.path.exists(pdf_path):
             return jsonify({"error": "PDF nicht mehr verfügbar"}), 410
+        # Dateiformat anhand Endung erkennen (PPTX oder PDF)
+        ext = os.path.splitext(pdf_path)[1].lower()
+        if ext == ".pdf":
+            mimetype = "application/pdf"
+            dl_name  = f"{job.get('name', 'Expose')}_Expose.pdf"
+        else:
+            mimetype = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+            dl_name  = f"{job.get('name', 'Expose')}_Expose.pptx"
         return send_file(
             pdf_path,
-            mimetype="application/pdf",
+            mimetype=mimetype,
             as_attachment=True,
-            download_name=f"{job.get('name', 'Expose')}_Expose.pdf"
+            download_name=dl_name
         )
 
 

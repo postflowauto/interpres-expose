@@ -417,9 +417,9 @@
       <div class="success-icon">✓</div>
       <div class="success-title">Exposé bereit</div>
       <div class="success-sub" id="successSub"></div>
-      <a class="btn-download" id="downloadLink" href="#" download="INTERPRÉS_Expose.pdf">
+      <a class="btn-download" id="downloadLink" href="#" download="INTERPRÉS_Expose.pptx">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-        PDF herunterladen
+        Präsentation herunterladen
       </a>
     </div>
 
@@ -502,7 +502,7 @@ function showSuccess(blob) {
   sc4.innerHTML = checkSvg();
 
   document.getElementById('successSub').textContent =
-    `${(blob.size/1048576).toFixed(1)} MB · Erstellt in wenigen Minuten`;
+    `${(blob.size/1048576).toFixed(1)} MB · PowerPoint/Google Slides`;
   const url = URL.createObjectURL(blob);
   document.getElementById('downloadLink').href = url;
 }
