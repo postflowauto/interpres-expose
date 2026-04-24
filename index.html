@@ -631,40 +631,101 @@ generateBtn.addEventListener('click', async () => {
       selectedFiles.forEach(f => formData.append('files', f, f.name));
     }
 
-    // ── Phase 3: Generierung ─────────────────────────────────────────────────
-    const fetchPromise = fetch(RENDER_URL, {
+    // ── Phase 3: Job starten ─────────────────────────────────────────────────
+    setStep(3);
+    setStepDetail('Dokumente werden analysiert …', 'Claude liest alle Unterlagen.', 'indeterminate');
+
+    const startResp = await fetch(RENDER_URL, {
       method: 'POST',
       headers: { 'X-API-Token': API_TOKEN },
       body: formData
     });
 
-    // Nach ~5 s auf "Generierung" wechseln (Claude ist fertig mit Analyse, baut jetzt die Präsentation)
-    const phaseTimer = setTimeout(() => {
-      setStep(3);
-      setStepDetail(
-        'Exposé wird erstellt …',
-        'Die Präsentation wird befüllt, Bilder werden eingebettet.',
-        'indeterminate'
-      );
-    }, 5000);
-
-    const resp = await fetchPromise;
-    clearTimeout(phaseTimer);
-
-    if (!resp.ok) {
-      const raw = await resp.text();
+    if (!startResp.ok) {
+      const raw = await startResp.text();
       let msg = raw;
       try { msg = JSON.parse(raw).error || raw; } catch(_) {}
-      throw new Error(`Fehler ${resp.status}: ${msg.substring(0, 400)}`);
+      throw new Error(`Fehler ${startResp.status}: ${msg.substring(0, 400)}`);
     }
 
-    const blob = await resp.blob();
-    if (blob.size < 1000) {
-      const t = await blob.text();
-      throw new Error('Unerwartete Antwort: ' + t.substring(0, 200));
-    }
+    const { job_id } = await startResp.json();
+    if (!job_id) throw new Error('Kein Job-ID vom Server erhalten.');
 
-    showSuccess(blob);
+    // ── Phase 4: Polling ─────────────────────────────────────────────────────
+    const PHASE_LABELS = {
+      'Dokumente werden analysiert …': [3, 'Claude liest alle Unterlagen aus dem Projektdatenraum.'],
+      'Exposé-Texte werden generiert …': [3, 'Claude generiert professionelle Exposé-Texte.'],
+      'Bilder werden ausgewählt …':      [4, 'Passende Bilder werden recherchiert und eingebettet.'],
+      'Präsentation wird erstellt …':    [4, 'Das Template wird mit Inhalten befüllt.'],
+      'Fertig':                           [4, 'Download wird vorbereitet …'],
+    };
+
+    const pollInterval = 3000; // ms
+    const maxAttempts  = 200;  // ~10 Minuten
+    let   attempts     = 0;
+    let   lastPhase    = '';
+
+    await new Promise((resolve, reject) => {
+      const poll = async () => {
+        attempts++;
+        if (attempts > maxAttempts) {
+          reject(new Error('Timeout: Der Server hat zu lange nicht geantwortet.'));
+          return;
+        }
+        try {
+          const r = await fetch(`/job/${job_id}`, {
+            headers: { 'X-API-Token': API_TOKEN }
+          });
+
+          if (r.status === 200) {
+            const contentType = r.headers.get('content-type') || '';
+            if (contentType.includes('application/pdf')) {
+              // Job fertig → PDF direkt aus dieser Antwort verwenden
+              setStep(4);
+              setStepDetail('Fertig!', 'Das Exposé wird heruntergeladen.', 'none');
+              const blob = await r.blob();
+              showSuccess(blob);
+              resolve();
+              return;
+            }
+            // JSON-Status-Antwort
+            const data = await r.json();
+            if (data.status === 'processing') {
+              const phase = data.phase || '';
+              if (phase !== lastPhase) {
+                lastPhase = phase;
+                const [stepNum, sub] = PHASE_LABELS[phase] || [3, phase];
+                setStep(stepNum);
+                setStepDetail(phase || 'In Bearbeitung …', sub, 'indeterminate');
+              }
+              setTimeout(poll, pollInterval);
+            } else if (data.status === 'done') {
+              // "done" als JSON → einmal mehr abrufen um die Datei zu holen
+              setStep(4);
+              setStepDetail('Fertig!', 'Das Exposé wird heruntergeladen.', 'none');
+              const fileResp = await fetch(`/job/${job_id}`, {
+                headers: { 'X-API-Token': API_TOKEN }
+              });
+              const blob = await fileResp.blob();
+              showSuccess(blob);
+              resolve();
+            } else if (data.status === 'error') {
+              reject(new Error(data.error || 'Unbekannter Serverfehler'));
+            } else {
+              setTimeout(poll, pollInterval);
+            }
+          } else {
+            const raw = await r.text();
+            let msg = raw;
+            try { msg = JSON.parse(raw).error || raw; } catch(_) {}
+            reject(new Error(`Polling-Fehler ${r.status}: ${msg.substring(0, 400)}`));
+          }
+        } catch(pollErr) {
+          reject(pollErr);
+        }
+      };
+      setTimeout(poll, pollInterval);
+    });
 
   } catch(e) {
     showError(e.message);

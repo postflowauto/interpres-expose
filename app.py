@@ -17,6 +17,17 @@ from flask import make_response
 def request_too_large(e):
     return jsonify({"error": "Datei zu groß (max. 500 MB)"}), 413
 
+@app.errorhandler(500)
+def internal_error(e):
+    import traceback
+    return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+
+@app.errorhandler(Exception)
+def unhandled_exception(e):
+    import traceback
+    app.logger.error("Unhandled exception: %s\n%s", str(e), traceback.format_exc())
+    return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+
 @app.after_request
 def add_cors(response):
     response.headers["Access-Control-Allow-Origin"] = "*"
@@ -1592,15 +1603,94 @@ def health():
     return jsonify({"status": "ok", "service": "INTERPRES Full Pipeline v3",
                     "test_mode": TEST_MODE})
 
+# ── Async Job Store ────────────────────────────────────────────────────────────
+import threading as _threading
+import time as _time
+
+_jobs = {}          # job_id → {"status", "phase", "pdf_path", "name", "error"}
+_jobs_lock = _threading.Lock()
+
+def _cleanup_old_jobs():
+    """Entfernt Jobs älter als 30 Minuten (Dateien + Dict-Einträge)."""
+    cutoff = _time.time() - 1800
+    with _jobs_lock:
+        stale = [jid for jid, j in _jobs.items() if j.get("created", 0) < cutoff]
+        for jid in stale:
+            path = _jobs[jid].get("pdf_path")
+            if path:
+                try: os.remove(path)
+                except: pass
+            del _jobs[jid]
+
+def _run_expose_job(job_id, pdfs, customer_image_list):
+    """Läuft in einem Background-Thread. Schreibt Ergebnis nach /tmp."""
+    def _set(phase=None, **kw):
+        with _jobs_lock:
+            _jobs[job_id].update(kw)
+            if phase:
+                _jobs[job_id]["phase"] = phase
+
+    try:
+        _set(phase="Dokumente werden analysiert …")
+
+        # Max. 3 PDFs senden
+        pdfs = sorted(pdfs, key=lambda x: x["priority"])[:3]
+
+        if TEST_MODE:
+            print(f"[{job_id}] TEST_MODE – überspringe Claude API")
+            expose_data = DUMMY_EXPOSE_DATA.copy()
+        else:
+            print(f"[{job_id}] Schritt 1/4: analyze_pdfs_with_claude…")
+            projektdaten = analyze_pdfs_with_claude(pdfs)
+
+            _set(phase="Exposé-Texte werden generiert …")
+            print(f"[{job_id}] Schritt 2/4: generate_expose_with_claude…")
+            raw_expose = generate_expose_with_claude(projektdaten)
+            print(f"[{job_id}]   Claude-Ausgabe: {len(raw_expose)} Felder")
+            expose_data = {**PLATZHALTER, **raw_expose}
+            expose_data["logo_initial"] = generate_logo_initial(expose_data.get("projekt_name", ""))
+
+        _set(phase="Bilder werden ausgewählt …")
+        print(f"[{job_id}] Schritt 3/4: Bilder …")
+
+        customer_images = {}
+        if customer_image_list:
+            customer_images = classify_and_assign_customer_images(customer_image_list)
+
+        expose_data = fill_image_placeholders(expose_data)
+
+        _set(phase="Präsentation wird erstellt …")
+        print(f"[{job_id}] Schritt 4/4: fill_pptx + PDF-Konvertierung …")
+        tmpl_bytes = requests.get(TEMPLATE_URL, timeout=30).content
+        pptx_bytes = fill_pptx(tmpl_bytes, expose_data, customer_images=customer_images)
+
+        projekt_name = expose_data.get("projekt_name", "Expose").replace(" ", "_")
+        pdf_bytes = convert_to_pdf(pptx_bytes, f"{projekt_name}.pptx")
+
+        # PDF in /tmp ablegen
+        pdf_path = f"/tmp/expose_{job_id}.pdf"
+        with open(pdf_path, "wb") as fh:
+            fh.write(pdf_bytes)
+
+        _set(status="done", phase="Fertig", pdf_path=pdf_path, name=projekt_name)
+        print(f"[{job_id}] ✓ Fertig: {len(pdf_bytes)//1024} KB")
+
+    except Exception as e:
+        import traceback as tb
+        err = f"{e}\n{tb.format_exc()}"
+        print(f"[{job_id}] ✗ Fehler: {err[:500]}")
+        _set(status="error", phase="Fehler", error=str(e))
+
+
 @app.route("/generate-expose", methods=["POST"])
 def generate_expose():
     if request.headers.get("X-API-Token") != API_TOKEN:
         return jsonify({"error": "Unauthorized"}), 401
     try:
+        _cleanup_old_jobs()
         pdfs = []
-        customer_image_list = []   # Bilder aus der ZIP (Kundenbilder)
+        customer_image_list = []
 
-        # --- Chunked-Session Upload ---
         session_ids = request.form.getlist("session_ids")
         if session_ids:
             for sid in session_ids:
@@ -1633,50 +1723,55 @@ def generate_expose():
         if not pdfs:
             return jsonify({"error": "Keine relevanten PDFs gefunden"}), 400
 
-        # Max. 3 PDFs senden (Kostenkontrolle)
-        pdfs = sorted(pdfs, key=lambda x: x["priority"])[:3]
+        job_id = str(uuid.uuid4())
+        with _jobs_lock:
+            _jobs[job_id] = {
+                "status": "processing",
+                "phase": "Wird gestartet …",
+                "created": _time.time(),
+                "pdf_path": None,
+                "name": None,
+                "error": None,
+            }
 
-        if TEST_MODE:
-            print("TEST_MODE aktiv – überspringe Claude API")
-            expose_data = DUMMY_EXPOSE_DATA.copy()
-        else:
-            print("Schritt 1/4: analyze_pdfs_with_claude…")
-            projektdaten = analyze_pdfs_with_claude(pdfs)
-            print("Schritt 2/4: generate_expose_with_claude…")
-            raw_expose = generate_expose_with_claude(projektdaten)
-            print(f"  Claude-Ausgabe: {len(raw_expose)} Felder")
-            # Merge: PLATZHALTER-Defaults sicherstellen, damit alle bild_* Keys existieren
-            expose_data = {**PLATZHALTER, **raw_expose}
-            expose_data["logo_initial"] = generate_logo_initial(expose_data.get("projekt_name", ""))
-            print("Schritt 3/4: fill_image_placeholders…")
+        t = _threading.Thread(
+            target=_run_expose_job,
+            args=(job_id, pdfs, customer_image_list),
+            daemon=True
+        )
+        t.start()
 
-        # Kundenbilder klassifizieren (Vorrang vor Unsplash)
-        customer_images = {}
-        if customer_image_list:
-            print(f"generate_expose: {len(customer_image_list)} Kundenbilder → klassifiziere…")
-            customer_images = classify_and_assign_customer_images(customer_image_list)
-
-        # Unsplash/Picsum-Fallback nur für Slots ohne Kundenbild
-        expose_data = fill_image_placeholders(expose_data)
-        bild_count = sum(1 for k, v in expose_data.items()
-                         if k.startswith("bild_") and isinstance(v, str) and v.startswith("http"))
-        print(f"generate_expose: {bild_count} bild_* URLs, {len(customer_images)} Kundenbilder vor fill_pptx")
-
-        print("Schritt 4/4: Template laden + fill_pptx…")
-        tmpl_bytes = requests.get(TEMPLATE_URL, timeout=30).content
-        pptx_bytes = fill_pptx(tmpl_bytes, expose_data, customer_images=customer_images)
-        print(f"  fill_pptx fertig: {len(pptx_bytes)//1024} KB PPTX")
-
-        projekt_name = expose_data.get("projekt_name", "Expose").replace(" ", "_")
-        print("convert_to_pdf starten…")
-        pdf_bytes = convert_to_pdf(pptx_bytes, f"{projekt_name}.pptx")
-
-        return send_file(io.BytesIO(pdf_bytes), mimetype="application/pdf",
-                         as_attachment=True, download_name=f"{projekt_name}_Expose.pdf")
+        return jsonify({"job_id": job_id})
 
     except Exception as e:
         import traceback
         return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
+
+
+@app.route("/job/<job_id>", methods=["GET", "OPTIONS"])
+def job_status(job_id):
+    if request.method == "OPTIONS":
+        return make_response("", 204)
+    if request.headers.get("X-API-Token") != API_TOKEN:
+        return jsonify({"error": "Unauthorized"}), 401
+    with _jobs_lock:
+        job = _jobs.get(job_id)
+    if not job:
+        return jsonify({"error": "Job nicht gefunden"}), 404
+    if job["status"] == "processing":
+        return jsonify({"status": "processing", "phase": job.get("phase", "")})
+    elif job["status"] == "error":
+        return jsonify({"status": "error", "error": job.get("error", "Unbekannter Fehler")}), 500
+    else:  # done
+        pdf_path = job.get("pdf_path")
+        if not pdf_path or not os.path.exists(pdf_path):
+            return jsonify({"error": "PDF nicht mehr verfügbar"}), 410
+        return send_file(
+            pdf_path,
+            mimetype="application/pdf",
+            as_attachment=True,
+            download_name=f"{job.get('name', 'Expose')}_Expose.pdf"
+        )
 
 
 @app.route("/debug-images", methods=["GET"])
