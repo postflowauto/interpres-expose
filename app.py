@@ -412,6 +412,173 @@ def extract_pdfs_from_zip(zip_bytes):
 
     return selected
 
+def extract_images_from_zip(zip_bytes):
+    """
+    Extrahiert Bilddateien (.jpg/.jpeg/.png/.webp) aus einer ZIP.
+    Gibt max. 20 Bilder zurück als Liste von {name, bytes, ext, b64}.
+    """
+    IMAGE_EXTS = {'.jpg', '.jpeg', '.png', '.webp'}
+    images = []
+    try:
+        with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+            for name in zf.namelist():
+                if '__MACOSX' in name or name.startswith('.'):
+                    continue
+                ext = os.path.splitext(name.lower())[1]
+                if ext not in IMAGE_EXTS:
+                    continue
+                raw = zf.read(name)
+                if len(raw) < 5000:   # Thumbnails/Icons überspringen
+                    continue
+                images.append({
+                    'name': name.split('/')[-1],
+                    'bytes': raw,
+                    'ext': ext,
+                    'b64': base64.b64encode(raw).decode(),
+                })
+                if len(images) >= 20:
+                    break
+    except Exception as e:
+        print(f"extract_images_from_zip Fehler: {e}")
+    print(f"Bilder in ZIP: {len(images)}")
+    return images
+
+
+# Mapping: welche bild_* Slots können Kundenbilder aufnehmen (in Prioritätsreihenfolge)
+CUSTOMER_IMAGE_SLOTS = {
+    "aussenansicht":  ["bild_titel", "bild_projekt_aussen", "bild_ansicht_1", "bild_ansicht_2",
+                       "bild_greenliving_1", "bild_greenliving_2"],
+    "grundriss":      ["bild_grundriss_1", "bild_grundriss_2", "bild_grundriss_3", "bild_grundriss_4",
+                       "bild_grundriss_intro_1", "bild_grundriss_intro_2", "bild_grundriss_intro_3"],
+    "innenansicht":   ["bild_interior", "bild_ausstattung_1", "bild_ausstattung_2", "bild_ausstattung_3",
+                       "bild_ausstattung_4", "bild_ausstattung_5", "bild_ausstattung_6",
+                       "bild_we_1", "bild_we_2", "bild_hotel_1", "bild_hotel_2"],
+    "lageplan":       ["bild_lageplan"],
+    "quartier":       ["bild_quartier", "bild_stadt_gross", "bild_stadt_klein",
+                       "bild_standort_aussen", "bild_standort_innen"],
+    "amenity":        ["bild_amenity_1", "bild_amenity_2", "bild_amenity_3", "bild_amenity_4",
+                       "bild_amenity_5", "bild_amenity_6", "bild_amenity_7", "bild_amenity_8", "bild_amenity_9"],
+    "collage":        ["bild_collage_1", "bild_collage_2", "bild_collage_3", "bild_collage_4", "bild_collage_5"],
+}
+
+
+def classify_and_assign_customer_images(images):
+    """
+    Sendet Kundenbilder an Claude Vision und lässt es sie den richtigen bild_*-Slots zuweisen.
+    Gibt {bild_key: image_bytes} zurück.
+    Fällt auf regelbasierte Zuweisung zurück wenn kein Claude-Key vorhanden.
+    """
+    if not images:
+        return {}
+
+    # Regelbasierter Fallback (anhand Dateiname)
+    def _rule_based(images):
+        slot_counters = {cat: 0 for cat in CUSTOMER_IMAGE_SLOTS}
+        result = {}
+        for img in images:
+            name_lower = img['name'].lower()
+            if any(k in name_lower for k in ('grundriss', 'floor', 'plan', 'gr_')):
+                cat = 'grundriss'
+            elif any(k in name_lower for k in ('lageplan', 'lage', 'map', 'karte')):
+                cat = 'lageplan'
+            elif any(k in name_lower for k in ('aussen', 'außen', 'exterior', 'fassade', 'ansicht')):
+                cat = 'aussenansicht'
+            elif any(k in name_lower for k in ('innen', 'interior', 'zimmer', 'küche', 'bad', 'wohn')):
+                cat = 'innenansicht'
+            elif any(k in name_lower for k in ('quartier', 'strasse', 'straße', 'stadt', 'neighborhood')):
+                cat = 'quartier'
+            elif any(k in name_lower for k in ('amenity', 'bike', 'solar', 'gym', 'garten', 'dach')):
+                cat = 'amenity'
+            else:
+                cat = 'aussenansicht'  # Standard-Fallback
+            slots = CUSTOMER_IMAGE_SLOTS[cat]
+            idx = slot_counters[cat]
+            if idx < len(slots):
+                result[slots[idx]] = img['bytes']
+                slot_counters[cat] += 1
+        return result
+
+    if not CLAUDE_API_KEY:
+        print("classify_customer_images: kein Claude-Key → regelbasierte Zuweisung")
+        result = _rule_based(images)
+        print(f"  {len(result)} Bilder zugewiesen (regelbasiert)")
+        return result
+
+    # Claude Vision: max. 10 Bilder (Kostenkontrolle)
+    batch = images[:10]
+    content = []
+    for i, img in enumerate(batch):
+        if img['ext'] in ('.jpg', '.jpeg'):
+            media_type = 'image/jpeg'
+        elif img['ext'] == '.png':
+            media_type = 'image/png'
+        else:
+            media_type = 'image/webp'
+        content.append({
+            "type": "image",
+            "source": {"type": "base64", "media_type": media_type, "data": img['b64']}
+        })
+        content.append({"type": "text", "text": f"Bild {i+1}: {img['name']}"})
+
+    slot_list = "\n".join(
+        f"- {cat}: {', '.join(slots[:4])}" + (" …" if len(slots) > 4 else "")
+        for cat, slots in CUSTOMER_IMAGE_SLOTS.items()
+    )
+    content.append({"type": "text", "text": (
+        "Analysiere diese Immobilien-Bilder und weise jedem Bild die passende Kategorie zu.\n\n"
+        "Kategorien und ihre Platzhalter:\n" + slot_list + "\n\n"
+        "Regeln:\n"
+        "- grundriss: NUR echte Grundriss-Zeichnungen mit Raumaufteilung/Maßen\n"
+        "- lageplan: NUR Karten, Stadtpläne, Lagepläne\n"
+        "- aussenansicht: Gebäude-Außenfotos, Fassade, Architektur\n"
+        "- innenansicht: Innenräume, Wohnung, Möbel, Küche, Bad\n"
+        "- quartier: Straßen, Stadtteile, Umgebung\n"
+        "- amenity: Ausstattungsmerkmale (Fahrrad, Solar, Gym, Garten)\n"
+        "- collage: Sonstige/dekorative Bilder\n\n"
+        "Antworte NUR mit JSON: {\"1\": \"kategorie\", \"2\": \"kategorie\", ...}\n"
+        "Bild-Nummern wie oben angegeben. Jedes Bild bekommt genau eine Kategorie."
+    )})
+
+    try:
+        resp = requests.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={"x-api-key": CLAUDE_API_KEY, "anthropic-version": "2023-06-01",
+                     "content-type": "application/json"},
+            json={"model": "claude-haiku-4-5-20251001", "max_tokens": 300,
+                  "messages": [{"role": "user", "content": content}]},
+            timeout=60
+        )
+        resp.raise_for_status()
+        json_text = resp.json()["content"][0]["text"]
+        json_text = json_text.replace("```json", "").replace("```", "").strip()
+        assignments = json.loads(json_text)
+    except Exception as e:
+        print(f"classify_customer_images Claude-Fehler: {e} → regelbasierter Fallback")
+        result = _rule_based(images)
+        print(f"  {len(result)} Bilder zugewiesen (regelbasiert)")
+        return result
+
+    # Kategorie → nächsten freien Slot zuweisen
+    slot_counters = {cat: 0 for cat in CUSTOMER_IMAGE_SLOTS}
+    result = {}
+    for img_num_str, cat in assignments.items():
+        idx = int(img_num_str) - 1
+        if not (0 <= idx < len(batch)):
+            continue
+        cat = cat.strip().lower()
+        if cat not in CUSTOMER_IMAGE_SLOTS:
+            cat = 'aussenansicht'
+        slots = CUSTOMER_IMAGE_SLOTS[cat]
+        slot_idx = slot_counters[cat]
+        if slot_idx < len(slots):
+            result[slots[slot_idx]] = batch[idx]['bytes']
+            slot_counters[cat] += 1
+            print(f"  Bild {img_num_str} ({batch[idx]['name']}) → {slots[slot_idx]}")
+
+    print(f"classify_customer_images: {len(result)} Bilder zugewiesen (Claude Vision)")
+    return result
+
+
 def fetch_unsplash_image(query):
     """Holt Bild-URL von Unsplash. Bei fehlendem/ungültigem Key → Picsum-Fallback."""
     if UNSPLASH_ACCESS_KEY:
@@ -523,15 +690,24 @@ def generate_expose_with_claude(projektdaten):
         f"Verwende ECHTE Sehenswürdigkeiten, Parks, Seen in der Nähe. Zeitangaben in Fußminuten.\n"
         f"freizeit_N_name + min_freizeit_N (N = 1 bis 4): z.B. 'Maschsee' + '8'\n\n"
         f"## WOHNUNGSTYPEN (Slide 24 – basierend auf Projektdaten):\n"
-        f"Das Template zeigt zwei WE-Varianten nebeneinander (linke + rechte Spalte):\n"
-        f"- we_beispiel_1 / we_beispiel_2: Beispiel-WE-Nummern links/rechts, z.B. 'WE 02'\n"
-        f"- we_bereich_1 / we_bereich_2: Bereich/Lage z.B. 'Wohnen & Schlafen'\n"
+        f"Das Template zeigt IMMER zwei WE-Varianten nebeneinander (linke + rechte Spalte).\n"
+        f"Felder pro WE-Paar:\n"
+        f"- we_beispiel_N: Beispiel-WE-Nummer, z.B. 'WE 02', 'WE 07'\n"
+        f"- we_bereich_N: Raumbereich/Lage, z.B. 'Wohnen & Schlafen', 'Wohnen/Kochen'\n"
         f"- we_flaeche_1 bis we_flaeche_5: NUR die Quadratmeterzahl, z.B. '23,99 m²'\n"
         f"  Der Raumname steht bereits in der linken Tabellenspalte (hardcoded).\n"
         f"  Letzte Zeile (we_flaeche_5): Gesamtfläche als 'XX,XX m²'\n"
-        f"- we_typ_beschreibung: 1–2 Sätze Beschreibung des Typs\n"
-        f"Falls Projektdaten mehr als einen Grundrisstyp enthalten: fülle auch\n"
-        f"we_beispiel_3/4, we_bereich_3/4 für einen zweiten WE-Slide aus.\n\n"
+        f"- we_typ_beschreibung: 1–2 Sätze Beschreibung des dominanten Typs\n\n"
+        f"PFLICHT – Wohnungstypen-Slides:\n"
+        f"  Slide 1 (immer): we_beispiel_1, we_bereich_1, we_beispiel_2, we_bereich_2\n"
+        f"  Slide 2 (wenn Projekt ≥ 2 verschiedene Wohnungstypen hat):\n"
+        f"    we_beispiel_3, we_bereich_3, we_beispiel_4, we_bereich_4\n"
+        f"  Slide 3 (wenn Projekt ≥ 3 verschiedene Wohnungstypen hat):\n"
+        f"    we_beispiel_5, we_bereich_5, we_beispiel_6, we_bereich_6\n"
+        f"  Leere Strings ('') für Slides die nicht benötigt werden.\n"
+        f"  Beispiel 2 Typen: we_beispiel_3='WE 12', we_bereich_3='Wohnen/Kochen',\n"
+        f"    we_beispiel_4='WE 15', we_bereich_4='Wohnen/Kochen',\n"
+        f"    we_beispiel_5='', we_bereich_5=''\n\n"
         f"## ALLE FELDER AUSFÜLLEN:\n{json.dumps(PLATZHALTER, ensure_ascii=False)}"
     )
     resp = requests.post(
@@ -722,32 +898,42 @@ def duplicate_we_slides(prs, data):
         orig_sp_tree.append(child)
 
 
-def fill_pptx(template_bytes, data):
-    """Fill PPTX template using python-pptx: embeds images and replaces text placeholders."""
+def fill_pptx(template_bytes, data, customer_images=None):
+    """Fill PPTX template using python-pptx: embeds images and replaces text placeholders.
+    customer_images: optional dict {bild_key: bytes} – Kundenbilder haben Vorrang vor URLs."""
 
     prs = Presentation(io.BytesIO(template_bytes))
 
-    # Pre-download all images referenced by bild_* keys
-    bild_keys_total = [k for k in data if k.startswith("bild_")]
-    bild_keys_with_url = [k for k in bild_keys_total if isinstance(data[k], str) and data[k].startswith("http")]
-    print(f"fill_pptx: {len(bild_keys_total)} bild_* Keys, davon {len(bild_keys_with_url)} mit URL")
-    if not bild_keys_with_url:
-        print("  WARNUNG: Keine bild_* URLs vorhanden – keine Bilder werden eingefügt!")
-
+    # Pre-load images: Kundenbilder zuerst, dann URLs für fehlende Slots
     image_data = {}
-    for key, value in data.items():
-        if key.startswith("bild_") and isinstance(value, str) and value.startswith("http"):
-            try:
-                resp = requests.get(value, timeout=15)
-                if resp.status_code == 200:
-                    image_data[key] = resp.content
-                    print(f"  ✓ Bild geladen: {key} ({len(resp.content)//1024} KB)")
-                else:
-                    print(f"  ✗ Bild HTTP-Fehler {key}: {resp.status_code}  URL={value[:80]}")
-            except Exception as e:
-                print(f"  ✗ Bild Download-Fehler {key}: {e}")
 
-    print(f"  image_data: {len(image_data)} Bilder erfolgreich heruntergeladen")
+    # 1. Kundenbilder direkt einsetzen (höchste Priorität)
+    if customer_images:
+        for key, raw in customer_images.items():
+            image_data[key] = raw
+            print(f"  ✓ Kundenbild: {key} ({len(raw)//1024} KB)")
+        print(f"  Kundenbilder: {len(customer_images)} eingeladen")
+
+    # 2. Unsplash/Picsum-URLs für alle noch fehlenden bild_* Keys herunterladen
+    bild_keys_total = [k for k in data if k.startswith("bild_")]
+    bild_keys_with_url = [k for k in bild_keys_total
+                          if isinstance(data[k], str) and data[k].startswith("http")
+                          and k not in image_data]
+    print(f"fill_pptx: {len(bild_keys_total)} bild_* Keys, {len(bild_keys_with_url)} noch per URL zu laden")
+
+    for key in bild_keys_with_url:
+        value = data[key]
+        try:
+            resp = requests.get(value, timeout=15)
+            if resp.status_code == 200:
+                image_data[key] = resp.content
+                print(f"  ✓ Bild geladen: {key} ({len(resp.content)//1024} KB)")
+            else:
+                print(f"  ✗ Bild HTTP-Fehler {key}: {resp.status_code}  URL={value[:80]}")
+        except Exception as e:
+            print(f"  ✗ Bild Download-Fehler {key}: {e}")
+
+    print(f"  image_data gesamt: {len(image_data)} Bilder")
 
     def make_replacement_map(data):
         """Build a case-insensitive lookup: UPPER_KEY -> value."""
@@ -1283,6 +1469,7 @@ def generate_expose():
         return jsonify({"error": "Unauthorized"}), 401
     try:
         pdfs = []
+        customer_image_list = []   # Bilder aus der ZIP (Kundenbilder)
 
         # --- Chunked-Session Upload ---
         session_ids = request.form.getlist("session_ids")
@@ -1290,20 +1477,27 @@ def generate_expose():
             for sid in session_ids:
                 zip_bytes = assemble_session(sid)
                 pdfs.extend(extract_pdfs_from_zip(zip_bytes))
+                customer_image_list.extend(extract_images_from_zip(zip_bytes))
 
         elif request.content_type and "multipart" in request.content_type:
             uploaded = request.files.getlist("files") or request.files.getlist("file")
             if not uploaded:
                 return jsonify({"error": "Keine Dateien im Request"}), 400
             for f in uploaded:
-                pdfs.extend(extract_pdfs_from_zip(f.read()))
+                raw = f.read()
+                pdfs.extend(extract_pdfs_from_zip(raw))
+                customer_image_list.extend(extract_images_from_zip(raw))
         else:
             body = request.get_json(force=True) or {}
             if "zip_base64_list" in body:
                 for b64 in body["zip_base64_list"]:
-                    pdfs.extend(extract_pdfs_from_zip(base64.b64decode(b64)))
+                    raw = base64.b64decode(b64)
+                    pdfs.extend(extract_pdfs_from_zip(raw))
+                    customer_image_list.extend(extract_images_from_zip(raw))
             elif "zip_base64" in body:
-                pdfs.extend(extract_pdfs_from_zip(base64.b64decode(body["zip_base64"])))
+                raw = base64.b64decode(body["zip_base64"])
+                pdfs.extend(extract_pdfs_from_zip(raw))
+                customer_image_list.extend(extract_images_from_zip(raw))
             else:
                 return jsonify({"error": "zip_base64 oder zip_base64_list fehlt"}), 400
 
@@ -1323,14 +1517,20 @@ def generate_expose():
             expose_data = {**PLATZHALTER, **raw_expose}
             expose_data["logo_initial"] = generate_logo_initial(expose_data.get("projekt_name", ""))
 
-        # Bilder holen (Unsplash oder Picsum-Fallback)
+        # Kundenbilder klassifizieren (Vorrang vor Unsplash)
+        customer_images = {}
+        if customer_image_list:
+            print(f"generate_expose: {len(customer_image_list)} Kundenbilder → klassifiziere…")
+            customer_images = classify_and_assign_customer_images(customer_image_list)
+
+        # Unsplash/Picsum-Fallback nur für Slots ohne Kundenbild
         expose_data = fill_image_placeholders(expose_data)
         bild_count = sum(1 for k, v in expose_data.items()
                          if k.startswith("bild_") and isinstance(v, str) and v.startswith("http"))
-        print(f"generate_expose: {bild_count} bild_* URLs vor fill_pptx")
+        print(f"generate_expose: {bild_count} bild_* URLs, {len(customer_images)} Kundenbilder vor fill_pptx")
 
         tmpl_bytes = requests.get(TEMPLATE_URL, timeout=30).content
-        pptx_bytes = fill_pptx(tmpl_bytes, expose_data)
+        pptx_bytes = fill_pptx(tmpl_bytes, expose_data, customer_images=customer_images)
 
         projekt_name = expose_data.get("projekt_name", "Expose").replace(" ", "_")
         pdf_bytes = convert_to_pdf(pptx_bytes, f"{projekt_name}.pptx")
