@@ -1607,31 +1607,61 @@ def health():
 import threading as _threading
 import time as _time
 
-_jobs = {}          # job_id → {"status", "phase", "pdf_path", "name", "error"}
-_jobs_lock = _threading.Lock()
+# ── Dateisystem-basierter Job-Store (/tmp) ────────────────────────────────────
+# Funktioniert mit mehreren Prozessen/Workern, da alle dasselbe /tmp teilen.
+_JOB_DIR = "/tmp/interpres_jobs"
+os.makedirs(_JOB_DIR, exist_ok=True)
+
+def _job_meta_path(job_id):
+    return os.path.join(_JOB_DIR, f"{job_id}.json")
+
+def _job_pdf_path(job_id):
+    return os.path.join(_JOB_DIR, f"{job_id}.pdf")
+
+def _write_job(job_id, **fields):
+    """Schreibt/aktualisiert Job-Metadaten atomar."""
+    path = _job_meta_path(job_id)
+    # Lese bestehende Daten falls vorhanden
+    try:
+        with open(path) as f:
+            data = json.load(f)
+    except Exception:
+        data = {}
+    data.update(fields)
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(data, f)
+    os.replace(tmp, path)  # atomarer Schreibvorgang
+
+def _read_job(job_id):
+    """Liest Job-Metadaten. Gibt None zurück wenn nicht gefunden."""
+    try:
+        with open(_job_meta_path(job_id)) as f:
+            return json.load(f)
+    except Exception:
+        return None
 
 def _cleanup_old_jobs():
-    """Entfernt Jobs älter als 30 Minuten (Dateien + Dict-Einträge)."""
+    """Entfernt Jobs und PDFs älter als 30 Minuten."""
     cutoff = _time.time() - 1800
-    with _jobs_lock:
-        stale = [jid for jid, j in _jobs.items() if j.get("created", 0) < cutoff]
-        for jid in stale:
-            path = _jobs[jid].get("pdf_path")
-            if path:
-                try: os.remove(path)
-                except: pass
-            del _jobs[jid]
+    try:
+        for fname in os.listdir(_JOB_DIR):
+            fpath = os.path.join(_JOB_DIR, fname)
+            try:
+                if os.path.getmtime(fpath) < cutoff:
+                    os.remove(fpath)
+            except Exception:
+                pass
+    except Exception:
+        pass
 
 def _run_expose_job(job_id, pdfs, customer_image_list):
-    """Läuft in einem Background-Thread. Schreibt Ergebnis nach /tmp."""
-    def _set(phase=None, **kw):
-        with _jobs_lock:
-            _jobs[job_id].update(kw)
-            if phase:
-                _jobs[job_id]["phase"] = phase
+    """Läuft in einem Background-Thread. Schreibt Status+PDF nach /tmp."""
+    def _set(**kw):
+        _write_job(job_id, **kw)
 
     try:
-        _set(phase="Dokumente werden analysiert …")
+        _set(status="processing", phase="Dokumente werden analysiert …")
 
         # Max. 3 PDFs senden
         pdfs = sorted(pdfs, key=lambda x: x["priority"])[:3]
@@ -1643,14 +1673,14 @@ def _run_expose_job(job_id, pdfs, customer_image_list):
             print(f"[{job_id}] Schritt 1/4: analyze_pdfs_with_claude…")
             projektdaten = analyze_pdfs_with_claude(pdfs)
 
-            _set(phase="Exposé-Texte werden generiert …")
+            _set(status="processing", phase="Exposé-Texte werden generiert …")
             print(f"[{job_id}] Schritt 2/4: generate_expose_with_claude…")
             raw_expose = generate_expose_with_claude(projektdaten)
             print(f"[{job_id}]   Claude-Ausgabe: {len(raw_expose)} Felder")
             expose_data = {**PLATZHALTER, **raw_expose}
             expose_data["logo_initial"] = generate_logo_initial(expose_data.get("projekt_name", ""))
 
-        _set(phase="Bilder werden ausgewählt …")
+        _set(status="processing", phase="Bilder werden ausgewählt …")
         print(f"[{job_id}] Schritt 3/4: Bilder …")
 
         customer_images = {}
@@ -1659,7 +1689,7 @@ def _run_expose_job(job_id, pdfs, customer_image_list):
 
         expose_data = fill_image_placeholders(expose_data)
 
-        _set(phase="Präsentation wird erstellt …")
+        _set(status="processing", phase="Präsentation wird erstellt …")
         print(f"[{job_id}] Schritt 4/4: fill_pptx + PDF-Konvertierung …")
         tmpl_bytes = requests.get(TEMPLATE_URL, timeout=30).content
         pptx_bytes = fill_pptx(tmpl_bytes, expose_data, customer_images=customer_images)
@@ -1667,8 +1697,8 @@ def _run_expose_job(job_id, pdfs, customer_image_list):
         projekt_name = expose_data.get("projekt_name", "Expose").replace(" ", "_")
         pdf_bytes = convert_to_pdf(pptx_bytes, f"{projekt_name}.pptx")
 
-        # PDF in /tmp ablegen
-        pdf_path = f"/tmp/expose_{job_id}.pdf"
+        # PDF in /tmp/interpres_jobs/<job_id>.pdf ablegen
+        pdf_path = _job_pdf_path(job_id)
         with open(pdf_path, "wb") as fh:
             fh.write(pdf_bytes)
 
@@ -1724,15 +1754,13 @@ def generate_expose():
             return jsonify({"error": "Keine relevanten PDFs gefunden"}), 400
 
         job_id = str(uuid.uuid4())
-        with _jobs_lock:
-            _jobs[job_id] = {
-                "status": "processing",
-                "phase": "Wird gestartet …",
-                "created": _time.time(),
-                "pdf_path": None,
-                "name": None,
-                "error": None,
-            }
+        _write_job(job_id,
+                   status="processing",
+                   phase="Wird gestartet …",
+                   created=_time.time(),
+                   pdf_path=None,
+                   name=None,
+                   error=None)
 
         t = _threading.Thread(
             target=_run_expose_job,
@@ -1754,8 +1782,7 @@ def job_status(job_id):
         return make_response("", 204)
     if request.headers.get("X-API-Token") != API_TOKEN:
         return jsonify({"error": "Unauthorized"}), 401
-    with _jobs_lock:
-        job = _jobs.get(job_id)
+    job = _read_job(job_id)
     if not job:
         return jsonify({"error": "Job nicht gefunden"}), 404
     if job["status"] == "processing":
