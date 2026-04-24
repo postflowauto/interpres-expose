@@ -679,8 +679,11 @@ generateBtn.addEventListener('click', async () => {
 
           if (r.status === 200) {
             const contentType = r.headers.get('content-type') || '';
-            if (contentType.includes('application/pdf')) {
-              // Job fertig → PDF direkt aus dieser Antwort verwenden
+            const isFile = contentType.includes('application/pdf')
+                        || contentType.includes('application/vnd.openxmlformats')
+                        || contentType.includes('application/octet-stream');
+            if (isFile) {
+              // Job fertig → Datei direkt aus dieser Antwort verwenden
               setStep(4);
               setStepDetail('Fertig!', 'Das Exposé wird heruntergeladen.', 'none');
               const blob = await r.blob();
