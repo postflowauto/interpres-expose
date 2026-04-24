@@ -455,11 +455,18 @@ def fill_image_placeholders(data):
     filled = 0
     for placeholder_key, query in queries.items():
         data_key = placeholder_key.lower()
-        if data_key in data:
-            url = fetch_unsplash_image(query)
-            if url:
-                data[data_key] = url
-                filled += 1
+        if data_key not in data:
+            continue
+        # Skip WE images for empty WE types to avoid wasting API calls
+        # and to prevent duplicate_we_slides from triggering on bare URLs.
+        if data_key in ('bild_we_3', 'bild_we_4') and not (data.get('we_beispiel_3') or data.get('we_bereich_3')):
+            continue
+        if data_key in ('bild_we_5', 'bild_we_6') and not (data.get('we_beispiel_5') or data.get('we_bereich_5')):
+            continue
+        url = fetch_unsplash_image(query)
+        if url:
+            data[data_key] = url
+            filled += 1
     print(f"fill_image_placeholders: {filled}/{len(queries)} Bilder befüllt")
     return data
 
@@ -617,10 +624,13 @@ def duplicate_we_slides(prs, data):
 
     letters = 'abcdefghijklmnopqrstuvwxyz'
 
+    # Only use TEXT keys to decide — image URLs are pre-filled for all slots
+    # regardless of whether the WE type actually exists, so bild_we_N alone
+    # must NOT trigger a duplicate slide.
     extra_slides = 0
-    if data.get("we_beispiel_3") or data.get("bild_we_3"):
+    if data.get("we_beispiel_3") or data.get("we_bereich_3"):
         extra_slides = 1
-    if data.get("we_beispiel_5") or data.get("bild_we_5"):
+    if data.get("we_beispiel_5") or data.get("we_bereich_5"):
         extra_slides = 2
 
     # Find original WE slide
