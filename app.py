@@ -115,11 +115,11 @@ DUMMY_EXPOSE_DATA = {
     # ── WE-Typen: Original-Slide (Typen 1+2 nebeneinander) ───────────────────
     "we_beispiel_1": "WE 02", "we_bereich_1": "Wohnen & Schlafen",
     "we_beispiel_2": "WE 07", "we_bereich_2": "Wohnen & Schlafen",
-    "we_flaeche_1": "Wohnen/Schlafen – 23,99 m²",
-    "we_flaeche_2": "Bad – 5,36 m²",
-    "we_flaeche_3": "Balkon – 5,34 m²",
-    "we_flaeche_4": "Flur – 2,33 m²",
-    "we_flaeche_5": "Gesamt – 32,02 m²",
+    "we_flaeche_1": "23,99 m²",
+    "we_flaeche_2": "5,36 m²",
+    "we_flaeche_3": "5,34 m²",
+    "we_flaeche_4": "2,33 m²",
+    "we_flaeche_5": "32,02 m²",
     "we_typ_beschreibung": "1-Zimmer-Wohnung mit Balkon. Optimal für Studierende und Berufspendler.",
     # Duplikat-Slide (Typen 3+4), leer = kein Duplikat
     "we_beispiel_3": "", "we_bereich_3": "",
@@ -519,8 +519,9 @@ def generate_expose_with_claude(projektdaten):
         f"Das Template zeigt zwei WE-Varianten nebeneinander (linke + rechte Spalte):\n"
         f"- we_beispiel_1 / we_beispiel_2: Beispiel-WE-Nummern links/rechts, z.B. 'WE 02'\n"
         f"- we_bereich_1 / we_bereich_2: Bereich/Lage z.B. 'Wohnen & Schlafen'\n"
-        f"- we_flaeche_1 bis we_flaeche_5: Raum-Flächen-Aufstellung Format 'Raumname – XX,XX m²'\n"
-        f"  z.B. 'Wohnen/Schlafen – 23,99 m²', letzte Zeile 'Gesamt – XX,XX m²'\n"
+        f"- we_flaeche_1 bis we_flaeche_5: NUR die Quadratmeterzahl, z.B. '23,99 m²'\n"
+        f"  Der Raumname steht bereits in der linken Tabellenspalte (hardcoded).\n"
+        f"  Letzte Zeile (we_flaeche_5): Gesamtfläche als 'XX,XX m²'\n"
         f"- we_typ_beschreibung: 1–2 Sätze Beschreibung des Typs\n"
         f"Falls Projektdaten mehr als einen Grundrisstyp enthalten: fülle auch\n"
         f"we_beispiel_3/4, we_bereich_3/4 für einen zweiten WE-Slide aus.\n\n"
@@ -746,6 +747,8 @@ def fill_pptx(template_bytes, data):
 
     # Regex that matches {{KEY}}, {{KEY|suffix}}, {{KEY | suffix}} (spaces ok around pipe)
     PLACEHOLDER_RE = re.compile(r'\{\{\s*([A-Z0-9_]+)\s*(?:\|[^}]*)?\}\}', re.IGNORECASE)
+    # Matches the |Xpt font-size hint inside a placeholder, e.g. {{MIN_UNI|50pt}}
+    _SIZE_HINT_RE = re.compile(r'\|\s*(\d+)\s*pt\b', re.IGNORECASE)
 
     def replace_text(text):
         """Replace all placeholders in a string using REPL_MAP."""
@@ -759,17 +762,28 @@ def fill_pptx(template_bytes, data):
 
         Strategy: reassemble all runs into one string, replace, write back into
         runs[0] preserving its formatting, clear all other runs.
+        If the placeholder contains a |Xpt font-size hint (e.g. {{MIN_UNI|50pt}}),
+        apply that size to the replacement run — Canva PPTX exports lose font sizes.
         """
         if not para.runs:
             return
         full_text = "".join(r.text for r in para.runs)
         if "{{" not in full_text:
             return
+        # Extract font-size hint BEFORE stripping the suffix
+        size_hint = None
+        sh = _SIZE_HINT_RE.search(full_text)
+        if sh:
+            size_hint = int(sh.group(1))
         modified = replace_text(full_text)
         if modified != full_text:
             para.runs[0].text = modified
             for run in para.runs[1:]:
                 run.text = ""
+            # Apply explicit font size if hint was present
+            if size_hint is not None:
+                from pptx.util import Pt
+                para.runs[0].font.size = Pt(size_hint)
 
     def replace_in_textframe(tf):
         """Replace placeholders across entire text frame, including cross-paragraph splits.
