@@ -84,7 +84,7 @@ DUMMY_EXPOSE_DATA = {
     "text_nachhaltig_3": "Photovoltaik", "text_nachhaltig_4": "E-Mobilität",
     "text_standort_1": "Zentral in Hannover-Linden.", "text_standort_2": "Alles in Laufnähe.",
     "stadt_einwohner": "535.932", "stadt_bip": "38.500", "stadt_mietsteigerung": "+3,2%",
-    "stadt_studierende": "48.000", "bundesland_bip": "310 Mrd. EUR",
+    "stadt_studierende": "48.000", "bundesland_bip": "310 Mrd.",
     "text_einwohner_detail": "Hannover wächst kontinuierlich.",
     "text_bip_detail": "Niedersachsen – starke Industrie und Dienstleistungen.",
     "text_mietsteigerung_detail": "Stabile Mietsteigerungen über dem Bundesschnitt.",
@@ -770,7 +770,8 @@ def generate_expose_with_claude(projektdaten):
         f"## STADTSTATISTIKEN ({stadt}):\n"
         f"Verwende echte, aktuelle Zahlen für {stadt}:\n"
         f"stadt_einwohner: Einwohnerzahl als formatierte Zahl, z.B. '245.279'\n"
-        f"stadt_bip: BIP des Bundeslandes in Mrd. EUR, z.B. '78,4 Mrd.'\n"
+        f"bundesland_bip: BIP des Bundeslandes NUR als Zahl+Einheit OHNE 'EUR'/'Euro', z.B. '310 Mrd.' oder '78,4 Mrd.'\n"
+        f"  (Das Template-Label schreibt 'in €' bereits dahinter – niemals doppelt!)\n"
         f"stadt_mietsteigerung: Mietsteigerung seit 2017/2018, z.B. '+31%'\n"
         f"stadt_studierende: Studierende an Hochschulen, z.B. '21.000'\n\n"
 
@@ -1422,6 +1423,22 @@ def fill_pptx(template_bytes, data, customer_images=None):
                 process_shape(slide, shape, image_data)
             except Exception as e:
                 print(f"Shape-Fehler slide={slide.slide_id} shape={shape.name}: {e}")
+
+    # Cleanup-Pass: Template-Texte die "in Euro" statt "in €" enthalten korrigieren
+    _euro_fixes = [("in Euro", "in €"), (" Euro", " €"), ("in EUR", "in €"), (" EUR", " €")]
+    for slide in prs.slides:
+        for shape in slide.shapes:
+            shapes_to_check = [shape]
+            if shape.shape_type == 6:
+                shapes_to_check += list(shape.shapes)
+            for s in shapes_to_check:
+                if not s.has_text_frame:
+                    continue
+                for para in s.text_frame.paragraphs:
+                    for run in para.runs:
+                        for old, new in _euro_fixes:
+                            if old in run.text:
+                                run.text = run.text.replace(old, new)
 
     out = io.BytesIO()
     prs.save(out)
