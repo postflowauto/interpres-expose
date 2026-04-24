@@ -687,8 +687,15 @@ def analyze_pdfs_with_claude(pdfs):
         timeout=120
     )
     resp.raise_for_status()
+    print(f"analyze_pdfs_with_claude: HTTP {resp.status_code}, stop_reason={resp.json().get('stop_reason')}")
     text = resp.json()["content"][0]["text"].replace("```json", "").replace("```", "").strip()
-    return json.loads(text)
+    try:
+        result = json.loads(text)
+        print(f"  Projektdaten extrahiert: {list(result.keys())}")
+        return result
+    except json.JSONDecodeError as e:
+        print(f"  JSON-Fehler in analyze_pdfs: {e} – letzten 200 Zeichen: ...{text[-200:]}")
+        raise
 
 def generate_expose_with_claude(projektdaten):
     stadt = projektdaten.get('stadt', 'der Stadt')
@@ -790,15 +797,41 @@ def generate_expose_with_claude(projektdaten):
         timeout=300
     )
     resp.raise_for_status()
+    resp_data = resp.json()
+    stop_reason = resp_data.get("stop_reason", "unknown")
+    print(f"generate_expose_with_claude: stop_reason={stop_reason}")
+
     json_text = ""
-    for block in resp.json()["content"]:
+    for block in resp_data.get("content", []):
         if block.get("type") == "text":
             json_text = block["text"]
+
     json_text = json_text.replace("```json", "").replace("```", "").strip()
     if not json_text:
-        raise ValueError("Claude hat keinen Text zurückgegeben. Stop-Reason: " +
-                         str(resp.json().get("stop_reason")))
-    return json.loads(json_text)
+        raise ValueError(f"Claude hat keinen Text zurückgegeben. stop_reason={stop_reason}")
+
+    # Wenn Claude durch max_tokens abgeschnitten wurde → JSON reparieren
+    if stop_reason == "max_tokens":
+        print("  WARNUNG: Antwort durch max_tokens abgeschnitten – versuche JSON zu reparieren")
+        # Finde letztes vollständiges Key-Value-Paar und schließe JSON
+        last_comma = json_text.rfind('",')
+        last_quote = json_text.rfind('"')
+        cut = max(last_comma, last_quote)
+        if cut > 0:
+            json_text = json_text[:cut + 1]
+            # Schließe alle offenen Objekte/Arrays
+            depth = json_text.count('{') - json_text.count('}')
+            json_text += '}' * max(depth, 1)
+        print(f"  Repariertes JSON (letzte 100 Zeichen): ...{json_text[-100:]}")
+
+    try:
+        return json.loads(json_text)
+    except json.JSONDecodeError as e:
+        print(f"  JSON-Parse-Fehler: {e}")
+        print(f"  Letzten 500 Zeichen: ...{json_text[-500:]}")
+        # Fallback: gib leeres Dict zurück, PLATZHALTER-Defaults werden benutzt
+        print("  Fallback: verwende leere Felder (PLATZHALTER-Defaults)")
+        return {}
 
 # Regex: matcht {{KEY}}, {{KEY-SPLIT}}, {{KEY|suffix}}, {{KEY | suffix}}
 # Bindestriche im Key werden beim Lookup entfernt (z.B. {{PRODUKT_BESCHREI-BUNG}})
@@ -1607,11 +1640,15 @@ def generate_expose():
             print("TEST_MODE aktiv – überspringe Claude API")
             expose_data = DUMMY_EXPOSE_DATA.copy()
         else:
+            print("Schritt 1/4: analyze_pdfs_with_claude…")
             projektdaten = analyze_pdfs_with_claude(pdfs)
+            print("Schritt 2/4: generate_expose_with_claude…")
             raw_expose = generate_expose_with_claude(projektdaten)
+            print(f"  Claude-Ausgabe: {len(raw_expose)} Felder")
             # Merge: PLATZHALTER-Defaults sicherstellen, damit alle bild_* Keys existieren
             expose_data = {**PLATZHALTER, **raw_expose}
             expose_data["logo_initial"] = generate_logo_initial(expose_data.get("projekt_name", ""))
+            print("Schritt 3/4: fill_image_placeholders…")
 
         # Kundenbilder klassifizieren (Vorrang vor Unsplash)
         customer_images = {}
@@ -1625,10 +1662,13 @@ def generate_expose():
                          if k.startswith("bild_") and isinstance(v, str) and v.startswith("http"))
         print(f"generate_expose: {bild_count} bild_* URLs, {len(customer_images)} Kundenbilder vor fill_pptx")
 
+        print("Schritt 4/4: Template laden + fill_pptx…")
         tmpl_bytes = requests.get(TEMPLATE_URL, timeout=30).content
         pptx_bytes = fill_pptx(tmpl_bytes, expose_data, customer_images=customer_images)
+        print(f"  fill_pptx fertig: {len(pptx_bytes)//1024} KB PPTX")
 
         projekt_name = expose_data.get("projekt_name", "Expose").replace(" ", "_")
+        print("convert_to_pdf starten…")
         pdf_bytes = convert_to_pdf(pptx_bytes, f"{projekt_name}.pptx")
 
         return send_file(io.BytesIO(pdf_bytes), mimetype="application/pdf",
