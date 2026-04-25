@@ -436,13 +436,15 @@ def extract_pdfs_from_zip(zip_bytes):
 
     return selected
 
-def _extract_images_from_pdf_bytes(pdf_bytes, pdf_name):
-    """Extrahiert eingebettete Bilder aus einem PDF via PyMuPDF."""
+def _extract_images_from_pdf_bytes(pdf_bytes, pdf_name, seen_hashes):
+    """Extrahiert eingebettete Bilder aus PDF via PyMuPDF. Dedupliziert via Hash."""
+    import hashlib
     images = []
     try:
         import fitz  # PyMuPDF
         doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-        for page_num in range(min(len(doc), 30)):  # max 30 Seiten
+        n_pages = min(len(doc), 50)
+        for page_num in range(n_pages):
             for img_idx, img in enumerate(doc[page_num].get_images(full=True)):
                 xref = img[0]
                 try:
@@ -451,18 +453,23 @@ def _extract_images_from_pdf_bytes(pdf_bytes, pdf_name):
                     ext = "." + base_image["ext"]
                     if ext not in {'.jpg', '.jpeg', '.png', '.webp', '.bmp'}:
                         continue
-                    if len(raw) < 15000:   # Thumbnails/Icons/Logos überspringen
+                    if len(raw) < 20000:  # < 20 KB = Logo/Icon/Decoration
                         continue
+                    # Deduplizieren (Logo erscheint auf jeder Seite!)
+                    h = hashlib.md5(raw).hexdigest()
+                    if h in seen_hashes:
+                        continue
+                    seen_hashes.add(h)
                     images.append({
                         'name': f"{pdf_name}_s{page_num+1}_b{img_idx+1}{ext}",
                         'bytes': raw,
                         'ext': ext,
                         'b64': base64.b64encode(raw).decode(),
+                        'size': len(raw),
                     })
-                    if len(images) >= 20:
-                        return images
                 except Exception:
                     continue
+        doc.close()
     except ImportError:
         print("  PyMuPDF nicht verfügbar – keine PDF-Bildextraktion")
     except Exception as e:
@@ -472,17 +479,21 @@ def _extract_images_from_pdf_bytes(pdf_bytes, pdf_name):
 
 def extract_images_from_zip(zip_bytes):
     """
-    Extrahiert Bilddateien aus einer ZIP:
+    Extrahiert Bilder aus ZIP:
     1. Direkte Bilddateien (.jpg/.png/.webp)
-    2. In PDFs eingebettete Bilder (via PyMuPDF)
-    Gibt max. 20 Bilder zurück als Liste von {name, bytes, ext, b64}.
+    2. In PDFs eingebettete Bilder (via PyMuPDF, dedupliziert)
+    Sortiert absteigend nach Größe → größte/wichtigste Bilder zuerst.
+    Gibt max. 30 Bilder zurück.
     """
+    import hashlib
     IMAGE_EXTS = {'.jpg', '.jpeg', '.png', '.webp'}
     images = []
+    seen_hashes = set()
     try:
         with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
             names = zf.namelist()
-            # Erst direkte Bilddateien
+
+            # 1. Direkte Bilddateien
             for name in names:
                 if '__MACOSX' in name or name.startswith('.'):
                     continue
@@ -490,38 +501,45 @@ def extract_images_from_zip(zip_bytes):
                 if ext not in IMAGE_EXTS:
                     continue
                 raw = zf.read(name)
-                if len(raw) < 5000:
+                if len(raw) < 8000:  # Skip Thumbnails
                     continue
+                h = hashlib.md5(raw).hexdigest()
+                if h in seen_hashes:
+                    continue
+                seen_hashes.add(h)
                 images.append({
                     'name': name.split('/')[-1],
                     'bytes': raw,
                     'ext': ext,
                     'b64': base64.b64encode(raw).decode(),
+                    'size': len(raw),
                 })
-                if len(images) >= 20:
-                    break
 
-            # Falls keine/wenige Bilder gefunden: aus PDFs extrahieren
-            if len(images) < 5:
-                for name in names:
-                    if '__MACOSX' in name or name.startswith('.'):
-                        continue
-                    if not name.lower().endswith('.pdf'):
-                        continue
-                    try:
-                        pdf_raw = zf.read(name)
-                        pdf_imgs = _extract_images_from_pdf_bytes(pdf_raw, name.split('/')[-1])
-                        images.extend(pdf_imgs)
-                        print(f"  PDF {name.split('/')[-1]}: {len(pdf_imgs)} Bilder extrahiert")
-                    except Exception as e:
-                        print(f"  PDF lesen Fehler ({name}): {e}")
-                    if len(images) >= 20:
-                        break
+            # 2. Aus PDFs extrahieren (immer, nicht nur als Fallback)
+            for name in names:
+                if '__MACOSX' in name or name.startswith('.'):
+                    continue
+                if not name.lower().endswith('.pdf'):
+                    continue
+                try:
+                    pdf_raw = zf.read(name)
+                    pdf_imgs = _extract_images_from_pdf_bytes(
+                        pdf_raw, name.split('/')[-1], seen_hashes
+                    )
+                    images.extend(pdf_imgs)
+                    print(f"  PDF {name.split('/')[-1]}: {len(pdf_imgs)} Bilder")
+                except Exception as e:
+                    print(f"  PDF lesen Fehler ({name}): {e}")
 
     except Exception as e:
         print(f"extract_images_from_zip Fehler: {e}")
-    images = images[:20]
-    print(f"Bilder gesamt in ZIP: {len(images)} (direkt + aus PDFs)")
+
+    # Sortieren: größte zuerst (= wichtigste/Hero-Bilder)
+    images.sort(key=lambda x: x.get('size', 0), reverse=True)
+    images = images[:30]
+    print(f"Bilder gesamt: {len(images)} (sortiert nach Größe)")
+    for i, img in enumerate(images[:10]):
+        print(f"    {i+1}. {img['name']} ({img['size']//1024} KB)")
     return images
 
 
@@ -585,76 +603,95 @@ def classify_and_assign_customer_images(images):
         print(f"  {len(result)} Bilder zugewiesen (regelbasiert)")
         return result
 
-    # Claude Vision: max. 10 Bilder (Kostenkontrolle)
-    batch = images[:10]
-    content = []
-    for i, img in enumerate(batch):
-        if img['ext'] in ('.jpg', '.jpeg'):
-            media_type = 'image/jpeg'
-        elif img['ext'] == '.png':
-            media_type = 'image/png'
-        else:
-            media_type = 'image/webp'
-        content.append({
-            "type": "image",
-            "source": {"type": "base64", "media_type": media_type, "data": img['b64']}
-        })
-        content.append({"type": "text", "text": f"Bild {i+1}: {img['name']}"})
-
+    # Claude Vision: bis zu 25 Bilder, in Batches à 10
+    all_images = images[:25]
     slot_list = "\n".join(
         f"- {cat}: {', '.join(slots[:4])}" + (" …" if len(slots) > 4 else "")
         for cat, slots in CUSTOMER_IMAGE_SLOTS.items()
     )
-    content.append({"type": "text", "text": (
-        "Analysiere diese Immobilien-Bilder und weise jedem Bild die passende Kategorie zu.\n\n"
-        "Kategorien und ihre Platzhalter:\n" + slot_list + "\n\n"
-        "Regeln:\n"
-        "- grundriss: NUR echte Grundriss-Zeichnungen mit Raumaufteilung/Maßen\n"
-        "- lageplan: NUR Karten, Stadtpläne, Lagepläne\n"
-        "- aussenansicht: Gebäude-Außenfotos, Fassade, Architektur\n"
-        "- innenansicht: Innenräume, Wohnung, Möbel, Küche, Bad\n"
-        "- quartier: Straßen, Stadtteile, Umgebung\n"
-        "- amenity: Ausstattungsmerkmale (Fahrrad, Solar, Gym, Garten)\n"
-        "- collage: Sonstige/dekorative Bilder\n\n"
+    classify_prompt = (
+        "Analysiere diese Immobilien-Bilder und weise jedem Bild EINE passende Kategorie zu.\n\n"
+        "Kategorien:\n" + slot_list + "\n\n"
+        "STRENGE REGELN:\n"
+        "- grundriss: NUR Grundriss-Zeichnungen mit Raumaufteilung/Wänden/Maßen (technische Zeichnung)\n"
+        "- lageplan: NUR Karten/Stadtpläne/Lagepläne (Vogelperspektive auf Stadt/Quartier)\n"
+        "- aussenansicht: Gebäude-Außenfotos, Fassade, Architektur, Rendering von außen\n"
+        "- innenansicht: Innenräume, Wohnung, Möbel, Küche, Bad, Visualisierungen von innen\n"
+        "- quartier: Straßen, Stadtteile, Nachbarschaft, urbane Umgebung\n"
+        "- amenity: Einzelne Features (Fahrrad, Solar, Gym, Garten, Aufzug, Concierge)\n"
+        "- collage: Logos, Schemata, Diagramme, dekorative Grafiken (NIEMALS Fotos hier!)\n\n"
         "Antworte NUR mit JSON: {\"1\": \"kategorie\", \"2\": \"kategorie\", ...}\n"
-        "Bild-Nummern wie oben angegeben. Jedes Bild bekommt genau eine Kategorie."
-    )})
+        "Jedes Bild bekommt genau EINE Kategorie. Keine Erklärungen."
+    )
 
-    try:
-        resp = requests.post(
-            "https://api.anthropic.com/v1/messages",
-            headers={"x-api-key": CLAUDE_API_KEY, "anthropic-version": "2023-06-01",
-                     "content-type": "application/json"},
-            json={"model": "claude-haiku-4-5-20251001", "max_tokens": 300,
-                  "messages": [{"role": "user", "content": content}]},
-            timeout=60
-        )
-        resp.raise_for_status()
-        json_text = resp.json()["content"][0]["text"]
-        json_text = json_text.replace("```json", "").replace("```", "").strip()
-        assignments = json.loads(json_text)
-    except Exception as e:
-        print(f"classify_customer_images Claude-Fehler: {e} → regelbasierter Fallback")
-        result = _rule_based(images)
-        print(f"  {len(result)} Bilder zugewiesen (regelbasiert)")
-        return result
+    all_assignments = {}  # global_idx → category
+    BATCH_SIZE = 10
 
-    # Kategorie → nächsten freien Slot zuweisen
-    slot_counters = {cat: 0 for cat in CUSTOMER_IMAGE_SLOTS}
-    result = {}
-    for img_num_str, cat in assignments.items():
-        idx = int(img_num_str) - 1
-        if not (0 <= idx < len(batch)):
-            continue
+    for batch_start in range(0, len(all_images), BATCH_SIZE):
+        batch = all_images[batch_start:batch_start + BATCH_SIZE]
+        content = []
+        for i, img in enumerate(batch):
+            mt = ('image/jpeg' if img['ext'] in ('.jpg', '.jpeg')
+                  else 'image/png' if img['ext'] == '.png'
+                  else 'image/webp')
+            content.append({"type": "image", "source": {
+                "type": "base64", "media_type": mt, "data": img['b64']
+            }})
+            content.append({"type": "text", "text": f"Bild {i+1}: {img['name']}"})
+        content.append({"type": "text", "text": classify_prompt})
+
+        try:
+            resp = requests.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={"x-api-key": CLAUDE_API_KEY, "anthropic-version": "2023-06-01",
+                         "content-type": "application/json"},
+                json={"model": "claude-haiku-4-5-20251001", "max_tokens": 500,
+                      "messages": [{"role": "user", "content": content}]},
+                timeout=90
+            )
+            resp.raise_for_status()
+            json_text = resp.json()["content"][0]["text"]
+            json_text = json_text.replace("```json", "").replace("```", "").strip()
+            batch_assignments = json.loads(json_text)
+            # Mapping local_idx (1-basiert) → global_idx
+            for local_str, cat in batch_assignments.items():
+                global_idx = batch_start + int(local_str) - 1
+                if 0 <= global_idx < len(all_images):
+                    all_assignments[global_idx] = cat
+            print(f"  Batch {batch_start//BATCH_SIZE + 1}: {len(batch_assignments)} Bilder klassifiziert")
+        except Exception as e:
+            print(f"  Batch {batch_start//BATCH_SIZE + 1} Claude-Fehler: {e}")
+            # Fallback nur für diesen Batch
+            for i, img in enumerate(batch):
+                if (batch_start + i) not in all_assignments:
+                    all_assignments[batch_start + i] = 'aussenansicht'
+
+    if not all_assignments:
+        print("classify_customer_images: keine Klassifizierung → regelbasierter Fallback")
+        return _rule_based(all_images)
+
+    # Sortiere Bilder pro Kategorie nach Größe (größte zuerst → wichtigste Slots)
+    by_category = {cat: [] for cat in CUSTOMER_IMAGE_SLOTS}
+    for global_idx, cat in all_assignments.items():
         cat = cat.strip().lower()
         if cat not in CUSTOMER_IMAGE_SLOTS:
             cat = 'aussenansicht'
+        by_category[cat].append((all_images[global_idx]['size'], global_idx))
+
+    # Innerhalb jeder Kategorie: größte zuerst
+    for cat in by_category:
+        by_category[cat].sort(reverse=True)
+
+    # Slots befüllen
+    result = {}
+    for cat, items in by_category.items():
         slots = CUSTOMER_IMAGE_SLOTS[cat]
-        slot_idx = slot_counters[cat]
-        if slot_idx < len(slots):
-            result[slots[slot_idx]] = batch[idx]['bytes']
-            slot_counters[cat] += 1
-            print(f"  Bild {img_num_str} ({batch[idx]['name']}) → {slots[slot_idx]}")
+        for slot_idx, (size, global_idx) in enumerate(items):
+            if slot_idx >= len(slots):
+                break
+            img = all_images[global_idx]
+            result[slots[slot_idx]] = img['bytes']
+            print(f"  {img['name']} ({size//1024} KB) → {slots[slot_idx]} [{cat}]")
 
     print(f"classify_customer_images: {len(result)} Bilder zugewiesen (Claude Vision)")
     return result
@@ -1772,8 +1809,11 @@ def _run_expose_job(job_id, pdfs, customer_image_list):
     try:
         _set(status="processing", phase="Dokumente werden analysiert …")
 
-        # Max. 3 PDFs senden
-        pdfs = sorted(pdfs, key=lambda x: x["priority"])[:3]
+        # Bis zu 6 PDFs senden (mehr Kontext = bessere Datenextraktion)
+        pdfs = sorted(pdfs, key=lambda x: x["priority"])[:6]
+        print(f"[{job_id}] sende {len(pdfs)} PDFs an Claude:")
+        for p in pdfs:
+            print(f"    [Prio {p['priority']}] {p['folder']} / {p['name']}")
 
         if TEST_MODE:
             print(f"[{job_id}] TEST_MODE – überspringe Claude API")
