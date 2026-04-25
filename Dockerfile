@@ -1,11 +1,13 @@
 FROM python:3.11-slim
 
-# LibreOffice + minimale System-Abhängigkeiten
+# LibreOffice Impress (nur was für PPTX→PDF benötigt wird)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libreoffice \
     libreoffice-impress \
+    libreoffice-common \
     fonts-liberation \
     fonts-dejavu-core \
+    fontconfig \
+    && fc-cache -fv \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 

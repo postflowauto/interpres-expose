@@ -6,4 +6,4 @@ services:
       - key: API_TOKEN
         generateValue: false
         value: interpres-secret-2026
-    plan: free
+    plan: starter

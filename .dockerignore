@@ -1,0 +1,11 @@
+.git
+.DS_Store
+*.pptx
+*.pdf
+__pycache__
+*.pyc
+*.pyo
+.env
+.env.*
+test_local.py
+n8n_pptx_befuellen_render.js
