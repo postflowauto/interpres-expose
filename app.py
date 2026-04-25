@@ -443,7 +443,7 @@ def _extract_images_from_pdf_bytes(pdf_bytes, pdf_name, seen_hashes):
     try:
         import fitz  # PyMuPDF
         doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-        n_pages = min(len(doc), 50)
+        n_pages = min(len(doc), 3)  # max 3 Seiten pro PDF → weniger RAM
         for page_num in range(n_pages):
             for img_idx, img in enumerate(doc[page_num].get_images(full=True)):
                 xref = img[0]
@@ -515,28 +515,34 @@ def extract_images_from_zip(zip_bytes):
                     'size': len(raw),
                 })
 
-            # 2. Aus PDFs extrahieren (immer, nicht nur als Fallback)
-            for name in names:
-                if '__MACOSX' in name or name.startswith('.'):
-                    continue
-                if not name.lower().endswith('.pdf'):
-                    continue
+            # 2. Aus PDFs extrahieren — max 8 größte PDFs (RAM-Limit)
+            pdf_entries = [
+                (n, zf.getinfo(n).file_size)
+                for n in names
+                if n.lower().endswith('.pdf')
+                and '__MACOSX' not in n and not n.startswith('.')
+            ]
+            pdf_entries.sort(key=lambda x: x[1], reverse=True)  # größte zuerst
+            for pdf_name_in_zip, _ in pdf_entries[:8]:
+                if len(images) >= 20:  # früh stoppen
+                    break
                 try:
-                    pdf_raw = zf.read(name)
+                    pdf_raw = zf.read(pdf_name_in_zip)
                     pdf_imgs = _extract_images_from_pdf_bytes(
-                        pdf_raw, name.split('/')[-1], seen_hashes
+                        pdf_raw, pdf_name_in_zip.split('/')[-1], seen_hashes
                     )
+                    del pdf_raw  # sofort freigeben
                     images.extend(pdf_imgs)
-                    print(f"  PDF {name.split('/')[-1]}: {len(pdf_imgs)} Bilder")
+                    print(f"  PDF {pdf_name_in_zip.split('/')[-1]}: {len(pdf_imgs)} Bilder")
                 except Exception as e:
-                    print(f"  PDF lesen Fehler ({name}): {e}")
+                    print(f"  PDF lesen Fehler ({pdf_name_in_zip}): {e}")
 
     except Exception as e:
         print(f"extract_images_from_zip Fehler: {e}")
 
     # Sortieren: größte zuerst (= wichtigste/Hero-Bilder)
     images.sort(key=lambda x: x.get('size', 0), reverse=True)
-    images = images[:30]
+    images = images[:15]  # max 15 statt 30 → weniger RAM
     print(f"Bilder gesamt: {len(images)} (sortiert nach Größe)")
     for i, img in enumerate(images[:10]):
         print(f"    {i+1}. {img['name']} ({img['size']//1024} KB)")
@@ -1171,9 +1177,23 @@ def fill_pptx(template_bytes, data, customer_images=None):
     bild_keys_with_url = [k for k in bild_keys_total
                           if isinstance(data[k], str) and data[k].startswith("http")
                           and k not in image_data]
-    print(f"fill_pptx: {len(bild_keys_total)} bild_* Keys, {len(bild_keys_with_url)} noch per URL zu laden")
+    # Max 25 Hintergrundbilder laden (RAM-Limit: 25×400KB=~10MB)
+    # Priorität: Titelbilder > Außen > Stadt > Ausstattung > Rest
+    _PRIO_PREFIXES = ["bild_titel", "bild_projekt", "bild_quartier", "bild_greenliving",
+                      "bild_interior", "bild_ausstattung", "bild_stadt", "bild_lageplan",
+                      "bild_ansicht", "bild_standort", "bild_grundriss_intro",
+                      "bild_we_1", "bild_we_2", "bild_amenity", "bild_collage",
+                      "bild_hotel", "bild_rechtlich"]
+    def _sort_key(k):
+        for i, prefix in enumerate(_PRIO_PREFIXES):
+            if k.startswith(prefix):
+                return i
+        return 99
+    bild_keys_with_url_sorted = sorted(bild_keys_with_url, key=_sort_key)[:25]
+    print(f"fill_pptx: {len(bild_keys_total)} bild_* Keys, "
+          f"{len(bild_keys_with_url)} URLs, lade {len(bild_keys_with_url_sorted)} (RAM-Limit)")
 
-    for key in bild_keys_with_url:
+    for key in bild_keys_with_url_sorted:
         value = data[key]
         try:
             resp = requests.get(value, timeout=15)
@@ -1181,7 +1201,7 @@ def fill_pptx(template_bytes, data, customer_images=None):
                 image_data[key] = resp.content
                 print(f"  ✓ Bild geladen: {key} ({len(resp.content)//1024} KB)")
             else:
-                print(f"  ✗ Bild HTTP-Fehler {key}: {resp.status_code}  URL={value[:80]}")
+                print(f"  ✗ Bild HTTP-Fehler {key}: {resp.status_code}")
         except Exception as e:
             print(f"  ✗ Bild Download-Fehler {key}: {e}")
 
@@ -1829,6 +1849,8 @@ def _run_expose_job(job_id, zip_paths):
                 customer_image_list.extend(extract_images_from_zip(zip_bytes))
                 print(f"[{job_id}] ZIP {os.path.basename(zip_path)}: "
                       f"{len(pdfs)} PDFs, {len(customer_image_list)} Bilder")
+                del zip_bytes  # ZIP-Bytes sofort freigeben → RAM sparen
+                import gc; gc.collect()
             except Exception as e:
                 print(f"[{job_id}] ZIP-Fehler {zip_path}: {e}")
 
