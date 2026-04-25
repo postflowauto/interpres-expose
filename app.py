@@ -1801,12 +1801,38 @@ def _cleanup_old_jobs():
     except Exception:
         pass
 
-def _run_expose_job(job_id, pdfs, customer_image_list):
-    """Läuft in einem Background-Thread. Schreibt Status+PDF nach /tmp."""
+def _run_expose_job(job_id, zip_paths):
+    """Läuft in einem Background-Thread. Liest ZIPs von Disk, schreibt Status+PDF nach /tmp."""
     def _set(**kw):
         _write_job(job_id, **kw)
 
+    input_dir = os.path.join(_JOB_DIR, f"input_{job_id}")
+
     try:
+        # ── Schritt 0: ZIP-Dateien lesen + Extraktion (im Thread!) ────────────
+        _set(status="processing", phase="Dateien werden verarbeitet …")
+        pdfs = []
+        customer_image_list = []
+
+        for zip_path in zip_paths:
+            try:
+                with open(zip_path, "rb") as f:
+                    zip_bytes = f.read()
+                pdfs.extend(extract_pdfs_from_zip(zip_bytes))
+                customer_image_list.extend(extract_images_from_zip(zip_bytes))
+                print(f"[{job_id}] ZIP {os.path.basename(zip_path)}: "
+                      f"{len(pdfs)} PDFs, {len(customer_image_list)} Bilder")
+            except Exception as e:
+                print(f"[{job_id}] ZIP-Fehler {zip_path}: {e}")
+
+        # Input-Verzeichnis aufräumen
+        shutil.rmtree(input_dir, ignore_errors=True)
+
+        if not pdfs:
+            _set(status="error", phase="Fehler",
+                 error="Keine relevanten PDFs im Datenraum gefunden.")
+            return
+
         _set(status="processing", phase="Dokumente werden analysiert …")
 
         # Bis zu 6 PDFs senden (mehr Kontext = bessere Datenextraktion)
@@ -1875,50 +1901,67 @@ def _run_expose_job(job_id, pdfs, customer_image_list):
         err = f"{e}\n{tb.format_exc()}"
         print(f"[{job_id}] ✗ Fehler: {err[:500]}")
         _set(status="error", phase="Fehler", error=str(e))
+    finally:
+        # Input-Verzeichnis aufräumen (falls noch nicht geschehen)
+        shutil.rmtree(input_dir, ignore_errors=True)
 
 
 @app.route("/generate-expose", methods=["POST"])
 def generate_expose():
+    """Empfängt ZIPs, speichert sie auf Disk und startet sofort den Hintergrund-Job.
+    KEINE schwere Verarbeitung hier – alles im Thread – damit kein 30s-Proxy-Timeout."""
     if request.headers.get("X-API-Token") != API_TOKEN:
         return jsonify({"error": "Unauthorized"}), 401
     try:
         _cleanup_old_jobs()
-        pdfs = []
-        customer_image_list = []
+
+        job_id = str(uuid.uuid4())
+        input_dir = os.path.join(_JOB_DIR, f"input_{job_id}")
+        os.makedirs(input_dir, exist_ok=True)
+
+        zip_paths = []
 
         session_ids = request.form.getlist("session_ids")
         if session_ids:
-            for sid in session_ids:
+            for i, sid in enumerate(session_ids):
                 zip_bytes = assemble_session(sid)
-                pdfs.extend(extract_pdfs_from_zip(zip_bytes))
-                customer_image_list.extend(extract_images_from_zip(zip_bytes))
+                zip_path = os.path.join(input_dir, f"zip_{i}.zip")
+                with open(zip_path, "wb") as fh:
+                    fh.write(zip_bytes)
+                zip_paths.append(zip_path)
+                print(f"[{job_id}] Session {sid}: {len(zip_bytes)//1024} KB gespeichert")
 
         elif request.content_type and "multipart" in request.content_type:
             uploaded = request.files.getlist("files") or request.files.getlist("file")
             if not uploaded:
+                shutil.rmtree(input_dir, ignore_errors=True)
                 return jsonify({"error": "Keine Dateien im Request"}), 400
-            for f in uploaded:
+            for i, f in enumerate(uploaded):
                 raw = f.read()
-                pdfs.extend(extract_pdfs_from_zip(raw))
-                customer_image_list.extend(extract_images_from_zip(raw))
+                zip_path = os.path.join(input_dir, f"upload_{i}.zip")
+                with open(zip_path, "wb") as fh:
+                    fh.write(raw)
+                zip_paths.append(zip_path)
+
         else:
             body = request.get_json(force=True) or {}
-            if "zip_base64_list" in body:
-                for b64 in body["zip_base64_list"]:
-                    raw = base64.b64decode(b64)
-                    pdfs.extend(extract_pdfs_from_zip(raw))
-                    customer_image_list.extend(extract_images_from_zip(raw))
-            elif "zip_base64" in body:
-                raw = base64.b64decode(body["zip_base64"])
-                pdfs.extend(extract_pdfs_from_zip(raw))
-                customer_image_list.extend(extract_images_from_zip(raw))
-            else:
+            b64_list = body.get("zip_base64_list") or (
+                [body["zip_base64"]] if "zip_base64" in body else None
+            )
+            if not b64_list:
+                shutil.rmtree(input_dir, ignore_errors=True)
                 return jsonify({"error": "zip_base64 oder zip_base64_list fehlt"}), 400
+            for i, b64 in enumerate(b64_list):
+                raw = base64.b64decode(b64)
+                zip_path = os.path.join(input_dir, f"b64_{i}.zip")
+                with open(zip_path, "wb") as fh:
+                    fh.write(raw)
+                zip_paths.append(zip_path)
 
-        if not pdfs:
-            return jsonify({"error": "Keine relevanten PDFs gefunden"}), 400
+        if not zip_paths:
+            shutil.rmtree(input_dir, ignore_errors=True)
+            return jsonify({"error": "Keine ZIP-Dateien empfangen"}), 400
 
-        job_id = str(uuid.uuid4())
         _write_job(job_id,
                    status="processing",
                    phase="Wird gestartet …",
@@ -1929,11 +1972,12 @@ def generate_expose():
 
         t = _threading.Thread(
             target=_run_expose_job,
-            args=(job_id, pdfs, customer_image_list),
+            args=(job_id, zip_paths),
             daemon=True
         )
         t.start()
 
+        print(f"[{job_id}] Job gestartet mit {len(zip_paths)} ZIP(s)")
         return jsonify({"job_id": job_id})
 
     except Exception as e:
