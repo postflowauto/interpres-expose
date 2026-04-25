@@ -1580,32 +1580,60 @@ def fill_pptx(template_bytes, data, customer_images=None):
     prs.save(out)
     return out.getvalue()
 
+def _find_libreoffice():
+    """Sucht den LibreOffice-Binary an allen bekannten Pfaden."""
+    import shutil
+    for name in ("libreoffice", "soffice"):
+        path = shutil.which(name)
+        if path:
+            return path
+    # Bekannte Installations-Pfade (Debian/Ubuntu/Docker)
+    for candidate in (
+        "/usr/bin/libreoffice",
+        "/usr/bin/soffice",
+        "/usr/lib/libreoffice/program/soffice",
+        "/opt/libreoffice/program/soffice",
+        "/Applications/LibreOffice.app/Contents/MacOS/soffice",
+    ):
+        if os.path.isfile(candidate):
+            return candidate
+    return None
+
+
 def convert_to_pdf(pptx_bytes, filename):
-    """Konvertiert PPTX-Bytes zu PDF via LibreOffice (kein externer Dienst nötig)."""
+    """Konvertiert PPTX-Bytes zu PDF via LibreOffice headless."""
     import subprocess, tempfile, glob as _glob
-    print(f"convert_to_pdf: LibreOffice für {filename} ({len(pptx_bytes)//1024} KB)")
+
+    lo_bin = _find_libreoffice()
+    if not lo_bin:
+        raise RuntimeError(
+            "LibreOffice nicht gefunden. Bitte sicherstellen dass das Docker-Image "
+            "korrekt deployed wurde (render.yaml: runtime: docker)."
+        )
+    print(f"convert_to_pdf: {lo_bin} für {filename} ({len(pptx_bytes)//1024} KB)")
 
     with tempfile.TemporaryDirectory() as tmpdir:
         pptx_path = os.path.join(tmpdir, filename)
         with open(pptx_path, "wb") as f:
             f.write(pptx_bytes)
 
-        # LibreOffice headless konvertierung
-        cmd = [
-            "libreoffice", "--headless", "--norestore", "--nofirststartwizard",
-            "--convert-to", "pdf",
-            "--outdir", tmpdir,
-            pptx_path
-        ]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-        print(f"  soffice returncode={result.returncode}")
+        env = os.environ.copy()
+        env["HOME"] = tmpdir   # LibreOffice braucht beschreibbares HOME
+
+        result = subprocess.run(
+            [lo_bin, "--headless", "--norestore", "--nofirststartwizard",
+             "--convert-to", "pdf", "--outdir", tmpdir, pptx_path],
+            capture_output=True, text=True, timeout=300, env=env
+        )
+        print(f"  returncode={result.returncode}")
         if result.stdout: print(f"  stdout: {result.stdout[:300]}")
         if result.stderr: print(f"  stderr: {result.stderr[:300]}")
 
         if result.returncode != 0:
-            raise RuntimeError(f"LibreOffice Fehler (rc={result.returncode}): {result.stderr[:300]}")
+            raise RuntimeError(
+                f"LibreOffice Fehler (rc={result.returncode}): {result.stderr[:300]}"
+            )
 
-        # PDF-Datei suchen (LibreOffice benennt sie wie die Eingabedatei)
         pdf_stem = os.path.splitext(filename)[0]
         matches = _glob.glob(os.path.join(tmpdir, f"{pdf_stem}.pdf"))
         if not matches:
