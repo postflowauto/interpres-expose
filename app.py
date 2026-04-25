@@ -726,6 +726,10 @@ def fetch_unsplash_image(query):
     return url
 
 def fill_image_placeholders(data):
+    """Füllt bild_*-Slots die noch leer sind mit Picsum-Fallback-URLs.
+    Unsplash wird NICHT mehr verwendet (Rate-Limit 50 req/h, zu knapp für 60 Slots).
+    Picsum ist unlimitiert und deterministisch (seed = hash des query).
+    """
     stadt = data.get("stadt", "")
     queries = UNSPLASH_QUERIES.copy()
     if stadt:
@@ -737,31 +741,34 @@ def fill_image_placeholders(data):
         queries["BILD_STADT_GROSS"] = f"city skyline aerial {stadt}"
         queries["BILD_STADT_KLEIN"] = f"city street urban {stadt}"
         queries["BILD_LAGEPLAN"] = f"city map district aerial {stadt}"
+
     filled = 0
     for placeholder_key, query in queries.items():
         data_key = placeholder_key.lower()
         if data_key not in data:
             continue
-        # Skip bild_we_N für nicht vorhandene WE-Typen:
-        # Paar k (k≥2): left_n = 2k-1, right_n = 2k
-        # Nur laden wenn TEXT-Keys des Paares befüllt sind.
-        import re as _re
-        _m = _re.match(r'^bild_we_(\d+)$', data_key)
+        # Skip wenn Slot bereits durch Kundenbild belegt
+        if data.get(data_key) and str(data[data_key]).startswith("http"):
+            continue
+        # Skip bild_we_N für nicht vorhandene WE-Typen
+        _m = re.match(r'^bild_we_(\d+)$', data_key)
         if _m:
             n = int(_m.group(1))
             if n > 2:
-                pair_k    = (n + 1) // 2   # welches Paar: n=3→2, n=4→2, n=5→3, ...
-                left_n    = pair_k * 2 - 1
-                right_n   = pair_k * 2
-                has_text  = (data.get(f"we_beispiel_{left_n}") or data.get(f"we_bereich_{left_n}")
-                             or data.get(f"we_beispiel_{right_n}") or data.get(f"we_bereich_{right_n}"))
+                pair_k   = (n + 1) // 2
+                left_n   = pair_k * 2 - 1
+                right_n  = pair_k * 2
+                has_text = (data.get(f"we_beispiel_{left_n}") or data.get(f"we_bereich_{left_n}")
+                            or data.get(f"we_beispiel_{right_n}") or data.get(f"we_bereich_{right_n}"))
                 if not has_text:
                     continue
-        url = fetch_unsplash_image(query)
-        if url:
-            data[data_key] = url
-            filled += 1
-    print(f"fill_image_placeholders: {filled}/{len(queries)} Bilder befüllt")
+        # Picsum direkt (kein Unsplash-Call → kein Rate-Limit)
+        seed = abs(hash(query)) % 1000
+        url = f"https://picsum.photos/seed/{seed}/1200/800"
+        data[data_key] = url
+        filled += 1
+
+    print(f"fill_image_placeholders: {filled} Slots mit Picsum-Fallback befüllt")
     return data
 
 def analyze_pdfs_with_claude(pdfs):
