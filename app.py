@@ -436,23 +436,61 @@ def extract_pdfs_from_zip(zip_bytes):
 
     return selected
 
+def _extract_images_from_pdf_bytes(pdf_bytes, pdf_name):
+    """Extrahiert eingebettete Bilder aus einem PDF via PyMuPDF."""
+    images = []
+    try:
+        import fitz  # PyMuPDF
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        for page_num in range(min(len(doc), 30)):  # max 30 Seiten
+            for img_idx, img in enumerate(doc[page_num].get_images(full=True)):
+                xref = img[0]
+                try:
+                    base_image = doc.extract_image(xref)
+                    raw = base_image["image"]
+                    ext = "." + base_image["ext"]
+                    if ext not in {'.jpg', '.jpeg', '.png', '.webp', '.bmp'}:
+                        continue
+                    if len(raw) < 15000:   # Thumbnails/Icons/Logos überspringen
+                        continue
+                    images.append({
+                        'name': f"{pdf_name}_s{page_num+1}_b{img_idx+1}{ext}",
+                        'bytes': raw,
+                        'ext': ext,
+                        'b64': base64.b64encode(raw).decode(),
+                    })
+                    if len(images) >= 20:
+                        return images
+                except Exception:
+                    continue
+    except ImportError:
+        print("  PyMuPDF nicht verfügbar – keine PDF-Bildextraktion")
+    except Exception as e:
+        print(f"  PDF-Bildextraktion Fehler ({pdf_name}): {e}")
+    return images
+
+
 def extract_images_from_zip(zip_bytes):
     """
-    Extrahiert Bilddateien (.jpg/.jpeg/.png/.webp) aus einer ZIP.
+    Extrahiert Bilddateien aus einer ZIP:
+    1. Direkte Bilddateien (.jpg/.png/.webp)
+    2. In PDFs eingebettete Bilder (via PyMuPDF)
     Gibt max. 20 Bilder zurück als Liste von {name, bytes, ext, b64}.
     """
     IMAGE_EXTS = {'.jpg', '.jpeg', '.png', '.webp'}
     images = []
     try:
         with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
-            for name in zf.namelist():
+            names = zf.namelist()
+            # Erst direkte Bilddateien
+            for name in names:
                 if '__MACOSX' in name or name.startswith('.'):
                     continue
                 ext = os.path.splitext(name.lower())[1]
                 if ext not in IMAGE_EXTS:
                     continue
                 raw = zf.read(name)
-                if len(raw) < 5000:   # Thumbnails/Icons überspringen
+                if len(raw) < 5000:
                     continue
                 images.append({
                     'name': name.split('/')[-1],
@@ -462,9 +500,28 @@ def extract_images_from_zip(zip_bytes):
                 })
                 if len(images) >= 20:
                     break
+
+            # Falls keine/wenige Bilder gefunden: aus PDFs extrahieren
+            if len(images) < 5:
+                for name in names:
+                    if '__MACOSX' in name or name.startswith('.'):
+                        continue
+                    if not name.lower().endswith('.pdf'):
+                        continue
+                    try:
+                        pdf_raw = zf.read(name)
+                        pdf_imgs = _extract_images_from_pdf_bytes(pdf_raw, name.split('/')[-1])
+                        images.extend(pdf_imgs)
+                        print(f"  PDF {name.split('/')[-1]}: {len(pdf_imgs)} Bilder extrahiert")
+                    except Exception as e:
+                        print(f"  PDF lesen Fehler ({name}): {e}")
+                    if len(images) >= 20:
+                        break
+
     except Exception as e:
         print(f"extract_images_from_zip Fehler: {e}")
-    print(f"Bilder in ZIP: {len(images)}")
+    images = images[:20]
+    print(f"Bilder gesamt in ZIP: {len(images)} (direkt + aus PDFs)")
     return images
 
 
@@ -687,6 +744,9 @@ def analyze_pdfs_with_claude(pdfs):
             "projektname_roh, adresse, stadt, stadtteil, plz, bautraeger, anzahl_haeuser, "
             "we_pro_haus, anzahl_we_gesamt, kfw_standard, energieversorgung, stellplaetze, "
             "groesse_von, groesse_bis, kaufpreis_ab, besonderheiten, planungsphase. "
+            "WICHTIG für bautraeger: Nur den exakten Firmennamen, OHNE Fußnotenzahlen oder Sonderzeichen. "
+            "Beispiel: 'SBB Bauträgergesellschaft mbH' (nicht 'SBB Bauträgergesellschaft1 mbH'). "
+            "WICHTIG für projektname_roh: Nur den Projektnamen, z.B. 'compact living. magdeburg.' oder 'The Central'. "
             "Kein Text davor oder danach, keine Markdown-Backticks."
         )
     })
@@ -727,41 +787,65 @@ def generate_expose_with_claude(projektdaten):
         "'feels like a hotel.'  'think green. live smart.'  'naturban.'  'work, life balance.'\n"
         "'designed to stay.'  'stilvoll. durchdacht.'  'simply more.'\n\n"
 
-        "### Fließtexte (text_intro, text_investment_pitch, text_greenliving_*, text_ausstattung_detail, text_hotel, text_architektur):\n"
-        "LANG und inhaltsstark. Mindestens 4-6 Sätze. Emotionale Einstiegssatz + konkrete Fakten + Zielgruppe + Ausblick.\n"
-        "Beispiel text_intro-Länge:\n"
-        "'Inmitten der geschäftigen Kulisse der Neuen Neustadt, einem aufstrebenden Stadtteil, verbindet "
-        "\"urbanunits – The Central\" auf einzigartige Weise urbanen Komfort mit dem Gefühl von Rückzug und Ruhe. "
-        "Hier entfaltet sich eine grüne Oase, die auf dem südlichen Areal der einstigen Diamant Brauerei entsteht. "
-        "Dieses Projekt ist mehr als nur ein Bauvorhaben – es ist ein Ort mit Charakter, geschaffen für Menschen "
-        "mit einem modernen Lebensstil. \"urbanunits – The Central\" bietet nicht nur gefragten Wohnraum, "
-        "sondern auch eine Verbindung von Stadt und Qualität, die eine besondere Balance schafft. "
-        "Ideal für Studierende, Berufstätige, Zweitwohnsitznutzer – und jeden, der flexibel wohnen möchte.'\n\n"
+        "### Fließtexte (text_intro, text_investment_pitch, text_greenliving_*, text_ausstattung_detail):\n"
+        "Maximal 2-3 Sätze. Prägnant, emotional, auf den Punkt. Kein Fließtext-Aufsatz.\n"
+        "Beispiel text_intro: 'Mitten in [Stadtteil] entsteht [Projektname] – [WE-Anzahl] möblierte Apartments "
+        "für Studierende, Berufstätige und Investoren. Modern ausgestattet, smart vernetzt und sofort bezugsfertig.'\n\n"
 
         "### Key-Facts (feature_N_label, amenity_N):\n"
-        "Kurze prägnante Substantive oder Kurzsätze. Beispiele:\n"
-        "'Fitnessstudio direkt im Quartier'  'E-Bike-Sharing'  'Paketstation'  'Dachbegrünung'\n\n"
+        "Kurze prägnante Substantive. Max. 3-4 Wörter. Beispiele:\n"
+        "'E-Bike-Sharing'  'Smart-Lock'  'Dachbegrünung'  'Fahrradabstellplätze'\n\n"
 
         "### Zahlen (feature_N_zahl, min_*, stadtstatistiken):\n"
         "Nur die Zahl, kein Text. Fahrrad-/Gehminuten realistisch für die Stadt.\n\n"
 
         "### Stadttext (text_stadt_*, text_einwohner_detail etc.):\n"
-        "Nutze ECHTES Wissen über die Stadt. Nenne echte Unternehmen, Branchen, Hochschulen, Investitionen.\n"
-        "Stil: 'Magdeburg verzeichnet seit Jahren ein kontinuierliches Wachstum: mehr als 245.000 Einwohner, "
-        "über 21.000 Studierende, steigende Mieten im Neubausegment und ein deutlich wachsendes BIP.'\n\n"
+        "Nutze ECHTES Wissen über die Stadt. Max. 1-2 Sätze pro Feld.\n"
+        "Beispiel: 'Magdeburg wächst: 245.000 Einwohner, über 21.000 Studierende, +34% Mieten seit 2017.'\n\n"
 
-        "### Investmenttext (text_investment_pitch, text_kapitel_invest_1/2):\n"
-        "Konkret: Einstiegspreis nennen, KfW-Darlehen, 3-fach AfA erklären, Rendite/Mietperspektive.\n"
-        "Beispiel: 'Kleine Einstiegspreise, attraktive KfW-Förderung und dreifach-AfA bieten ideale "
-        "Voraussetzungen für Kapitalanleger, die Wert auf Effizienz und Stabilität legen.'\n\n"
+        "### Investmenttext:\n"
+        "Konkret in 2 Sätzen: Preis, KfW-Darlehen, AfA-Vorteil. Kein Fließtext.\n\n"
 
-        "### Nachhaltigkeit (text_greenliving_1, text_greenliving_2, text_projekt_nachhaltig_*):\n"
-        "text_greenliving_1: 5-6 Sätze über Fernwärme, Photovoltaik, Gründach, E-Ladeinfrastruktur.\n"
-        "text_greenliving_2: 4-5 Sätze über Außenbereiche, Bepflanzung, Mikroklima, Lebensqualität.\n\n"
+        "### Nachhaltigkeit:\n"
+        "text_greenliving_1: max 2 Sätze über Fernwärme/Photovoltaik/Energiekonzept.\n"
+        "text_greenliving_2: max 2 Sätze über Außenbereiche/Mobilität/Lebensqualität.\n\n"
 
-        "### Ausstattung (text_ausstattung_detail, text_ausstattung_intro):\n"
-        "text_ausstattung_detail: 4-5 Sätze. Konkret: Bodenbeläge, Fliesen, Fußbodenheizung, "
-        "Beleuchtung, Barrierefreiheit, Balkone/Terrassen.\n\n"
+        "### Ausstattung:\n"
+        "text_ausstattung_detail: max 2 Sätze. Bodenbelag, Heizung, Balkone. Konkret.\n\n"
+
+        "## ⚠️ STRENGE ZEICHENLIMITS – JEDE ÜBERSCHREITUNG BRICHT DAS LAYOUT:\n"
+        "produkt_beschreibung: max 20 Zeichen (z.B. 'Microapartments' oder '1-2 Zimmer')\n"
+        "text_kapitel_*: max 40 Zeichen\n"
+        "text_hotel / text_*_kurz: max 40 Zeichen\n"
+        "text_intro: max 320 Zeichen\n"
+        "text_investment_pitch: max 300 Zeichen\n"
+        "text_greenliving_intro: max 80 Zeichen\n"
+        "text_greenliving_1: max 320 Zeichen\n"
+        "text_greenliving_2: max 300 Zeichen\n"
+        "text_ausstattung_intro: max 80 Zeichen\n"
+        "text_ausstattung_detail: max 320 Zeichen\n"
+        "text_ausstattung_kurz: max 60 Zeichen\n"
+        "text_ausstattung_lang: max 320 Zeichen\n"
+        "text_grundriss_intro: max 180 Zeichen\n"
+        "text_architektur: max 180 Zeichen\n"
+        "text_nachhaltig_1/2/3/4: max 100 Zeichen\n"
+        "text_standort_1/2: max 180 Zeichen\n"
+        "text_projekt_nachhaltig_1/2: max 120 Zeichen\n"
+        "text_stadt_wachstum_1: max 260 Zeichen\n"
+        "text_stadt_wachstum_2: max 240 Zeichen\n"
+        "text_stadt_intro: max 120 Zeichen\n"
+        "text_stadt_wirtschaft_links/rechts: max 180 Zeichen\n"
+        "text_stadt_invest_detail: max 220 Zeichen\n"
+        "text_einwohner_detail/bip_detail/mietsteigerung_detail/studierende_detail: max 70 Zeichen\n"
+        "text_stadt_stat_N_detail: max 70 Zeichen\n"
+        "text_stadt_branche_1/2: max 160 Zeichen\n"
+        "feature_N_label: max 28 Zeichen\n"
+        "amenity_N: max 28 Zeichen\n"
+        "we_typ_beschreibung: max 200 Zeichen\n"
+        "besonderheiten: max 60 Zeichen\n"
+        "steuerliche_moeglichkeiten: max 80 Zeichen\n"
+        "quartier_history/quartier_ref: max 120 Zeichen\n"
+        "zitat_intro: max 160 Zeichen\n\n"
 
         f"## STANDORT-MINUTEN ({stadt} – Slide 5):\n"
         f"min_uni / label_min_uni: Fahrradminuten + Name der nächsten Uni/FH in {stadt}\n"
@@ -1077,6 +1161,9 @@ def fill_pptx(template_bytes, data, customer_images=None):
             return REPL_MAP.get(key, m.group(0))  # keep original if not found
         return PLACEHOLDER_RE.sub(_sub, text)
 
+    # Invisible/formatting chars that PowerPoint inserts inside placeholders
+    _INVIS_RE = re.compile(r'[\u00AD\u200B\u200C\u200D\uFEFF\u00A0]')
+
     def replace_in_paragraph(para):
         """Replace placeholders in a paragraph, handling split-run placeholders.
 
@@ -1088,15 +1175,21 @@ def fill_pptx(template_bytes, data, customer_images=None):
         if not para.runs:
             return
         full_text = "".join(r.text for r in para.runs)
-        if "{{" not in full_text:
+        if "{{" not in full_text and "{{" not in _INVIS_RE.sub("", full_text):
+            return
+        # Strip invisible chars (soft-hyphens, zero-width spaces, etc.) that
+        # PowerPoint inserts inside placeholder names (breaks regex matching)
+        clean_text = _INVIS_RE.sub("", full_text)
+        if "{{" not in clean_text:
             return
         # Extract font-size hint BEFORE stripping the suffix
         size_hint = None
-        sh = _SIZE_HINT_RE.search(full_text)
+        sh = _SIZE_HINT_RE.search(clean_text)
         if sh:
             size_hint = int(sh.group(1))
-        modified = replace_text(full_text)
-        if modified != full_text:
+        # Use clean_text (soft-hyphens removed) for replacement
+        modified = replace_text(clean_text)
+        if modified != clean_text:
             para.runs[0].text = modified
             for run in para.runs[1:]:
                 run.text = ""
@@ -1116,9 +1209,8 @@ def fill_pptx(template_bytes, data, customer_images=None):
             replace_in_paragraph(para)
 
         # Then handle cross-paragraph splits: join all paragraph texts and check
-        # Build list of (para_index, full_run_text) pairs
-        para_texts = ["".join(r.text for r in p.runs) for p in tf.paragraphs]
-        joined = "\n".join(para_texts)
+        # Build list of (para_index, full_run_text) pairs, stripping invisible chars
+        para_texts = [_INVIS_RE.sub("", "".join(r.text for r in p.runs)) for p in tf.paragraphs]
 
         # Find any remaining {{...}} that survived (i.e. were split across paragraphs)
         # by scanning pairs of adjacent paragraphs
