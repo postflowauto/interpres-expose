@@ -191,11 +191,19 @@ DUMMY_EXPOSE_DATA = {
 
 # Relevante PDF-Typen nach Priorität
 PDF_PRIORITY = [
-    (1, ["zusammenfassung", "summary"]),
+    # Prio 1 – wichtigste Projektdokumente (bis 2 pro Ordner erlaubt)
+    (1, ["zusammenfassung", "summary", "expose", "exposé", "verkauf", "vertrieb",
+         "investment", "invest", "mieteinnahmen", "rendite", "broschüre", "brochure",
+         "flyer", "projektbeschreibung", "projektinfo"]),
     (1, ["berechnung-bri", "bri-berechnung"]),
+    # Prio 2 – Grundrisse & Flächenberechnungen (bis 3 pro Ordner erlaubt)
     (2, ["grundriss", "floor", "lageplan"]),
-    (2, ["wfl-berechnung", "wohnflaeche", "wfl_berechnung"]),
+    (2, ["wfl-berechnung", "wohnflaeche", "wfl_berechnung", "flaeche", "fläche",
+         "raumplan", "typ_a", "typ_b", "typ_c", "typ-a", "typ-b", "typ-c"]),
     (3, ["schnitt", "ansicht", "elevation"]),
+    # Prio 4 – sonstige Projektdokumente (1 pro Ordner)
+    (4, ["baugenehmigung", "genehmigung", "baubeschreibung", "leistungsverzeichnis",
+         "ausstattung", "energieausweis"]),
 ]
 
 UNSPLASH_QUERIES = {
@@ -410,7 +418,9 @@ def extract_pdfs_from_zip(zip_bytes):
     # Sortieren nach Priorität
     all_pdfs.sort(key=lambda x: (x["priority"], x["folder"]))
 
-    # Auswahl: max 2 Prio-1 PDFs pro Ordner, max 1 Prio-2 pro Ordner, gesamt max 20
+    # Auswahl: Prio-1 max 2/Ordner, Prio-2 max 3/Ordner (WFL-Typen!), Prio-3/4 max 1/Ordner
+    # Gesamt max 20
+    _PRIO_LIMITS = {1: 2, 2: 3, 3: 1, 4: 1}
     selected = []
     folder_count = {}
 
@@ -426,7 +436,7 @@ def extract_pdfs_from_zip(zip_bytes):
         key = f"{folder}_{prio}"
         folder_count[key] = folder_count.get(key, 0) + 1
 
-        limit = 2 if prio == 1 else 1
+        limit = _PRIO_LIMITS.get(prio, 1)
         if folder_count[key] <= limit:
             selected.append(pdf)
 
@@ -793,7 +803,9 @@ def analyze_pdfs_with_claude(pdfs):
             "Antworte NUR mit einem JSON-Objekt mit diesen Feldern: "
             "projektname_roh, adresse, stadt, stadtteil, plz, bautraeger, anzahl_haeuser, "
             "we_pro_haus, anzahl_we_gesamt, kfw_standard, energieversorgung, stellplaetze, "
-            "groesse_von, groesse_bis, kaufpreis_ab, besonderheiten, planungsphase. "
+            "groesse_von, groesse_bis, kaufpreis_ab, besonderheiten, planungsphase, "
+            "we_typen_count (Anzahl der verschiedenen WE-Typen/Grundriss-Typen als Zahl), "
+            "we_typen_liste (Array von Objekten mit {bezeichnung, typ, wohnflaeche_qm} für jeden WE-Typ wenn aus WFL-PDFs erkennbar). "
             "WICHTIG für bautraeger: Nur den exakten Firmennamen, OHNE Fußnotenzahlen oder Sonderzeichen. "
             "Beispiel: 'SBB Bauträgergesellschaft mbH' (nicht 'SBB Bauträgergesellschaft1 mbH'). "
             "WICHTIG für projektname_roh: Nur der vermarktbare Projektname, z.B. 'compact living. magdeburg.' oder 'The Central'. "
@@ -826,12 +838,29 @@ def generate_expose_with_claude(projektdaten):
     stadt = projektdaten.get('stadt', 'der Stadt')
     projekt = projektdaten.get('projektname_roh', 'das Projekt')
     bautraeger = projektdaten.get('bautraeger', 'urbanunits')
+    we_typen_liste = projektdaten.get('we_typen_liste', [])
+
+    # WE-Typen Info für Prompt aufbereiten
+    we_typen_hint = ""
+    if we_typen_liste:
+        lines = []
+        for i, t in enumerate(we_typen_liste[:6]):
+            bez = t.get('bezeichnung', f'Typ {i+1}')
+            typ = t.get('typ', '')
+            wfl = t.get('wohnflaeche_qm', '')
+            lines.append(f"  - {bez}{': ' + typ if typ else ''}{', ' + str(wfl) + ' m²' if wfl else ''}")
+        we_typen_hint = (
+            f"\nEXTRAHIERTE WE-TYPEN aus WFL-PDFs ({len(we_typen_liste)} Typen):\n"
+            + "\n".join(lines)
+            + "\nNutze diese Daten für we_beispiel_N, we_bereich_N und we_flaeche_1-5!\n"
+        )
 
     prompt = (
         "Du bist ein erfahrener Immobilien-Exposé-Texter bei INTERPRÉS GmbH. "
         "Antworte NUR mit einem validen JSON-Objekt. Kein Text davor oder danach. Keine Markdown-Backticks.\n\n"
 
-        f"## PROJEKTDATEN\n{json.dumps(projektdaten, ensure_ascii=False)}\n\n"
+        f"## PROJEKTDATEN\n{json.dumps(projektdaten, ensure_ascii=False)}\n"
+        f"{we_typen_hint}\n"
 
         "## SCHREIBSTIL – REFERENZ (genau so schreiben!)\n"
         "Das Exposé folgt dem Stil eines Premium-Immobilien-Prospekts. Konkret:\n\n"
@@ -931,25 +960,48 @@ def generate_expose_with_claude(projektdaten):
         f"freizeit_N_name: ECHTER Name (Park, See, Sehenswürdigkeit) in {stadt}\n"
         f"min_freizeit_N: Gehminuten als Zahl\n\n"
 
-        f"## WOHNUNGSTYPEN:\n"
-        f"Analysiere die Grundrisse aus den Projektdaten. Pro WE-Paar (je 2 nebeneinander):\n"
-        f"- we_beispiel_N: 'WE 02' (linke Spalte), we_beispiel_N+1: 'WE 07' (rechte Spalte)\n"
-        f"- we_bereich_N: Hauptbereich des Typs, z.B. 'Wohnen & Schlafen', 'Wohnen/Kochen'\n"
-        f"- we_flaeche_1-5: NUR Quadratmeter als '23,99 m²' (Raumnamen sind hardcoded im Template)\n"
-        f"- we_flaeche_5: Gesamtfläche\n"
-        f"- we_typ_beschreibung: 2-3 Sätze Beschreibung des Wohnungstyps mit Zielgruppe\n"
-        f"Slide 1 (immer): Paar 1 (we_beispiel_1, we_bereich_1, we_beispiel_2, we_bereich_2)\n"
-        f"Slide 2 (wenn ≥2 Typen): Paar 2 (we_beispiel_3..4), leere Strings wenn nicht benötigt\n"
-        f"Slide 3 (wenn ≥3 Typen): Paar 3 (we_beispiel_5..6)\n"
-        f"Und so weiter für weitere Typen.\n\n"
+        f"## WOHNUNGSTYPEN (aus WFL-Berechnung und Grundrissen):\n"
+        f"Analysiere alle WFL-Berechnungs-PDFs und Grundrisse. Das Template zeigt pro Slide ZWEI WE-Typen nebeneinander.\n"
+        f"Jeder WE-Typ hat 5 Raumflächen (we_flaeche_1-5). Im Template sind die Raumnamen bereits aufgedruckt:\n"
+        f"  we_flaeche_1 = Fläche des größten Raums (Wohnen/Schlafen/Wohnzimmer)\n"
+        f"  we_flaeche_2 = Fläche des zweiten Raums (Bad/Dusche oder Schlafzimmer)\n"
+        f"  we_flaeche_3 = Fläche des dritten Raums (Küche/Kochen oder Bad)\n"
+        f"  we_flaeche_4 = Fläche des vierten Raums (Balkon/Terrasse oder Flur)\n"
+        f"  we_flaeche_5 = Gesamtfläche der Wohnung\n"
+        f"WICHTIG: Lies die WFL-Berechnung-PDFs! Dort stehen die echten m²-Werte.\n"
+        f"Format: '23,99 m²' (Komma als Dezimalzeichen, immer mit ' m²')\n\n"
+        f"Feldnamen pro WE-Typ (Paare von 2 nebeneinander):\n"
+        f"- we_beispiel_N: WE-Bezeichnung z.B. 'WE 02' oder 'Typ A' (linke Spalte des Paares)\n"
+        f"- we_beispiel_N+1: WE-Bezeichnung (rechte Spalte)\n"
+        f"- we_bereich_N: Kurzbezeichnung des Wohnungstyps, z.B. '1-Zimmer', '2-Zimmer', 'Studio'\n"
+        f"- we_typ_beschreibung: 2-3 Sätze Beschreibung des ersten Typs im Paar (max 200 Zeichen)\n"
+        f"Slide 1 (immer): Paar 1 (we_beispiel_1+2, we_bereich_1+2, we_flaeche_1-5)\n"
+        f"Slide 2 (wenn ≥2 Typen): Paar 2 (we_beispiel_3+4), leere Strings wenn nicht benötigt\n"
+        f"Slide 3 (wenn ≥3 Typen): Paar 3 (we_beispiel_5+6)\n"
+        f"Und so weiter. ACHTUNG: we_flaeche_1-5 gelten für das erste WE-Paar! Wenn mehrere Slides,\n"
+        f"dann alle WE-Typen haben ähnliche Raumaufteilung.\n\n"
 
         f"## STADTSTATISTIKEN ({stadt}):\n"
         f"Verwende echte, aktuelle Zahlen für {stadt}:\n"
         f"stadt_einwohner: Einwohnerzahl als formatierte Zahl, z.B. '245.279'\n"
         f"bundesland_bip: BIP des Bundeslandes NUR als Zahl+Einheit OHNE 'EUR'/'Euro', z.B. '310 Mrd.' oder '78,4 Mrd.'\n"
         f"  (Das Template-Label schreibt 'in €' bereits dahinter – niemals doppelt!)\n"
-        f"stadt_mietsteigerung: Mietsteigerung seit 2017/2018, z.B. '+31%'\n"
-        f"stadt_studierende: Studierende an Hochschulen, z.B. '21.000'\n\n"
+        f"stadt_mietsteigerung: Mietsteigerung des Mietniveaus seit 2017/2018, z.B. '+31%'\n"
+        f"stadt_studierende: Studierende an Hochschulen, z.B. '21.000'\n"
+        f"stadt_bip: BIP der Stadt/Region als formatierte Zahl (optional, falls vorhanden)\n\n"
+        + (
+        f"BEKANNTE FAKTEN FÜR MAGDEBURG (Stand 2024/2025, verwende diese wenn stadt=Magdeburg):\n"
+        f"  stadt_einwohner: '245.278'\n"
+        f"  bundesland_bip: '73,4 Mrd.' (Sachsen-Anhalt)\n"
+        f"  stadt_mietsteigerung: '+28%' (seit 2017)\n"
+        f"  stadt_studierende: '21.000'\n"
+        f"  text_einwohner_detail oder text_bip_detail: Erwähne den Intel-Chip-Werksinvestition "
+        f"(~17 Mrd. Euro Investition in Magdeburg 2024) und die wachsende Technologiebranche.\n"
+        f"  Magdeburg ist die Hauptstadt Sachsen-Anhalts, Uni-Stadt, wächst durch Ansiedlung "
+        f"von Tech-Unternehmen (Intel, etc.).\n\n"
+        if 'magdeburg' in stadt.lower() else ""
+        )
+        + "\n"
 
         f"## ALLE FELDER – PFLICHT:\n"
         f"Jedes Feld MUSS befüllt werden. Leere Strings sind nicht akzeptabel außer bei\n"
@@ -1894,8 +1946,8 @@ def _run_expose_job(job_id, zip_paths):
 
         _set(status="processing", phase="Dokumente werden analysiert …")
 
-        # Bis zu 6 PDFs senden (mehr Kontext = bessere Datenextraktion)
-        pdfs = sorted(pdfs, key=lambda x: x["priority"])[:6]
+        # Bis zu 8 PDFs senden (mehr Kontext = bessere Daten- & WE-Extraktion)
+        pdfs = sorted(pdfs, key=lambda x: x["priority"])[:8]
         print(f"[{job_id}] sende {len(pdfs)} PDFs an Claude:")
         for p in pdfs:
             print(f"    [Prio {p['priority']}] {p['folder']} / {p['name']}")
