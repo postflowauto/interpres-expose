@@ -796,7 +796,11 @@ def analyze_pdfs_with_claude(pdfs):
             "groesse_von, groesse_bis, kaufpreis_ab, besonderheiten, planungsphase. "
             "WICHTIG für bautraeger: Nur den exakten Firmennamen, OHNE Fußnotenzahlen oder Sonderzeichen. "
             "Beispiel: 'SBB Bauträgergesellschaft mbH' (nicht 'SBB Bauträgergesellschaft1 mbH'). "
-            "WICHTIG für projektname_roh: Nur den Projektnamen, z.B. 'compact living. magdeburg.' oder 'The Central'. "
+            "WICHTIG für projektname_roh: Nur der vermarktbare Projektname, z.B. 'compact living. magdeburg.' oder 'The Central'. "
+            "Falls kein expliziter Projektname in den Dokumenten steht, ERFINDE einen kurzen, "
+            "kreativen Markennamen (1-3 Wörter, Englisch oder Deutsch), der zur Lage und Produktart passt. "
+            "Beispiele: 'The Rothenseer', 'New Living 72', 'Central Magdeburg', 'Die 72'. "
+            "NIEMALS den Firmennamen oder Bauträgernamen als Projektname verwenden! "
             "Kein Text davor oder danach, keine Markdown-Backticks."
         )
     })
@@ -832,10 +836,23 @@ def generate_expose_with_claude(projektdaten):
         "## SCHREIBSTIL – REFERENZ (genau so schreiben!)\n"
         "Das Exposé folgt dem Stil eines Premium-Immobilien-Prospekts. Konkret:\n\n"
 
-        "### Slogans (text_kapitel_*, text_hotel, text_*_kurz):\n"
-        "Kurze englische Phrasen mit Punkt. Maximal 3-4 Wörter. Beispiele:\n"
+        "### Slogans (text_kapitel_invest/live/stay/know/hotel – NUR die Hauptüberschrift):\n"
+        "Kurze Phrasen mit Punkt. Maximal 3-4 Wörter. Beispiele:\n"
         "'feels like a hotel.'  'think green. live smart.'  'naturban.'  'work, life balance.'\n"
         "'designed to stay.'  'stilvoll. durchdacht.'  'simply more.'\n\n"
+        "### Kapitelseiten-Bodytexte (text_kapitel_invest_1, text_kapitel_invest_2 etc.):\n"
+        "Das sind die Fließtexte auf den Kapitel-Trennseiten (links neben dem Slogan).\n"
+        "Stil: 2-3 prägnante Sätze, emotional, projekt-spezifisch. Kein Bullet-Point-Stil.\n"
+        "Referenz text_kapitel_invest_1: 'Kleine Einstiegspreise, attraktive KfW-Förderung und "
+        "dreifach-AfA bieten ideale Voraussetzungen für Kapitalanleger, die Wert auf Effizienz "
+        "und Stabilität legen.'\n"
+        "Referenz text_kapitel_invest_2: 'Die aufstrebende Lage, die energieeffiziente Bauweise "
+        "sowie die durchdachte Möblierung machen [Projekt] zu einem Investment, das heute "
+        "überzeugt – und morgen relevant bleibt.'\n"
+        "Referenz text_kapitel_live_1: 'Ein Ort, an dem man das Leben in der Stadt in vollen Zügen "
+        "genießen kann – ohne auf die Schönheit der Natur zu verzichten.'\n"
+        "Referenz text_kapitel_stay_1: '[Projekt] steht für eine Wohnform, die den Alltag neu denkt: "
+        "kompakt, hochwertig, durchdacht.'\n\n"
 
         "### Fließtexte (text_intro, text_investment_pitch, text_greenliving_*, text_ausstattung_detail):\n"
         "Maximal 2-3 Sätze. Prägnant, emotional, auf den Punkt. Kein Fließtext-Aufsatz.\n"
@@ -864,11 +881,12 @@ def generate_expose_with_claude(projektdaten):
         "text_ausstattung_detail: max 2 Sätze. Bodenbelag, Heizung, Balkone. Konkret.\n\n"
 
         "## ⚠️ STRENGE ZEICHENLIMITS – JEDE ÜBERSCHREITUNG BRICHT DAS LAYOUT:\n"
-        "produkt_beschreibung: max 20 Zeichen (z.B. 'Microapartments' oder '1-2 Zimmer')\n"
-        "text_kapitel_*: max 40 Zeichen\n"
-        "text_hotel / text_*_kurz: max 40 Zeichen\n"
+        "produkt_beschreibung: max 25 Zeichen (z.B. 'Microapartments' oder '1-2 Zi. möbliert')\n"
+        "text_kapitel_invest/live/stay/know/hotel (NUR die Slogan-Zeile): max 40 Zeichen\n"
+        "text_kapitel_invest_1/2, text_kapitel_live_1/2, text_kapitel_stay_1/2, text_kapitel_know_1/2: max 200 Zeichen\n"
+        "text_hotel: max 40 Zeichen\n"
         "text_intro: max 320 Zeichen\n"
-        "text_investment_pitch: max 300 Zeichen\n"
+        "text_investment_pitch: max 420 Zeichen\n"
         "text_greenliving_intro: max 80 Zeichen\n"
         "text_greenliving_1: max 320 Zeichen\n"
         "text_greenliving_2: max 300 Zeichen\n"
@@ -1384,7 +1402,8 @@ def fill_pptx(template_bytes, data, customer_images=None):
             bild_child = None
             for child in shape.shapes:
                 if child.has_text_frame:
-                    txt = child.text_frame.text.strip()
+                    # Invisible chars (soft-hyphen, NBSP etc.) strippen → sonst schlägt Regex fehl!
+                    txt = _INVIS_RE.sub("", child.text_frame.text).strip()
                     m = PLACEHOLDER_RE.match(txt)
                     if m:
                         key = m.group(1).lower()
@@ -1537,7 +1556,7 @@ def fill_pptx(template_bytes, data, customer_images=None):
 
         # 2. Bild per Text-Inhalt
         if shape.has_text_frame:
-            txt = shape.text_frame.text.strip()
+            txt = _INVIS_RE.sub("", shape.text_frame.text).strip()
             m = PLACEHOLDER_RE.match(txt)
             if m:
                 key = m.group(1).lower()
