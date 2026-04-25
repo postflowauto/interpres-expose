@@ -1847,14 +1847,28 @@ def _run_expose_job(job_id, pdfs, customer_image_list):
 
         _set(status="processing", phase="PDF wird erstellt …")
         print(f"[{job_id}] Schritt 5/5: PDF-Konvertierung via LibreOffice …")
-        pdf_bytes = convert_to_pdf(pptx_bytes, f"{projekt_name}.pptx")
 
-        pdf_path = _job_pdf_path(job_id)
-        with open(pdf_path, "wb") as fh:
-            fh.write(pdf_bytes)
-
-        _set(status="done", phase="Fertig", pdf_path=pdf_path, name=projekt_name)
-        print(f"[{job_id}] ✓ Fertig: {len(pdf_bytes)//1024} KB PDF")
+        lo_available = _find_libreoffice() is not None
+        if lo_available:
+            try:
+                pdf_bytes = convert_to_pdf(pptx_bytes, f"{projekt_name}.pptx")
+                output_path = _job_pdf_path(job_id)
+                with open(output_path, "wb") as fh:
+                    fh.write(pdf_bytes)
+                _set(status="done", phase="Fertig", pdf_path=output_path, name=projekt_name)
+                print(f"[{job_id}] ✓ PDF fertig: {len(pdf_bytes)//1024} KB")
+            except Exception as pdf_err:
+                print(f"[{job_id}] PDF-Fehler: {pdf_err} → Fallback PPTX")
+                output_path = os.path.join(_JOB_DIR, f"{job_id}.pptx")
+                with open(output_path, "wb") as fh:
+                    fh.write(pptx_bytes)
+                _set(status="done", phase="Fertig", pdf_path=output_path, name=projekt_name)
+        else:
+            print(f"[{job_id}] LibreOffice nicht verfügbar → gebe PPTX aus")
+            output_path = os.path.join(_JOB_DIR, f"{job_id}.pptx")
+            with open(output_path, "wb") as fh:
+                fh.write(pptx_bytes)
+            _set(status="done", phase="Fertig", pdf_path=output_path, name=projekt_name)
 
     except Exception as e:
         import traceback as tb
