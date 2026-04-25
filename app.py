@@ -863,6 +863,12 @@ def generate_expose_with_claude(projektdaten):
         "Kurze prägnante Substantive. Max. 3-4 Wörter. Beispiele:\n"
         "'E-Bike-Sharing'  'Smart-Lock'  'Dachbegrünung'  'Fahrradabstellplätze'\n\n"
 
+        "### Entwicklername (entwickler_name, entwickler_name_gross):\n"
+        f"entwickler_name: Kurzer Markenname des Entwicklers (max 15 Zeichen, kein 'GmbH/mbH/AG').\n"
+        f"Falls der Bauträger '{bautraeger}' heißt und das lang/korporativ klingt:\n"
+        "→ Nimm nur den prägnanten Teil (z.B. 'SBB' statt 'SBB Bauträgergesellschaft mbH')\n"
+        "→ oder den Markennamen falls bekannt (z.B. 'Urban Units' statt 'Urbanunits GmbH')\n"
+        "entwickler_name_gross: Großbuchstaben-Version davon (z.B. 'SBB' → 'SBB')\n\n"
         "### Zahlen (feature_N_zahl, min_*, stadtstatistiken):\n"
         "Nur die Zahl, kein Text. Fahrrad-/Gehminuten realistisch für die Stadt.\n\n"
 
@@ -1231,15 +1237,20 @@ def fill_pptx(template_bytes, data, customer_images=None):
 
     REPL_MAP = make_replacement_map(data)
 
-    # Regex that matches {{KEY}}, {{KEY|suffix}}, {{KEY | suffix}} (spaces ok around pipe)
-    PLACEHOLDER_RE = re.compile(r'\{\{\s*([A-Z0-9_]+)\s*(?:\|[^}]*)?\}\}', re.IGNORECASE)
+    # Regex that matches {{KEY}}, {{KEY-SPLIT}}, {{KEY|suffix}}, {{KEY | suffix}}
+    # Includes '-' in key chars so split-across-linebreak placeholders like
+    # {{PRODUKT_BESCHREI-BUNG}} (after joining runs) are captured.
+    PLACEHOLDER_RE = re.compile(r'\{\{\s*([A-Z0-9_-]+)\s*(?:\|[^}]*)?\}\}', re.IGNORECASE)
     # Matches the |Xpt font-size hint inside a placeholder, e.g. {{MIN_UNI|50pt}}
     _SIZE_HINT_RE = re.compile(r'\|\s*(\d+)\s*pt\b', re.IGNORECASE)
 
     def replace_text(text):
-        """Replace all placeholders in a string using REPL_MAP."""
+        """Replace all placeholders in a string using REPL_MAP.
+        Strips hyphens from keys before lookup so {{PRODUKT_BESCHREI-BUNG}}
+        resolves to PRODUKT_BESCHREIBUNG (PowerPoint line-break artefact).
+        """
         def _sub(m):
-            key = m.group(1).upper().strip()
+            key = m.group(1).upper().strip().replace('-', '')
             return REPL_MAP.get(key, m.group(0))  # keep original if not found
         return PLACEHOLDER_RE.sub(_sub, text)
 
