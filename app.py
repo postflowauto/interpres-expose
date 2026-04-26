@@ -2283,6 +2283,7 @@ def _run_expose_job(job_id, zip_paths):
                         "name": fname,
                         "ext": ext,
                         "bytes": raw,
+                        "b64": base64.b64encode(raw).decode(),
                         "size": len(raw),
                     })
                     print(f"[{job_id}] Direktbild: {fname} ({len(raw)//1024} KB)")
