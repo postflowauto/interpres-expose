@@ -46,6 +46,7 @@ API_TOKEN = os.environ.get("API_TOKEN", "interpres-secret-2026")
 CLAUDE_API_KEY = os.environ.get("CLAUDE_API_KEY", "")
 CLOUDCONVERT_KEY = os.environ.get("CLOUDCONVERT_KEY", "")
 UNSPLASH_ACCESS_KEY = os.environ.get("UNSPLASH_ACCESS_KEY", "")
+TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY", "")
 TEST_MODE = os.environ.get("TEST_MODE", "false").lower() == "true"
 TEMPLATE_URL = "https://raw.githubusercontent.com/postflowauto/interpres-expose/main/urbanunits_Marketing_Expose_v3.pdf-19.pptx"
 
@@ -839,12 +840,21 @@ def fill_image_placeholders(data):
         seed = abs(hash(f"{city} {hint}")) % 1000
         data[slot] = f"https://picsum.photos/seed/{seed}/1200/800"
 
+    # Slots die NUR mit echten Projektfotos befüllt werden sollen.
+    # Kein Picsum-Fallback – falsches Foto ist schlimmer als kein Foto.
+    _NO_FALLBACK_SLOTS = {
+        "bild_projekt_aussen", "bild_greenliving_1", "bild_greenliving_2",
+        "bild_collage_1", "bild_collage_2", "bild_collage_3", "bild_collage_4", "bild_collage_5",
+        "bild_hotel_1", "bild_hotel_2",
+        "bild_ansicht_1", "bild_ansicht_2",
+        "bild_standort_innen",
+        "bild_rechtlich_1", "bild_rechtlich_2",
+        "bild_grundriss_intro_1", "bild_grundriss_intro_2", "bild_grundriss_intro_3",
+    }
+
     queries = UNSPLASH_QUERIES.copy()
-    if stadt:
-        queries["BILD_PROJEKT_AUSSEN"] = f"modern apartment building {stadt} exterior"
-        queries["BILD_GREENLIVING_1"] = f"sustainable green building {stadt}"
-        queries["BILD_GREENLIVING_2"] = f"modern residential {stadt} facade"
-        queries["BILD_LAGEPLAN"] = f"city map district aerial {stadt}"
+    # Lageplan-URL kommt aus OSM, nicht aus Picsum
+    queries.pop("BILD_LAGEPLAN", None)
 
     filled = 0
     for placeholder_key, query in queries.items():
@@ -853,6 +863,9 @@ def fill_image_placeholders(data):
             continue
         # Skip wenn Slot bereits durch Kundenbild oder Wikimedia belegt
         if data.get(data_key) and str(data[data_key]).startswith("http"):
+            continue
+        # Kein Picsum für projekt-spezifische Slots ohne Kundenbild
+        if data_key in _NO_FALLBACK_SLOTS:
             continue
         # Skip bild_we_N für nicht vorhandene WE-Typen
         _m = re.match(r'^bild_we_(\d+)$', data_key)
@@ -866,7 +879,7 @@ def fill_image_placeholders(data):
                             or data.get(f"we_beispiel_{right_n}") or data.get(f"we_bereich_{right_n}"))
                 if not has_text:
                     continue
-        # Picsum direkt (kein Unsplash-Call → kein Rate-Limit)
+        # Picsum für generische Slots (Ausstattung, WE-Typen, etc.)
         seed = abs(hash(query)) % 1000
         url = f"https://picsum.photos/seed/{seed}/1200/800"
         data[data_key] = url
@@ -920,17 +933,35 @@ def fill_image_placeholders(data):
 # ── Geocoding + Proximity Calculation via Nominatim + Overpass ─────────────
 
 def _geocode_address(adresse, stadt):
-    """Geocodiert eine Adresse via Nominatim. Gibt (lat, lon) zurück oder None."""
+    """Geocodiert eine Adresse via Nominatim.
+    Gibt (lat, lon, official_city) zurück oder None.
+    official_city = offizieller Gemeinde-/Stadtname laut OSM (kann von 'stadt' abweichen).
+    """
     try:
         resp = requests.get(
             "https://nominatim.openstreetmap.org/search",
-            params={"q": f"{adresse}, {stadt}, Deutschland", "format": "json", "limit": 1},
+            params={
+                "q": f"{adresse}, {stadt}, Deutschland",
+                "format": "json",
+                "addressdetails": 1,
+                "limit": 1,
+            },
             headers={"User-Agent": "interpres-expose/1.0 (contact@interpres.de)"},
-            timeout=10
+            timeout=10,
         )
         if resp.status_code == 200 and resp.json():
             loc = resp.json()[0]
-            return float(loc['lat']), float(loc['lon'])
+            addr = loc.get("address", {})
+            # Offizielle Stadt/Gemeinde aus OSM-Adressdaten (Priorität: city > town > village > municipality)
+            official_city = (
+                addr.get("city")
+                or addr.get("town")
+                or addr.get("village")
+                or addr.get("municipality")
+                or stadt  # Fallback auf User-Angabe
+            )
+            print(f"  Nominatim: stadt_input='{stadt}' → official_city='{official_city}'")
+            return float(loc['lat']), float(loc['lon']), official_city
     except Exception as e:
         print(f"  Geocoding Fehler für '{adresse}, {stadt}': {e}")
     return None
@@ -940,6 +971,55 @@ def _osm_lageplan_url(lat, lon, zoom=15):
     """Generiert eine OpenStreetMap Static Map URL für den Projektstandort."""
     # Wikimedia static map: free, no API key needed, uses OSM tiles
     return f"https://maps.wikimedia.org/img/osm-intl,{zoom},{lat:.5f},{lon:.5f},800x600.png"
+
+
+def _search_city_info(stadt, stadtteil=""):
+    """Sucht aktuelle Infos zur Stadt via Tavily API.
+    Gibt einen zusammengefassten Text-Block zurück, den Claude für Stadtstatistiken nutzen kann.
+    """
+    if not TAVILY_API_KEY:
+        print(f"  TAVILY_API_KEY fehlt – kein Web-Search für '{stadt}'")
+        return ""
+
+    queries = [
+        f"{stadt} Immobilienmarkt Mietpreise Wohnungsmarkt 2024 2025",
+        f"{stadt} Wirtschaft Investitionen Unternehmen Arbeitgeber Wachstum",
+        f"{stadt} Bevölkerung Einwohner Infrastruktur Stadtentwicklung aktuell",
+    ]
+    if stadtteil and stadtteil.lower() != stadt.lower():
+        queries.append(f"{stadtteil} {stadt} Stadtentwicklung neue Projekte")
+
+    results = []
+    for q in queries:
+        try:
+            resp = requests.post(
+                "https://api.tavily.com/search",
+                json={
+                    "api_key": TAVILY_API_KEY,
+                    "query": q,
+                    "search_depth": "basic",
+                    "max_results": 3,
+                    "include_answer": True,
+                    "include_raw_content": False,
+                },
+                timeout=20,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("answer"):
+                    results.append(f"[{q}]\n{data['answer']}")
+                for r in data.get("results", [])[:2]:
+                    snippet = (r.get("content") or r.get("snippet") or "")[:400]
+                    if snippet:
+                        results.append(snippet)
+            else:
+                print(f"  Tavily Fehler {resp.status_code} für '{q}': {resp.text[:100]}")
+        except Exception as e:
+            print(f"  Tavily Exception für '{q}': {e}")
+
+    combined = "\n\n---\n\n".join(results)
+    print(f"  Tavily: {len(results)} Ergebnisse für '{stadt}', {len(combined)} Zeichen")
+    return combined
 
 
 def _calculate_proximity_data(adresse, stadt, lat, lon):
@@ -1166,7 +1246,7 @@ def analyze_pdfs_with_claude(pdfs):
         print(f"  JSON-Fehler in analyze_pdfs: {e} – letzten 200 Zeichen: ...{text[-200:]}")
         raise
 
-def generate_expose_with_claude(projektdaten):
+def generate_expose_with_claude(projektdaten, city_context=""):
     stadt = projektdaten.get('stadt', 'der Stadt')
     projekt = projektdaten.get('projektname_roh', 'das Projekt')
     bautraeger = projektdaten.get('bautraeger', 'urbanunits')
@@ -1315,7 +1395,15 @@ def generate_expose_with_claude(projektdaten):
         f"Und so weiter. ACHTUNG: we_flaeche_1-5 gelten für das erste WE-Paar! Wenn mehrere Slides,\n"
         f"dann alle WE-Typen haben ähnliche Raumaufteilung.\n\n"
 
-        f"## STADTSTATISTIKEN ({stadt}):\n"
+        + (
+        f"## AKTUELLE RECHERCHE-ERGEBNISSE FÜR {stadt.upper()} (Web-Suche, Stand heute):\n"
+        f"Nutze diese Informationen für alle Stadtfelder (text_stadt_*, stadt_einwohner, "
+        f"stadt_mietsteigerung, text_einwohner_detail, text_bip_detail etc.).\n"
+        f"Extrahiere konkrete Zahlen, Unternehmen, Projekte, Entwicklungen:\n\n"
+        f"{city_context}\n\n"
+        if city_context else ""
+        )
+        + f"## STADTSTATISTIKEN ({stadt}):\n"
         f"Verwende echte, aktuelle Zahlen für {stadt}:\n"
         f"stadt_einwohner: Einwohnerzahl als formatierte Zahl, z.B. '245.279'\n"
         f"bundesland_bip: BIP des Bundeslandes NUR als Zahl+Einheit OHNE 'EUR'/'Euro', z.B. '310 Mrd.' oder '78,4 Mrd.'\n"
@@ -2328,27 +2416,42 @@ def _run_expose_job(job_id, zip_paths):
             print(f"[{job_id}] Schritt 1/5: analyze_pdfs_with_claude…")
             projektdaten = analyze_pdfs_with_claude(pdfs)
 
-            # Schritt 1b: Geocoding + Proximity (parallel zur Claude-Arbeit)
-            adresse = projektdaten.get("adresse", "")
-            stadt   = projektdaten.get("stadt", "")
-            geo_coords = None
+            # Schritt 1b: Geocoding + offizielle Stadt + Web-Suche
+            adresse   = projektdaten.get("adresse", "")
+            stadt     = projektdaten.get("stadt", "")
+            stadtteil = projektdaten.get("stadtteil", "")
+            geo_result = None
+            official_city = stadt  # Fallback
             if adresse and stadt:
                 print(f"[{job_id}] Schritt 1b: Geocoding {adresse!r}, {stadt!r} …")
-                geo_coords = _geocode_address(adresse, stadt)
-                if geo_coords:
-                    lat, lon = geo_coords
-                    print(f"[{job_id}]   → ({lat:.4f}, {lon:.4f})")
+                geo_result = _geocode_address(adresse, stadt)
+                if geo_result:
+                    lat, lon, official_city = geo_result
+                    print(f"[{job_id}]   → ({lat:.4f}, {lon:.4f}), official_city='{official_city}'")
+                    # Offizielle Stadt in projektdaten setzen (für Stadtbilder + Stats)
+                    if official_city and official_city.lower() != stadt.lower():
+                        print(f"[{job_id}]   Stadt korrigiert: '{stadt}' → '{official_city}'")
+                        projektdaten["stadt_offiziell"] = official_city
+                        # Für Bildsuche und Expose-Generierung die offizielle Stadt nutzen
+                        projektdaten["stadt"] = official_city
+
+            # Web-Suche: aktuelle Stadtinfos via Tavily
+            city_context = ""
+            search_city = projektdaten.get("stadt", stadt)
+            if search_city:
+                print(f"[{job_id}] Schritt 1c: Tavily Web-Suche für '{search_city}' …")
+                city_context = _search_city_info(search_city, stadtteil)
 
             _set(status="processing", phase="Exposé-Texte werden generiert …")
             print(f"[{job_id}] Schritt 2/5: generate_expose_with_claude…")
-            raw_expose = generate_expose_with_claude(projektdaten)
+            raw_expose = generate_expose_with_claude(projektdaten, city_context=city_context)
             print(f"[{job_id}]   Claude-Ausgabe: {len(raw_expose)} Felder")
             expose_data = {**PLATZHALTER, **raw_expose}
             expose_data["logo_initial"] = generate_logo_initial(expose_data.get("projekt_name", ""))
 
             # Schritt 2b: Proximity-Daten (Einkaufen/Ärzte/Sport/Bildung) berechnen
-            if geo_coords:
-                lat, lon = geo_coords
+            if geo_result:
+                lat, lon, _ = geo_result
                 print(f"[{job_id}] Schritt 2b: Proximity via Overpass …")
                 proximity = _calculate_proximity_data(adresse, stadt, lat, lon)
                 expose_data.update(proximity)
