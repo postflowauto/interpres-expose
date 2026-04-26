@@ -734,22 +734,45 @@ def classify_and_assign_customer_images(images):
     return result
 
 
-def _fetch_wikimedia_city_image(city, hint=""):
-    """Sucht ein echtes Stadtfoto via Wikimedia Commons.
-    Gibt eine direkte Bild-URL zurück oder None bei Fehler.
+def _fetch_wikipedia_city_image(city, lang="de"):
+    """Holt das Hauptbild des Wikipedia-Artikels über eine Stadt.
+    Zuverlässiger als Wikimedia Commons Suche – gibt immer das offizielle Stadtfoto zurück.
     """
-    search_q = f"{city} {hint}".strip()
+    title = city.replace(" ", "_")
+    for wiki_lang in [lang, "en"]:
+        try:
+            resp = requests.get(
+                f"https://{wiki_lang}.wikipedia.org/api/rest_v1/page/summary/{requests.utils.quote(title)}",
+                headers={"User-Agent": "interpres-expose/1.0"},
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                d = resp.json()
+                img = ((d.get("originalimage") or {}).get("source") or
+                       (d.get("thumbnail") or {}).get("source"))
+                if img and img.lower().split("?")[0].rsplit(".", 1)[-1] in ("jpg", "jpeg", "png"):
+                    print(f"  Wikipedia ({wiki_lang}) '{city}': {img[:80]}")
+                    return img
+        except Exception as e:
+            print(f"  Wikipedia {wiki_lang} Fehler für '{city}': {e}")
+    return None
+
+
+def _fetch_wikimedia_image(query):
+    """Sucht ein thematisch passendes Bild via Wikimedia Commons.
+    Für Amenity/Ausstattungsbilder mit spezifischen deutschen Suchbegriffen.
+    """
     try:
         resp = requests.get(
             "https://commons.wikimedia.org/w/api.php",
             params={
                 "action": "query",
                 "generator": "search",
-                "gsrnamespace": 6,          # File namespace
-                "gsrsearch": search_q,
-                "gsrlimit": 10,
+                "gsrnamespace": 6,
+                "gsrsearch": query,
+                "gsrlimit": 8,
                 "prop": "imageinfo",
-                "iiprop": "url|size|mediatype",
+                "iiprop": "url|size",
                 "iiurlwidth": 1200,
                 "format": "json",
             },
@@ -763,23 +786,20 @@ def _fetch_wikimedia_city_image(city, hint=""):
         for page in pages.values():
             for ii in page.get("imageinfo", []):
                 url = ii.get("thumburl") or ii.get("url", "")
-                w   = ii.get("thumbwidth", 0)
-                h   = ii.get("thumbheight", 0)
+                w, h = ii.get("thumbwidth", 0), ii.get("thumbheight", 0)
                 if not url:
                     continue
                 ext = url.lower().split("?")[0].rsplit(".", 1)[-1]
                 if ext not in ("jpg", "jpeg", "png"):
                     continue
-                if w > 0 and h > 0 and w < h:  # skip portrait images
+                if w > 0 and h > 0 and w < h:
                     continue
                 candidates.append((w * h, url))
         if candidates:
             candidates.sort(reverse=True)
-            chosen = candidates[0][1]
-            print(f"  Wikimedia city image: {chosen[:80]}")
-            return chosen
+            return candidates[0][1]
     except Exception as e:
-        print(f"  Wikimedia Commons Fehler für '{search_q}': {e}")
+        print(f"  Wikimedia Fehler für '{query}': {e}")
     return None
 
 
@@ -818,27 +838,34 @@ def fill_image_placeholders(data):
     """
     stadt = data.get("stadt", "")
 
-    # Stadtspezifische Slots: echte Wikimedia-Fotos bevorzugen
-    _CITY_SLOTS = {
-        "bild_titel":         (stadt, "city skyline modern"),
-        "bild_quartier":      (stadt, "residential neighborhood street"),
-        "bild_stadt_gross":   (stadt, "aerial city view panorama"),
-        "bild_stadt_klein":   (stadt, "city center street view"),
-        "bild_standort_aussen": (stadt, "city district residential"),
-    }
-    for slot, (city, hint) in _CITY_SLOTS.items():
+    # Stadtspezifische Slots: Wikipedia REST API (zuverlässig) → Wikimedia-Fallback
+    stadtteil = data.get("stadtteil", "")
+    _CITY_SLOT_SEARCHES = [
+        # (slot,                primary_search,                        commons_fallback_query)
+        ("bild_titel",          stadt,                                 f"{stadt} Stadtansicht Panorama"),
+        ("bild_quartier",       stadtteil or stadt,                    f"{stadt} Stadtquartier Wohngebiet"),
+        ("bild_stadt_gross",    stadt,                                 f"{stadt} Luftbild Stadtpanorama"),
+        ("bild_stadt_klein",    f"{stadt} Innenstadt",                 f"{stadt} Innenstadt Marktplatz"),
+        ("bild_standort_aussen",stadtteil or stadt,                    f"{stadtteil or stadt} Stadtbild Straße"),
+    ]
+    for slot, wp_search, commons_q in _CITY_SLOT_SEARCHES:
         if slot not in data:
             continue
         if data.get(slot) and str(data[slot]).startswith("http"):
-            continue   # already filled by customer image
-        if city:
-            url = _fetch_wikimedia_city_image(city, hint)
-            if url:
-                data[slot] = url
-                continue
-        # Picsum fallback for this city slot
-        seed = abs(hash(f"{city} {hint}")) % 1000
-        data[slot] = f"https://picsum.photos/seed/{seed}/1200/800"
+            continue  # already filled by customer image
+        if not stadt:
+            continue
+        # 1. Wikipedia REST API – most reliable, always the official city photo
+        url = _fetch_wikipedia_city_image(wp_search)
+        if not url:
+            # 2. Wikimedia Commons with specific German search term
+            url = _fetch_wikimedia_image(commons_q)
+        if not url:
+            # 3. Last resort: Picsum
+            seed = abs(hash(commons_q)) % 1000
+            url = f"https://picsum.photos/seed/{seed}/1200/800"
+        data[slot] = url
+        print(f"  {slot} → {url[:70]}")
 
     # Slots die NUR mit echten Projektfotos befüllt werden sollen.
     # Kein Picsum-Fallback – falsches Foto ist schlimmer als kein Foto.
@@ -885,46 +912,58 @@ def fill_image_placeholders(data):
         data[data_key] = url
         filled += 1
 
-    # Amenity-spezifische Bild-Queries aus tatsächlichen amenity_N Werten ableiten
+    # Amenity-spezifische Bilder: Wikimedia Commons mit deutschen Fachbegriffen
+    # → viel zuverlässiger als Picsum (gibt thematisch passende Fotos)
     _AMENITY_QUERY_MAP = {
-        "dachterras": "rooftop terrace modern apartment building",
-        "balkon": "balcony apartment modern residential",
-        "terras": "terrace outdoor seating urban modern",
-        "fahrrad": "bicycle storage modern residential building",
-        "spindel": "spiral staircase modern building interior",
-        "gemeinschaft": "communal lounge modern apartment building",
-        "smart": "smart home door lock technology modern",
-        "smart-lock": "smart door lock keyless entry modern",
-        "sanitär": "modern bathroom residential design",
-        "boden": "hardwood floor modern apartment interior",
-        "außenanlage": "landscaping residential exterior modern garden",
-        "außen": "modern residential building exterior architecture",
-        "aufzug": "modern elevator building interior",
-        "gym": "gym fitness center modern",
-        "pool": "swimming pool modern residential",
-        "küche": "modern kitchen interior residential",
-        "keller": "storage room organized modern",
-        "tiefgarage": "underground parking modern building",
-        "parken": "parking modern residential building",
-        "solar": "solar panels rooftop renewable energy",
-        "photovoltaik": "solar panels rooftop renewable energy building",
-        "fernwärme": "district heating pipes modern energy infrastructure",
-        "concierge": "reception concierge modern luxury building",
-        "post": "parcel station package locker modern",
-        "e-bike": "e-bike sharing station urban modern",
+        "dachterras":   "Dachterrasse Wohngebäude modern",
+        "balkon":       "Balkon Wohnung modern",
+        "terras":       "Terrasse Außenbereich modern Wohnen",
+        "fahrrad":      "Fahrradkeller Fahrradabstellraum Wohnhaus",
+        "spindel":      "Abstellraum Einlagerung modern",
+        "gemeinschaft": "Gemeinschaftsraum Aufenthaltsraum modern",
+        "smart":        "Smart Home Steuerung Wohnhaus",
+        "smart-lock":   "Türschloss elektronisch Zugangssystem",
+        "sanitär":      "modernes Badezimmer Dusche Wohnhaus",
+        "bad":          "modernes Badezimmer Dusche Wohnhaus",
+        "boden":        "Parkett Holzboden Wohnung modern",
+        "außenanlage":  "Außenanlage Grünfläche Wohnanlage",
+        "außen":        "Wohngebäude Außenansicht Neubau",
+        "aufzug":       "Fahrstuhl Aufzug modernes Wohnhaus",
+        "gym":          "Fitnessstudio Fitnessraum modern",
+        "pool":         "Schwimmbad Schwimmbecken modern",
+        "küche":        "moderne Einbauküche Wohnung",
+        "keller":       "Kellerraum Abstellraum Wohnhaus",
+        "tiefgarage":   "Tiefgarage Parkhaus Wohnanlage",
+        "parken":       "Stellplatz Parkplatz Wohngebäude",
+        "solar":        "Photovoltaik Solaranlage Dach Wohnhaus",
+        "photovoltaik": "Photovoltaikanlage Solarpanel Gebäude",
+        "fernwärme":    "Fernwärme Heizungsanlage modernes Gebäude",
+        "concierge":    "Empfang Rezeption modernes Wohnhaus",
+        "post":         "Paketstation Briefkasten Wohnhaus",
+        "e-bike":       "E-Bike Fahrrad Ladestation urban",
+        "möbli":        "möbliertes Apartment Wohnen modern",
+        "möbel":        "möbliertes Zimmer modernes Interieur",
     }
     for n in range(1, 10):
         amenity_val = str(data.get(f"amenity_{n}", "")).strip().lower()
         bild_key = f"bild_amenity_{n}"
-        if bild_key in data and not data.get(bild_key):
-            matched_query = None
-            for kw, q in _AMENITY_QUERY_MAP.items():
-                if kw in amenity_val:
-                    matched_query = q
-                    break
-            if matched_query:
-                seed = abs(hash(matched_query)) % 1000
-                data[bild_key] = f"https://picsum.photos/seed/{seed}/1200/800"
+        if bild_key not in data or data.get(bild_key):
+            continue
+        matched_query = None
+        for kw, q in _AMENITY_QUERY_MAP.items():
+            if kw in amenity_val:
+                matched_query = q
+                break
+        if not matched_query:
+            matched_query = "modernes Apartment Wohnen Ausstattung"
+        # Wikimedia Commons mit spezifischem deutschem Suchbegriff
+        url = _fetch_wikimedia_image(matched_query)
+        if url:
+            data[bild_key] = url
+        else:
+            # Picsum nur als letzter Fallback
+            seed = abs(hash(matched_query)) % 1000
+            data[bild_key] = f"https://picsum.photos/seed/{seed}/1200/800"
 
     print(f"fill_image_placeholders: {filled} Slots mit Picsum-Fallback befüllt")
     return data
@@ -1269,7 +1308,10 @@ def generate_expose_with_claude(projektdaten, city_context=""):
 
     prompt = (
         "Du bist ein erfahrener Immobilien-Exposé-Texter bei INTERPRÉS GmbH. "
-        "Antworte NUR mit einem validen JSON-Objekt. Kein Text davor oder danach. Keine Markdown-Backticks.\n\n"
+        "Antworte NUR mit einem validen JSON-Objekt. Kein Text davor oder danach. Keine Markdown-Backticks.\n"
+        "⚠️ WICHTIG: Verwende '€' NUR für Geldbeträge (z.B. '189.000 €' oder '17 Mrd. €'). "
+        "NIEMALS '€' als Silbe in deutschen Wörtern wie 'Europas', 'Europa', 'europäisch' – "
+        "schreibe diese Wörter immer vollständig aus!\n\n"
 
         f"## PROJEKTDATEN\n{json.dumps(projektdaten, ensure_ascii=False)}\n"
         f"{we_typen_hint}\n"
@@ -1452,6 +1494,20 @@ def generate_expose_with_claude(projektdaten, city_context=""):
     json_text = json_text.replace("```json", "").replace("```", "").strip()
     if not json_text:
         raise ValueError(f"Claude hat keinen Text zurückgegeben. stop_reason={stop_reason}")
+
+    # ── Text-Korrekturen: Claude-Fehler bei der Verwendung von Sonderzeichen ──
+    # Claude schreibt manchmal "€pas" statt "Europas" (verwechselt € mit "Euro-")
+    _TEXT_FIXES = [
+        ("€pas",       "Europas"),
+        ("€pa ",       "Europa "),
+        ("€päisch",    "europäisch"),
+        ("€pä",        "europä"),
+        ("€pe",        "Europe"),
+        ("IIntel",     "Intel"),
+        ("  ",         " "),    # doppelte Leerzeichen
+    ]
+    for wrong, right in _TEXT_FIXES:
+        json_text = json_text.replace(wrong, right)
 
     # Wenn Claude durch max_tokens abgeschnitten wurde → JSON reparieren
     if stop_reason == "max_tokens":
