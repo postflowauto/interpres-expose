@@ -47,7 +47,7 @@ CLAUDE_API_KEY = os.environ.get("CLAUDE_API_KEY", "")
 CLOUDCONVERT_KEY = os.environ.get("CLOUDCONVERT_KEY", "")
 UNSPLASH_ACCESS_KEY = os.environ.get("UNSPLASH_ACCESS_KEY", "")
 TEST_MODE = os.environ.get("TEST_MODE", "false").lower() == "true"
-TEMPLATE_URL = "https://raw.githubusercontent.com/postflowauto/interpres-expose/main/urbanunits_Marketing_Expose_v3.pdf-18.pptx"
+TEMPLATE_URL = "https://raw.githubusercontent.com/postflowauto/interpres-expose/main/urbanunits_Marketing_Expose_v3.pdf-19.pptx"
 
 # Dummy-Daten für TEST_MODE (kein Claude-API-Call)
 DUMMY_PROJEKTDATEN = {
@@ -307,11 +307,31 @@ PLATZHALTER = {
     "min_uni": "", "label_min_uni": "",
     "min_bahnhof": "", "label_min_bahnhof": "",
     "min_altstadt": "", "label_min_altstadt": "",
-    # ── Alles ganz nah (Slide 14): 4 Freizeit-Einträge ───────────────────────
+    # ── Alles ganz nah (Slide 14): Freizeit (4) ─────────────────────────────
     "freizeit_1_name": "", "min_freizeit_1": "",
     "freizeit_2_name": "", "min_freizeit_2": "",
     "freizeit_3_name": "", "min_freizeit_3": "",
     "freizeit_4_name": "", "min_freizeit_4": "",
+    # ── Alles ganz nah (Slide 14): Einkaufen (4) – via Overpass ─────────────
+    "einkaufen_1_name": "Bäckerei",   "min_einkaufen_1": "2",
+    "einkaufen_2_name": "Supermarkt", "min_einkaufen_2": "2",
+    "einkaufen_3_name": "Drogerie",   "min_einkaufen_3": "3",
+    "einkaufen_4_name": "REWE",       "min_einkaufen_4": "4",
+    # ── Alles ganz nah (Slide 14): Ärzte (4) – via Overpass ─────────────────
+    "arzt_1_name": "Hausarzt",    "min_arzt_1": "5",
+    "arzt_2_name": "Facharzt",    "min_arzt_2": "8",
+    "arzt_3_name": "Apotheke",    "min_arzt_3": "3",
+    "arzt_4_name": "Krankenhaus", "min_arzt_4": "12",
+    # ── Alles ganz nah (Slide 14): Sport (4) – via Overpass ─────────────────
+    "sport_1_name": "Fitnessstudio", "min_sport_1": "8",
+    "sport_2_name": "Schwimmbad",    "min_sport_2": "10",
+    "sport_3_name": "Sportanlage",   "min_sport_3": "6",
+    "sport_4_name": "Sportpark",     "min_sport_4": "5",
+    # ── Alles ganz nah (Slide 14): Bildung (4) – via Overpass ───────────────
+    "bildung_1_name": "Kita",        "min_bildung_1": "5",
+    "bildung_2_name": "Grundschule", "min_bildung_2": "8",
+    "bildung_3_name": "Gymnasium",   "min_bildung_3": "10",
+    "bildung_4_name": "Universität", "min_bildung_4": "15",
     # ── WE-Typen ──────────────────────────────────────────────────────────────
     "we_beispiel_1": "", "we_bereich_1": "",
     "we_beispiel_2": "", "we_bereich_2": "",
@@ -784,8 +804,252 @@ def fill_image_placeholders(data):
         data[data_key] = url
         filled += 1
 
+    # Amenity-spezifische Bild-Queries aus tatsächlichen amenity_N Werten ableiten
+    _AMENITY_QUERY_MAP = {
+        "dachterras": "rooftop terrace modern apartment building",
+        "balkon": "balcony apartment modern residential",
+        "terras": "terrace outdoor seating urban modern",
+        "fahrrad": "bicycle storage modern residential building",
+        "spindel": "spiral staircase modern building interior",
+        "gemeinschaft": "communal lounge modern apartment building",
+        "smart": "smart home door lock technology modern",
+        "smart-lock": "smart door lock keyless entry modern",
+        "sanitär": "modern bathroom residential design",
+        "boden": "hardwood floor modern apartment interior",
+        "außenanlage": "landscaping residential exterior modern garden",
+        "außen": "modern residential building exterior architecture",
+        "aufzug": "modern elevator building interior",
+        "gym": "gym fitness center modern",
+        "pool": "swimming pool modern residential",
+        "küche": "modern kitchen interior residential",
+        "keller": "storage room organized modern",
+        "tiefgarage": "underground parking modern building",
+        "parken": "parking modern residential building",
+        "solar": "solar panels rooftop renewable energy",
+        "photovoltaik": "solar panels rooftop renewable energy building",
+        "fernwärme": "district heating pipes modern energy infrastructure",
+        "concierge": "reception concierge modern luxury building",
+        "post": "parcel station package locker modern",
+        "e-bike": "e-bike sharing station urban modern",
+    }
+    for n in range(1, 10):
+        amenity_val = str(data.get(f"amenity_{n}", "")).strip().lower()
+        bild_key = f"bild_amenity_{n}"
+        if bild_key in data and not data.get(bild_key):
+            matched_query = None
+            for kw, q in _AMENITY_QUERY_MAP.items():
+                if kw in amenity_val:
+                    matched_query = q
+                    break
+            if matched_query:
+                seed = abs(hash(matched_query)) % 1000
+                data[bild_key] = f"https://picsum.photos/seed/{seed}/1200/800"
+
     print(f"fill_image_placeholders: {filled} Slots mit Picsum-Fallback befüllt")
     return data
+
+
+# ── Geocoding + Proximity Calculation via Nominatim + Overpass ─────────────
+
+def _geocode_address(adresse, stadt):
+    """Geocodiert eine Adresse via Nominatim. Gibt (lat, lon) zurück oder None."""
+    try:
+        resp = requests.get(
+            "https://nominatim.openstreetmap.org/search",
+            params={"q": f"{adresse}, {stadt}, Deutschland", "format": "json", "limit": 1},
+            headers={"User-Agent": "interpres-expose/1.0 (contact@interpres.de)"},
+            timeout=10
+        )
+        if resp.status_code == 200 and resp.json():
+            loc = resp.json()[0]
+            return float(loc['lat']), float(loc['lon'])
+    except Exception as e:
+        print(f"  Geocoding Fehler für '{adresse}, {stadt}': {e}")
+    return None
+
+
+def _osm_lageplan_url(lat, lon, zoom=15):
+    """Generiert eine OpenStreetMap Static Map URL für den Projektstandort."""
+    # Wikimedia static map: free, no API key needed, uses OSM tiles
+    return f"https://maps.wikimedia.org/img/osm-intl,{zoom},{lat:.5f},{lon:.5f},800x600.png"
+
+
+def _calculate_proximity_data(adresse, stadt, lat, lon):
+    """
+    Berechnet Entfernungen zu nahegelegenen POIs via Overpass API.
+    Gibt dict mit einkaufen_N_name, min_einkaufen_N etc. zurück.
+    Walking speed: 80 m/min | Cycling: 250 m/min
+    """
+    import math
+
+    def _haversine_m(lat1, lon1, lat2, lon2):
+        R = 6371000
+        p1, p2 = math.radians(lat1), math.radians(lat2)
+        dp, dl = math.radians(lat2 - lat1), math.radians(lon2 - lon1)
+        a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+        return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+    def _walk(m): return str(max(1, round(m / 80)))
+    def _bike(m): return str(max(1, round(m / 250)))
+
+    # Defaults (match template DQN reference values)
+    result = {
+        "einkaufen_1_name": "Bäckerei",    "min_einkaufen_1": "2",
+        "einkaufen_2_name": "Supermarkt",  "min_einkaufen_2": "2",
+        "einkaufen_3_name": "Drogerie",    "min_einkaufen_3": "3",
+        "einkaufen_4_name": "Getränke",    "min_einkaufen_4": "4",
+        "arzt_1_name": "Hausarzt",         "min_arzt_1": "5",
+        "arzt_2_name": "Facharzt",         "min_arzt_2": "8",
+        "arzt_3_name": "Apotheke",         "min_arzt_3": "3",
+        "arzt_4_name": "Krankenhaus",      "min_arzt_4": "12",
+        "sport_1_name": "Fitnessstudio",   "min_sport_1": "8",
+        "sport_2_name": "Schwimmbad",      "min_sport_2": "10",
+        "sport_3_name": "Sportanlage",     "min_sport_3": "6",
+        "sport_4_name": "Sportpark",       "min_sport_4": "5",
+        "bildung_1_name": "Kita",          "min_bildung_1": "5",
+        "bildung_2_name": "Grundschule",   "min_bildung_2": "8",
+        "bildung_3_name": "Gymnasium",     "min_bildung_3": "10",
+        "bildung_4_name": "Universität",   "min_bildung_4": "15",
+    }
+
+    try:
+        overpass_q = f"""[out:json][timeout:15];
+(
+  node(around:2000,{lat},{lon})[amenity=bakery];
+  node(around:2000,{lat},{lon})[shop=supermarket];
+  node(around:2000,{lat},{lon})[shop=convenience];
+  node(around:2000,{lat},{lon})[shop=beverages];
+  node(around:2000,{lat},{lon})[shop=chemist];
+  node(around:2000,{lat},{lon})[shop=drugstore];
+  node(around:2000,{lat},{lon})[amenity=doctors];
+  node(around:2000,{lat},{lon})[amenity=clinic];
+  node(around:2000,{lat},{lon})[amenity=pharmacy];
+  node(around:2000,{lat},{lon})[amenity=hospital];
+  node(around:2000,{lat},{lon})[leisure=fitness_centre];
+  node(around:2000,{lat},{lon})[leisure=sports_centre];
+  node(around:2000,{lat},{lon})[leisure=swimming_pool];
+  node(around:2000,{lat},{lon})[leisure=pitch];
+  node(around:2000,{lat},{lon})[amenity=kindergarten];
+  node(around:2000,{lat},{lon})[amenity=school];
+  node(around:2000,{lat},{lon})[amenity=university];
+  node(around:2000,{lat},{lon})[amenity=college];
+);out body;"""
+
+        op = requests.post(
+            "https://overpass-api.de/api/interpreter",
+            data={"data": overpass_q},
+            timeout=25,
+            headers={"User-Agent": "interpres-expose/1.0"}
+        )
+        if op.status_code != 200:
+            print(f"  Overpass HTTP {op.status_code}")
+            return result
+
+        cats = {k: [] for k in (
+            "bakery", "supermarket", "beverages", "chemist",
+            "doctors", "pharmacy", "hospital",
+            "fitness", "swimming", "pitch",
+            "kindergarten", "school", "university"
+        )}
+        for el in op.json().get("elements", []):
+            tags = el.get("tags", {})
+            el_lat, el_lon = float(el.get("lat", lat)), float(el.get("lon", lon))
+            name = (tags.get("name") or "").strip()
+            dist = _haversine_m(lat, lon, el_lat, el_lon)
+            amenity = tags.get("amenity", "")
+            shop    = tags.get("shop", "")
+            leisure = tags.get("leisure", "")
+
+            if amenity == "bakery" or shop == "bakery":
+                cats["bakery"].append((dist, name or "Bäckerei"))
+            elif shop == "supermarket":
+                cats["supermarket"].append((dist, name or "Supermarkt"))
+            elif shop in ("beverages",):
+                cats["beverages"].append((dist, name or "Getränkemarkt"))
+            elif shop in ("chemist", "drugstore"):
+                cats["chemist"].append((dist, name or "Drogerie"))
+            elif amenity in ("doctors", "clinic"):
+                cats["doctors"].append((dist, name or "Arzt"))
+            elif amenity == "pharmacy":
+                cats["pharmacy"].append((dist, name or "Apotheke"))
+            elif amenity == "hospital":
+                cats["hospital"].append((dist, name or "Krankenhaus"))
+            elif leisure in ("fitness_centre", "sports_centre"):
+                cats["fitness"].append((dist, name or "Fitnessstudio"))
+            elif leisure == "swimming_pool":
+                cats["swimming"].append((dist, name or "Schwimmbad"))
+            elif leisure == "pitch":
+                cats["pitch"].append((dist, name or "Sportanlage"))
+            elif amenity == "kindergarten":
+                cats["kindergarten"].append((dist, name or "Kita"))
+            elif amenity == "school":
+                cats["school"].append((dist, name or "Schule"))
+            elif amenity in ("university", "college"):
+                cats["university"].append((dist, name or "Universität"))
+
+        for k in cats:
+            cats[k].sort()
+
+        def _near(cat, default, default_min, mode="walk"):
+            pois = cats.get(cat, [])
+            if pois:
+                d, n = pois[0]
+                n = n[:22]  # truncate long names
+                return n, (_walk(d) if mode == "walk" else _bike(d))
+            return default, default_min
+
+        # Einkaufen (walking)
+        n, m = _near("bakery", "Bäckerei", "2")
+        result["einkaufen_1_name"] = n; result["min_einkaufen_1"] = m
+        n, m = _near("supermarket", "Supermarkt", "2")
+        result["einkaufen_2_name"] = n; result["min_einkaufen_2"] = m
+        n, m = _near("chemist", "Drogerie", "3")
+        result["einkaufen_3_name"] = n; result["min_einkaufen_3"] = m
+        n, m = _near("beverages", "Getränkemarkt", "4")
+        result["einkaufen_4_name"] = n; result["min_einkaufen_4"] = m
+
+        # Ärzte (walking)
+        docs = cats.get("doctors", [])
+        if len(docs) >= 1:
+            d, n = docs[0]; result["arzt_1_name"] = n[:22]; result["min_arzt_1"] = _walk(d)
+        if len(docs) >= 2:
+            d, n = docs[1]; result["arzt_2_name"] = n[:22]; result["min_arzt_2"] = _walk(d)
+        n, m = _near("pharmacy", "Apotheke", "3")
+        result["arzt_3_name"] = n; result["min_arzt_3"] = m
+        n, m = _near("hospital", "Krankenhaus", "12")
+        result["arzt_4_name"] = n; result["min_arzt_4"] = m
+
+        # Sport (biking)
+        n, m = _near("fitness", "Fitnessstudio", "8", "bike")
+        result["sport_1_name"] = n; result["min_sport_1"] = m
+        n, m = _near("swimming", "Schwimmbad", "10", "bike")
+        result["sport_2_name"] = n; result["min_sport_2"] = m
+        n, m = _near("pitch", "Sportanlage", "6", "bike")
+        result["sport_3_name"] = n; result["min_sport_3"] = m
+
+        # Bildung (walking/biking)
+        n, m = _near("kindergarten", "Kita", "5")
+        result["bildung_1_name"] = n; result["min_bildung_1"] = m
+
+        schools = cats.get("school", [])
+        grund = [(d, n) for d, n in schools if "gymnasium" not in n.lower()]
+        gyms  = [(d, n) for d, n in schools if "gymnasium" in n.lower()]
+        if grund:
+            d, n = grund[0]; result["bildung_2_name"] = n[:22]; result["min_bildung_2"] = _walk(d)
+        if gyms:
+            d, n = gyms[0]; result["bildung_3_name"] = n[:22]; result["min_bildung_3"] = _walk(d)
+        elif len(schools) >= 2:
+            d, n = schools[1]; result["bildung_3_name"] = n[:22]; result["min_bildung_3"] = _walk(d)
+
+        n, m = _near("university", "Universität", "15", "bike")
+        result["bildung_4_name"] = n; result["min_bildung_4"] = m
+
+        print(f"  Proximity: {sum(1 for k in result if not k.startswith('min_'))} POI-Namen berechnet")
+    except Exception as e:
+        print(f"  Proximity Fehler: {e}")
+
+    return result
+
 
 def analyze_pdfs_with_claude(pdfs):
     content = []
@@ -915,33 +1179,35 @@ def generate_expose_with_claude(projektdaten):
         "### Ausstattung:\n"
         "text_ausstattung_detail: max 2 Sätze. Bodenbelag, Heizung, Balkone. Konkret.\n\n"
 
-        "## ⚠️ STRENGE ZEICHENLIMITS – JEDE ÜBERSCHREITUNG BRICHT DAS LAYOUT:\n"
+        "## ⚠️ ZEICHENLIMITS – NUTZE DEN VOLLEN RAUM, SCHREIBE VIEL!\n"
+        "Schreibe SO LANG WIE MÖGLICH bis zum Maximum. Kurze Texte werden nicht akzeptiert.\n"
         "produkt_beschreibung: max 25 Zeichen (z.B. 'Microapartments' oder '1-2 Zi. möbliert')\n"
         "text_kapitel_invest/live/stay/know/hotel (NUR die Slogan-Zeile): max 40 Zeichen\n"
-        "text_kapitel_invest_1/2, text_kapitel_live_1/2, text_kapitel_stay_1/2, text_kapitel_know_1/2: max 200 Zeichen\n"
+        "text_kapitel_invest_1/2, text_kapitel_live_1/2, text_kapitel_stay_1/2, text_kapitel_know_1/2:\n"
+        "  ZIEL 250-350 Zeichen (MINDESTENS 2 vollständige Sätze, projekt-spezifisch, emotional)\n"
         "text_hotel: max 40 Zeichen\n"
-        "text_intro: max 320 Zeichen\n"
-        "text_investment_pitch: max 420 Zeichen\n"
+        "text_intro: ZIEL 300-420 Zeichen (3 Sätze, emotional, konkret über Projekt + Stadt)\n"
+        "text_investment_pitch: ZIEL 400-600 Zeichen (konkret: Preis, KfW, AfA, Rendite-Potenzial)\n"
         "text_greenliving_intro: max 80 Zeichen\n"
-        "text_greenliving_1: max 320 Zeichen\n"
-        "text_greenliving_2: max 300 Zeichen\n"
+        "text_greenliving_1: ZIEL 280-400 Zeichen\n"
+        "text_greenliving_2: ZIEL 260-380 Zeichen\n"
         "text_ausstattung_intro: max 80 Zeichen\n"
-        "text_ausstattung_detail: max 320 Zeichen\n"
+        "text_ausstattung_detail: ZIEL 280-380 Zeichen\n"
         "text_ausstattung_kurz: max 60 Zeichen\n"
-        "text_ausstattung_lang: max 320 Zeichen\n"
-        "text_grundriss_intro: max 180 Zeichen\n"
-        "text_architektur: max 180 Zeichen\n"
+        "text_ausstattung_lang: ZIEL 260-340 Zeichen\n"
+        "text_grundriss_intro: ZIEL 140-200 Zeichen\n"
+        "text_architektur: ZIEL 140-200 Zeichen\n"
         "text_nachhaltig_1/2/3/4: max 100 Zeichen\n"
-        "text_standort_1/2: max 180 Zeichen\n"
-        "text_projekt_nachhaltig_1/2: max 120 Zeichen\n"
-        "text_stadt_wachstum_1: max 260 Zeichen\n"
-        "text_stadt_wachstum_2: max 240 Zeichen\n"
-        "text_stadt_intro: max 120 Zeichen\n"
-        "text_stadt_wirtschaft_links/rechts: max 180 Zeichen\n"
-        "text_stadt_invest_detail: max 220 Zeichen\n"
-        "text_einwohner_detail/bip_detail/mietsteigerung_detail/studierende_detail: max 70 Zeichen\n"
-        "text_stadt_stat_N_detail: max 70 Zeichen\n"
-        "text_stadt_branche_1/2: max 160 Zeichen\n"
+        "text_standort_1/2: ZIEL 140-200 Zeichen\n"
+        "text_projekt_nachhaltig_1/2: ZIEL 100-150 Zeichen\n"
+        "text_stadt_wachstum_1: ZIEL 220-300 Zeichen\n"
+        "text_stadt_wachstum_2: ZIEL 200-280 Zeichen\n"
+        "text_stadt_intro: ZIEL 100-140 Zeichen\n"
+        "text_stadt_wirtschaft_links/rechts: ZIEL 150-200 Zeichen\n"
+        "text_stadt_invest_detail: ZIEL 180-260 Zeichen\n"
+        "text_einwohner_detail/bip_detail/mietsteigerung_detail/studierende_detail: ZIEL 50-80 Zeichen\n"
+        "text_stadt_stat_N_detail: ZIEL 50-80 Zeichen\n"
+        "text_stadt_branche_1/2: ZIEL 130-180 Zeichen\n"
         "feature_N_label: max 28 Zeichen\n"
         "amenity_N: max 28 Zeichen\n"
         "we_typ_beschreibung: max 200 Zeichen\n"
@@ -1284,8 +1550,12 @@ def fill_pptx(template_bytes, data, customer_images=None):
     print(f"  image_data gesamt: {len(image_data)} Bilder")
 
     def make_replacement_map(data):
-        """Build a case-insensitive lookup: UPPER_KEY -> value."""
-        return {k.upper(): str(v or "") for k, v in data.items()}
+        """Build a case-insensitive lookup: UPPER_KEY -> value.
+        EXCLUDES bild_* keys — image slots must never be text-substituted.
+        If an image fails to embed, the {{BILD_X}} placeholder stays visible
+        rather than becoming a URL string in the slide text."""
+        return {k.upper(): str(v or "") for k, v in data.items()
+                if not k.lower().startswith('bild_')}
 
     REPL_MAP = make_replacement_map(data)
 
@@ -1691,8 +1961,13 @@ def fill_pptx(template_bytes, data, customer_images=None):
                         return
                     except Exception as e:
                         print(f"Bild-Ersatz Fehler (text) {key}: {e}")
+                        import traceback; traceback.print_exc()
+                        return  # IMPORTANT: don't text-substitute on failure → leave {{BILD_X}}
 
-        # 3. Text ersetzen
+        # 3. Text ersetzen – nur für Nicht-Bild-Shapes
+        # (bild_* keys sind aus REPL_MAP ausgeschlossen, also kann diese Zeile
+        #  keine Bild-URL als Text einsetzen – aber return oben verhindert auch die
+        #  Fallthrough-Situation bei Shape-Typ 2 = image slot)
         if shape.has_text_frame:
             replace_in_textframe(shape.text_frame)
 
@@ -1955,19 +2230,41 @@ def _run_expose_job(job_id, zip_paths):
         if TEST_MODE:
             print(f"[{job_id}] TEST_MODE – überspringe Claude API")
             expose_data = DUMMY_EXPOSE_DATA.copy()
+            geo_coords = None
         else:
-            print(f"[{job_id}] Schritt 1/4: analyze_pdfs_with_claude…")
+            print(f"[{job_id}] Schritt 1/5: analyze_pdfs_with_claude…")
             projektdaten = analyze_pdfs_with_claude(pdfs)
 
+            # Schritt 1b: Geocoding + Proximity (parallel zur Claude-Arbeit)
+            adresse = projektdaten.get("adresse", "")
+            stadt   = projektdaten.get("stadt", "")
+            geo_coords = None
+            if adresse and stadt:
+                print(f"[{job_id}] Schritt 1b: Geocoding {adresse!r}, {stadt!r} …")
+                geo_coords = _geocode_address(adresse, stadt)
+                if geo_coords:
+                    lat, lon = geo_coords
+                    print(f"[{job_id}]   → ({lat:.4f}, {lon:.4f})")
+
             _set(status="processing", phase="Exposé-Texte werden generiert …")
-            print(f"[{job_id}] Schritt 2/4: generate_expose_with_claude…")
+            print(f"[{job_id}] Schritt 2/5: generate_expose_with_claude…")
             raw_expose = generate_expose_with_claude(projektdaten)
             print(f"[{job_id}]   Claude-Ausgabe: {len(raw_expose)} Felder")
             expose_data = {**PLATZHALTER, **raw_expose}
             expose_data["logo_initial"] = generate_logo_initial(expose_data.get("projekt_name", ""))
 
+            # Schritt 2b: Proximity-Daten (Einkaufen/Ärzte/Sport/Bildung) berechnen
+            if geo_coords:
+                lat, lon = geo_coords
+                print(f"[{job_id}] Schritt 2b: Proximity via Overpass …")
+                proximity = _calculate_proximity_data(adresse, stadt, lat, lon)
+                expose_data.update(proximity)
+                # Lageplan via OpenStreetMap
+                expose_data["bild_lageplan"] = _osm_lageplan_url(lat, lon)
+                print(f"[{job_id}]   Lageplan URL: {expose_data['bild_lageplan']}")
+
         _set(status="processing", phase="Bilder werden ausgewählt …")
-        print(f"[{job_id}] Schritt 3/4: Bilder …")
+        print(f"[{job_id}] Schritt 3/5: Bilder …")
 
         customer_images = {}
         if customer_image_list:
@@ -1976,7 +2273,7 @@ def _run_expose_job(job_id, zip_paths):
         expose_data = fill_image_placeholders(expose_data)
 
         _set(status="processing", phase="Präsentation wird erstellt …")
-        print(f"[{job_id}] Schritt 4/4: fill_pptx …")
+        print(f"[{job_id}] Schritt 4/5: fill_pptx …")
         tmpl_bytes = requests.get(TEMPLATE_URL, timeout=30).content
         pptx_bytes = fill_pptx(tmpl_bytes, expose_data, customer_images=customer_images)
 
