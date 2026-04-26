@@ -733,6 +733,55 @@ def classify_and_assign_customer_images(images):
     return result
 
 
+def _fetch_wikimedia_city_image(city, hint=""):
+    """Sucht ein echtes Stadtfoto via Wikimedia Commons.
+    Gibt eine direkte Bild-URL zurück oder None bei Fehler.
+    """
+    search_q = f"{city} {hint}".strip()
+    try:
+        resp = requests.get(
+            "https://commons.wikimedia.org/w/api.php",
+            params={
+                "action": "query",
+                "generator": "search",
+                "gsrnamespace": 6,          # File namespace
+                "gsrsearch": search_q,
+                "gsrlimit": 10,
+                "prop": "imageinfo",
+                "iiprop": "url|size|mediatype",
+                "iiurlwidth": 1200,
+                "format": "json",
+            },
+            headers={"User-Agent": "interpres-expose/1.0"},
+            timeout=10,
+        )
+        if resp.status_code != 200:
+            return None
+        pages = resp.json().get("query", {}).get("pages", {})
+        candidates = []
+        for page in pages.values():
+            for ii in page.get("imageinfo", []):
+                url = ii.get("thumburl") or ii.get("url", "")
+                w   = ii.get("thumbwidth", 0)
+                h   = ii.get("thumbheight", 0)
+                if not url:
+                    continue
+                ext = url.lower().split("?")[0].rsplit(".", 1)[-1]
+                if ext not in ("jpg", "jpeg", "png"):
+                    continue
+                if w > 0 and h > 0 and w < h:  # skip portrait images
+                    continue
+                candidates.append((w * h, url))
+        if candidates:
+            candidates.sort(reverse=True)
+            chosen = candidates[0][1]
+            print(f"  Wikimedia city image: {chosen[:80]}")
+            return chosen
+    except Exception as e:
+        print(f"  Wikimedia Commons Fehler für '{search_q}': {e}")
+    return None
+
+
 def fetch_unsplash_image(query):
     """Holt Bild-URL von Unsplash. Bei fehlendem/ungültigem Key → Picsum-Fallback."""
     if UNSPLASH_ACCESS_KEY:
@@ -762,20 +811,39 @@ def fetch_unsplash_image(query):
     return url
 
 def fill_image_placeholders(data):
-    """Füllt bild_*-Slots die noch leer sind mit Picsum-Fallback-URLs.
-    Unsplash wird NICHT mehr verwendet (Rate-Limit 50 req/h, zu knapp für 60 Slots).
-    Picsum ist unlimitiert und deterministisch (seed = hash des query).
+    """Füllt bild_*-Slots die noch leer sind.
+    Stadtbilder: Wikimedia Commons (echte Fotos der Stadt).
+    Alle anderen: Picsum-Fallback (deterministisch, kein Rate-Limit).
     """
     stadt = data.get("stadt", "")
+
+    # Stadtspezifische Slots: echte Wikimedia-Fotos bevorzugen
+    _CITY_SLOTS = {
+        "bild_titel":         (stadt, "city skyline modern"),
+        "bild_quartier":      (stadt, "residential neighborhood street"),
+        "bild_stadt_gross":   (stadt, "aerial city view panorama"),
+        "bild_stadt_klein":   (stadt, "city center street view"),
+        "bild_standort_aussen": (stadt, "city district residential"),
+    }
+    for slot, (city, hint) in _CITY_SLOTS.items():
+        if slot not in data:
+            continue
+        if data.get(slot) and str(data[slot]).startswith("http"):
+            continue   # already filled by customer image
+        if city:
+            url = _fetch_wikimedia_city_image(city, hint)
+            if url:
+                data[slot] = url
+                continue
+        # Picsum fallback for this city slot
+        seed = abs(hash(f"{city} {hint}")) % 1000
+        data[slot] = f"https://picsum.photos/seed/{seed}/1200/800"
+
     queries = UNSPLASH_QUERIES.copy()
     if stadt:
-        queries["BILD_TITEL"] = f"modern residential building {stadt} urban architecture"
-        queries["BILD_QUARTIER"] = f"{stadt} city neighborhood street"
         queries["BILD_PROJEKT_AUSSEN"] = f"modern apartment building {stadt} exterior"
         queries["BILD_GREENLIVING_1"] = f"sustainable green building {stadt}"
         queries["BILD_GREENLIVING_2"] = f"modern residential {stadt} facade"
-        queries["BILD_STADT_GROSS"] = f"city skyline aerial {stadt}"
-        queries["BILD_STADT_KLEIN"] = f"city street urban {stadt}"
         queries["BILD_LAGEPLAN"] = f"city map district aerial {stadt}"
 
     filled = 0
@@ -783,7 +851,7 @@ def fill_image_placeholders(data):
         data_key = placeholder_key.lower()
         if data_key not in data:
             continue
-        # Skip wenn Slot bereits durch Kundenbild belegt
+        # Skip wenn Slot bereits durch Kundenbild oder Wikimedia belegt
         if data.get(data_key) and str(data[data_key]).startswith("http"):
             continue
         # Skip bild_we_N für nicht vorhandene WE-Typen
@@ -1179,42 +1247,42 @@ def generate_expose_with_claude(projektdaten):
         "### Ausstattung:\n"
         "text_ausstattung_detail: max 2 Sätze. Bodenbelag, Heizung, Balkone. Konkret.\n\n"
 
-        "## ⚠️ ZEICHENLIMITS – NUTZE DEN VOLLEN RAUM, SCHREIBE VIEL!\n"
-        "Schreibe SO LANG WIE MÖGLICH bis zum Maximum. Kurze Texte werden nicht akzeptiert.\n"
+        "## ⚠️ ZEICHENLIMITS – HALTE DICH STRIKT DARAN! Das Template hat feste Textfelder.\n"
+        "Zu langer Text läuft über die Trennlinien hinaus. Schreibe KNAPP und PRÄGNANT.\n"
         "produkt_beschreibung: max 25 Zeichen (z.B. 'Microapartments' oder '1-2 Zi. möbliert')\n"
         "text_kapitel_invest/live/stay/know/hotel (NUR die Slogan-Zeile): max 40 Zeichen\n"
         "text_kapitel_invest_1/2, text_kapitel_live_1/2, text_kapitel_stay_1/2, text_kapitel_know_1/2:\n"
-        "  ZIEL 250-350 Zeichen (MINDESTENS 2 vollständige Sätze, projekt-spezifisch, emotional)\n"
+        "  max 120 Zeichen – 1-2 kurze Sätze, projekt-spezifisch und prägnant\n"
         "text_hotel: max 40 Zeichen\n"
-        "text_intro: ZIEL 300-420 Zeichen (3 Sätze, emotional, konkret über Projekt + Stadt)\n"
-        "text_investment_pitch: ZIEL 400-600 Zeichen (konkret: Preis, KfW, AfA, Rendite-Potenzial)\n"
+        "text_intro: max 160 Zeichen – 2 kurze Sätze, emotional, konkret über Projekt + Stadt\n"
+        "text_investment_pitch: max 200 Zeichen – konkret: Preis, KfW, AfA, Rendite-Potenzial\n"
         "text_greenliving_intro: max 80 Zeichen\n"
-        "text_greenliving_1: ZIEL 280-400 Zeichen\n"
-        "text_greenliving_2: ZIEL 260-380 Zeichen\n"
+        "text_greenliving_1: max 120 Zeichen\n"
+        "text_greenliving_2: max 120 Zeichen\n"
         "text_ausstattung_intro: max 80 Zeichen\n"
-        "text_ausstattung_detail: ZIEL 280-380 Zeichen\n"
+        "text_ausstattung_detail: max 120 Zeichen\n"
         "text_ausstattung_kurz: max 60 Zeichen\n"
-        "text_ausstattung_lang: ZIEL 260-340 Zeichen\n"
-        "text_grundriss_intro: ZIEL 140-200 Zeichen\n"
-        "text_architektur: ZIEL 140-200 Zeichen\n"
-        "text_nachhaltig_1/2/3/4: max 100 Zeichen\n"
-        "text_standort_1/2: ZIEL 140-200 Zeichen\n"
-        "text_projekt_nachhaltig_1/2: ZIEL 100-150 Zeichen\n"
-        "text_stadt_wachstum_1: ZIEL 220-300 Zeichen\n"
-        "text_stadt_wachstum_2: ZIEL 200-280 Zeichen\n"
-        "text_stadt_intro: ZIEL 100-140 Zeichen\n"
-        "text_stadt_wirtschaft_links/rechts: ZIEL 150-200 Zeichen\n"
-        "text_stadt_invest_detail: ZIEL 180-260 Zeichen\n"
-        "text_einwohner_detail/bip_detail/mietsteigerung_detail/studierende_detail: ZIEL 50-80 Zeichen\n"
-        "text_stadt_stat_N_detail: ZIEL 50-80 Zeichen\n"
-        "text_stadt_branche_1/2: ZIEL 130-180 Zeichen\n"
+        "text_ausstattung_lang: max 110 Zeichen\n"
+        "text_grundriss_intro: max 90 Zeichen\n"
+        "text_architektur: max 90 Zeichen\n"
+        "text_nachhaltig_1/2/3/4: max 80 Zeichen\n"
+        "text_standort_1/2: max 90 Zeichen\n"
+        "text_projekt_nachhaltig_1/2: max 80 Zeichen\n"
+        "text_stadt_wachstum_1: max 130 Zeichen\n"
+        "text_stadt_wachstum_2: max 120 Zeichen\n"
+        "text_stadt_intro: max 80 Zeichen\n"
+        "text_stadt_wirtschaft_links/rechts: max 100 Zeichen\n"
+        "text_stadt_invest_detail: max 110 Zeichen\n"
+        "text_einwohner_detail/bip_detail/mietsteigerung_detail/studierende_detail: max 70 Zeichen\n"
+        "text_stadt_stat_N_detail: max 70 Zeichen\n"
+        "text_stadt_branche_1/2: max 100 Zeichen\n"
         "feature_N_label: max 28 Zeichen\n"
         "amenity_N: max 28 Zeichen\n"
-        "we_typ_beschreibung: max 200 Zeichen\n"
+        "we_typ_beschreibung: max 160 Zeichen\n"
         "besonderheiten: max 60 Zeichen\n"
         "steuerliche_moeglichkeiten: max 80 Zeichen\n"
-        "quartier_history/quartier_ref: max 120 Zeichen\n"
-        "zitat_intro: max 160 Zeichen\n\n"
+        "quartier_history/quartier_ref: max 100 Zeichen\n"
+        "zitat_intro: max 130 Zeichen\n\n"
 
         f"## STANDORT-MINUTEN ({stadt} – Slide 5):\n"
         f"min_uni / label_min_uni: Fahrradminuten + Name der nächsten Uni/FH in {stadt}\n"
@@ -2198,6 +2266,30 @@ def _run_expose_job(job_id, zip_paths):
         pdfs = []
         customer_image_list = []
 
+        # ── Direkt hochgeladene Bilder zuerst laden (höchste Priorität) ──────
+        _DIRECT_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
+        if os.path.isdir(input_dir):
+            for fname in sorted(os.listdir(input_dir)):
+                if not fname.startswith("_direct_img_"):
+                    continue
+                ext = os.path.splitext(fname)[1].lower()
+                if ext not in _DIRECT_EXTS:
+                    continue
+                fpath = os.path.join(input_dir, fname)
+                try:
+                    with open(fpath, "rb") as fh:
+                        raw = fh.read()
+                    customer_image_list.append({
+                        "name": fname,
+                        "ext": ext,
+                        "bytes": raw,
+                        "size": len(raw),
+                    })
+                    print(f"[{job_id}] Direktbild: {fname} ({len(raw)//1024} KB)")
+                except Exception as e:
+                    print(f"[{job_id}] Direktbild Fehler {fname}: {e}")
+        direct_image_count = len(customer_image_list)
+
         for zip_path in zip_paths:
             try:
                 with open(zip_path, "rb") as f:
@@ -2369,6 +2461,21 @@ def generate_expose():
         if not zip_paths:
             shutil.rmtree(input_dir, ignore_errors=True)
             return jsonify({"error": "Keine ZIP-Dateien empfangen"}), 400
+
+        # ── Direkt hochgeladene Projektfotos speichern ────────────────────────
+        direct_images = request.files.getlist("images") or request.files.getlist("images[]")
+        saved_direct = 0
+        for i, img_file in enumerate(direct_images):
+            if not img_file or not img_file.filename:
+                continue
+            ext = os.path.splitext(img_file.filename)[1].lower()
+            if ext not in (".jpg", ".jpeg", ".png", ".webp"):
+                continue
+            img_path = os.path.join(input_dir, f"_direct_img_{i}{ext}")
+            img_file.save(img_path)
+            saved_direct += 1
+        if saved_direct:
+            print(f"[{job_id}] {saved_direct} direkte Projektfotos gespeichert")
 
         _write_job(job_id,
                    status="processing",

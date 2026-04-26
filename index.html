@@ -131,6 +131,59 @@
   .file-item-name { color: #8a9eb8; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .file-item-size { color: #3a5270; flex-shrink: 0; font-size: 0.73rem; }
 
+  /* ── Image Upload Zone ── */
+  .img-upload-section {
+    margin-top: 1.2rem;
+  }
+  .img-upload-label {
+    color: #4a6080;
+    font-size: 0.7rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    margin-bottom: 0.6rem;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .img-upload-label span { color: #2a4060; font-size: 0.65rem; letter-spacing: 0; text-transform: none; }
+  .img-drop-zone {
+    border: 1.5px dashed #1a2d3e;
+    border-radius: 10px;
+    padding: 1.1rem 1rem;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.25s ease;
+    position: relative;
+    background: rgba(13,27,46,0.3);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+  }
+  .img-drop-zone:hover, .img-drop-zone.dragover {
+    border-color: rgba(200,169,110,0.5);
+    background: rgba(200,169,110,0.03);
+  }
+  .img-drop-zone input {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    cursor: pointer;
+    width: 100%;
+    height: 100%;
+  }
+  .img-drop-icon { color: #2a4565; font-size: 1.1rem; flex-shrink: 0; }
+  .img-drop-text { color: #3a5270; font-size: 0.75rem; line-height: 1.4; text-align: left; }
+  .img-drop-text strong { color: #5a7090; font-weight: 500; }
+  .img-count-badge {
+    display: none;
+    margin-top: 0.5rem;
+    font-size: 0.72rem;
+    color: #8a9eb8;
+    text-align: center;
+  }
+  .img-count-badge.has-files { display: block; color: #C8A96E; }
+
   /* ── Button ── */
   .btn-generate {
     width: 100%;
@@ -376,6 +429,22 @@
         <div class="file-list" id="fileList"></div>
       </div>
 
+      <!-- Image Upload -->
+      <div class="img-upload-section">
+        <div class="img-upload-label">
+          Projektfotos <span>(optional – JPG, PNG, WebP)</span>
+        </div>
+        <div class="img-drop-zone" id="imgDropZone">
+          <input type="file" id="imgInput" accept=".jpg,.jpeg,.png,.webp" multiple>
+          <div class="img-drop-icon">🖼️</div>
+          <div class="img-drop-text">
+            <strong>Bilder hier ablegen</strong><br>
+            Außenansichten, Grundrisse, Innenaufnahmen …
+          </div>
+        </div>
+        <div class="img-count-badge" id="imgCountBadge"></div>
+      </div>
+
       <button class="btn-generate" id="generateBtn" disabled>Exposé generieren</button>
     </div>
 
@@ -447,7 +516,8 @@ const progressPanel = document.getElementById('progressPanel');
 const successPanel  = document.getElementById('successPanel');
 const errorPanel    = document.getElementById('errorPanel');
 
-let selectedFiles = [];
+let selectedFiles  = [];
+let selectedImages = [];
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 function fmt(bytes) {
@@ -547,6 +617,41 @@ dropZone.addEventListener('drop', e => {
   updateFileList();
 });
 
+// ── Image Selection ───────────────────────────────────────────────────────────
+const imgInput    = document.getElementById('imgInput');
+const imgDropZone = document.getElementById('imgDropZone');
+const imgBadge    = document.getElementById('imgCountBadge');
+const _IMG_EXTS   = ['.jpg','.jpeg','.png','.webp'];
+
+function updateImageBadge() {
+  if (selectedImages.length === 0) {
+    imgBadge.className = 'img-count-badge';
+    imgBadge.textContent = '';
+  } else {
+    const total = selectedImages.reduce((s, f) => s + f.size, 0);
+    imgBadge.className = 'img-count-badge has-files';
+    imgBadge.textContent = `${selectedImages.length} Bild${selectedImages.length > 1 ? 'er' : ''} ausgewählt · ${fmt(total)}`;
+  }
+}
+
+imgInput.addEventListener('change', e => {
+  selectedImages = Array.from(e.target.files).filter(f =>
+    _IMG_EXTS.some(x => f.name.toLowerCase().endsWith(x)));
+  updateImageBadge();
+});
+imgDropZone.addEventListener('dragover', e => { e.preventDefault(); imgDropZone.classList.add('dragover'); });
+imgDropZone.addEventListener('dragleave', () => imgDropZone.classList.remove('dragover'));
+imgDropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  imgDropZone.classList.remove('dragover');
+  const dropped = Array.from(e.dataTransfer.files).filter(f =>
+    _IMG_EXTS.some(x => f.name.toLowerCase().endsWith(x)));
+  if (dropped.length) {
+    selectedImages = dropped;
+    updateImageBadge();
+  }
+});
+
 // ── Upload (chunked) ──────────────────────────────────────────────────────────
 async function uploadAllFiles() {
   const totalBytes   = selectedFiles.reduce((s, f) => s + f.size, 0);
@@ -636,6 +741,9 @@ generateBtn.addEventListener('click', async () => {
       setStepDetail('Dokumente werden analysiert …', 'Claude liest alle Unterlagen aus dem Projektdatenraum.', 'indeterminate');
       selectedFiles.forEach(f => formData.append('files', f, f.name));
     }
+
+    // ── Projektfotos anhängen (immer direkt, nie chunked) ────────────────────
+    selectedImages.forEach(img => formData.append('images', img, img.name));
 
     // ── Phase 3: Job starten ─────────────────────────────────────────────────
     setStep(3);
@@ -746,6 +854,9 @@ document.getElementById('retryBtn').addEventListener('click', () => {
   errorPanel.classList.remove('active');
   uploadPanel.style.display = 'block';
   generateBtn.disabled = selectedFiles.length === 0;
+  // Reset image selection on retry
+  selectedImages = [];
+  updateImageBadge();
 });
 </script>
 </body>
