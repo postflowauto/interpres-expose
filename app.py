@@ -48,7 +48,7 @@ CLOUDCONVERT_KEY = os.environ.get("CLOUDCONVERT_KEY", "")
 UNSPLASH_ACCESS_KEY = os.environ.get("UNSPLASH_ACCESS_KEY", "")
 TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY", "")
 TEST_MODE = os.environ.get("TEST_MODE", "false").lower() == "true"
-TEMPLATE_URL = "https://raw.githubusercontent.com/postflowauto/interpres-expose/main/urbanunits_Marketing_Expose_v3.pdf-19.pptx"
+TEMPLATE_URL = "https://raw.githubusercontent.com/postflowauto/interpres-expose/main/urbanunits_Marketing_Expose_v3.pdf-20.pptx"
 
 # Dummy-Daten für TEST_MODE (kein Claude-API-Call)
 DUMMY_PROJEKTDATEN = {
@@ -125,20 +125,26 @@ DUMMY_EXPOSE_DATA = {
     "freizeit_3_name": "Innenstadt", "min_freizeit_3": "15",
     "freizeit_4_name": "Herrenhäuser Gärten", "min_freizeit_4": "20",
     # ── WE-Typen: Original-Slide (Typen 1+2 nebeneinander) ───────────────────
-    "we_beispiel_1": "WE 02", "we_bereich_1": "Wohnen & Schlafen",
-    "we_beispiel_2": "WE 07", "we_bereich_2": "Wohnen & Schlafen",
-    "we_flaeche_1": "23,99 m²",
-    "we_flaeche_2": "5,36 m²",
-    "we_flaeche_3": "5,34 m²",
-    "we_flaeche_4": "2,33 m²",
-    "we_flaeche_5": "32,02 m²",
-    "we_typ_beschreibung": "1-Zimmer-Wohnung mit Balkon. Optimal für Studierende und Berufspendler.",
+    "we_beispiel_1": "WE 02", "we_nummern_1": "WE 01, WE 02, WE 05, WE 06",
+    "we_beispiel_2": "WE 07", "we_nummern_2": "WE 07, WE 08, WE 11, WE 12",
+    "we_raum_1_name_1": "Wohnen/Kochen", "we_raum_2_name_1": "Schlafen",
+    "we_raum_3_name_1": "Bad",           "we_raum_4_name_1": "Abstellraum",
+    "we_raum_5_name_1": "Balkon",
+    "we_flaeche_1_1": "23,99 m²", "we_flaeche_2_1": "5,36 m²",
+    "we_flaeche_3_1": "5,34 m²",  "we_flaeche_4_1": "2,33 m²", "we_flaeche_5_1": "32,02 m²",
+    "we_typ_beschreibung_1": "1-Zimmer-Wohnung mit Balkon. Optimal für Studierende und Berufspendler.",
+    "we_raum_1_name_2": "Wohnen/Kochen", "we_raum_2_name_2": "Schlafen",
+    "we_raum_3_name_2": "Bad",           "we_raum_4_name_2": "Abstellraum",
+    "we_raum_5_name_2": "Balkon",
+    "we_flaeche_1_2": "28,45 m²", "we_flaeche_2_2": "6,10 m²",
+    "we_flaeche_3_2": "5,80 m²",  "we_flaeche_4_2": "3,20 m²", "we_flaeche_5_2": "43,55 m²",
+    "we_typ_beschreibung_2": "2-Zimmer-Wohnung mit großem Balkon. Ideal für Paare und Singles.",
     # Duplikat-Slide (Typen 3+4), leer = kein Duplikat
-    "we_beispiel_3": "", "we_bereich_3": "",
-    "we_beispiel_4": "", "we_bereich_4": "",
+    "we_beispiel_3": "", "we_nummern_3": "",
+    "we_beispiel_4": "", "we_nummern_4": "",
     # Duplikat-Slide 2 (Typen 5+6), leer = kein zweites Duplikat
-    "we_beispiel_5": "", "we_bereich_5": "",
-    "we_beispiel_6": "", "we_bereich_6": "",
+    "we_beispiel_5": "", "we_nummern_5": "",
+    "we_beispiel_6": "", "we_nummern_6": "",
     "feature_1_zahl": "48", "feature_1_label": "Wohneinheiten",
     "feature_2_zahl": "100", "feature_2_label": "Prozent möbliert",
     "feature_3_zahl": "24", "feature_3_label": "Stunden Zugang per Smart-Lock-System",
@@ -334,15 +340,42 @@ PLATZHALTER = {
     "bildung_3_name": "Gymnasium",   "min_bildung_3": "10",
     "bildung_4_name": "Universität", "min_bildung_4": "15",
     # ── WE-Typen ──────────────────────────────────────────────────────────────
-    "we_beispiel_1": "", "we_bereich_1": "",
-    "we_beispiel_2": "", "we_bereich_2": "",
-    "we_flaeche_1": "", "we_flaeche_2": "", "we_flaeche_3": "",
-    "we_flaeche_4": "", "we_flaeche_5": "",
-    "we_typ_beschreibung": "",
-    "we_beispiel_3": "", "we_bereich_3": "",
-    "we_beispiel_4": "", "we_bereich_4": "",
-    "we_beispiel_5": "", "we_bereich_5": "",
-    "we_beispiel_6": "", "we_bereich_6": "",
+    "we_beispiel_1": "", "we_nummern_1": "",
+    "we_beispiel_2": "", "we_nummern_2": "",
+    "we_raum_1_name_1": "", "we_raum_2_name_1": "", "we_raum_3_name_1": "",
+    "we_raum_4_name_1": "", "we_raum_5_name_1": "",
+    "we_flaeche_1_1": "", "we_flaeche_2_1": "", "we_flaeche_3_1": "",
+    "we_flaeche_4_1": "", "we_flaeche_5_1": "",
+    "we_typ_beschreibung_1": "",
+    "we_raum_1_name_2": "", "we_raum_2_name_2": "", "we_raum_3_name_2": "",
+    "we_raum_4_name_2": "", "we_raum_5_name_2": "",
+    "we_flaeche_1_2": "", "we_flaeche_2_2": "", "we_flaeche_3_2": "",
+    "we_flaeche_4_2": "", "we_flaeche_5_2": "",
+    "we_typ_beschreibung_2": "",
+    "we_beispiel_3": "", "we_nummern_3": "",
+    "we_beispiel_4": "", "we_nummern_4": "",
+    "we_raum_1_name_3": "", "we_raum_2_name_3": "", "we_raum_3_name_3": "",
+    "we_raum_4_name_3": "", "we_raum_5_name_3": "",
+    "we_flaeche_1_3": "", "we_flaeche_2_3": "", "we_flaeche_3_3": "",
+    "we_flaeche_4_3": "", "we_flaeche_5_3": "",
+    "we_typ_beschreibung_3": "",
+    "we_raum_1_name_4": "", "we_raum_2_name_4": "", "we_raum_3_name_4": "",
+    "we_raum_4_name_4": "", "we_raum_5_name_4": "",
+    "we_flaeche_1_4": "", "we_flaeche_2_4": "", "we_flaeche_3_4": "",
+    "we_flaeche_4_4": "", "we_flaeche_5_4": "",
+    "we_typ_beschreibung_4": "",
+    "we_beispiel_5": "", "we_nummern_5": "",
+    "we_beispiel_6": "", "we_nummern_6": "",
+    "we_raum_1_name_5": "", "we_raum_2_name_5": "", "we_raum_3_name_5": "",
+    "we_raum_4_name_5": "", "we_raum_5_name_5": "",
+    "we_flaeche_1_5": "", "we_flaeche_2_5": "", "we_flaeche_3_5": "",
+    "we_flaeche_4_5": "", "we_flaeche_5_5": "",
+    "we_typ_beschreibung_5": "",
+    "we_raum_1_name_6": "", "we_raum_2_name_6": "", "we_raum_3_name_6": "",
+    "we_raum_4_name_6": "", "we_raum_5_name_6": "",
+    "we_flaeche_1_6": "", "we_flaeche_2_6": "", "we_flaeche_3_6": "",
+    "we_flaeche_4_6": "", "we_flaeche_5_6": "",
+    "we_typ_beschreibung_6": "",
     "feature_1_zahl": "", "feature_1_label": "",
     "feature_2_zahl": "100", "feature_2_label": "Prozent möbliert",
     "feature_3_zahl": "24", "feature_3_label": "Stunden Zugang per Smart-Lock-System",
@@ -584,11 +617,13 @@ def extract_images_from_zip(zip_bytes):
 CUSTOMER_IMAGE_SLOTS = {
     "aussenansicht":  ["bild_titel", "bild_projekt_aussen", "bild_ansicht_1", "bild_ansicht_2",
                        "bild_greenliving_1", "bild_greenliving_2"],
-    "grundriss":      ["bild_grundriss_1", "bild_grundriss_2", "bild_grundriss_3", "bild_grundriss_4",
+    "grundriss":      ["bild_we_1", "bild_we_2", "bild_we_3", "bild_we_4",
+                       "bild_we_5", "bild_we_6", "bild_we_7", "bild_we_8",
+                       "bild_grundriss_1", "bild_grundriss_2", "bild_grundriss_3", "bild_grundriss_4",
                        "bild_grundriss_intro_1", "bild_grundriss_intro_2", "bild_grundriss_intro_3"],
     "innenansicht":   ["bild_interior", "bild_ausstattung_1", "bild_ausstattung_2", "bild_ausstattung_3",
                        "bild_ausstattung_4", "bild_ausstattung_5", "bild_ausstattung_6",
-                       "bild_we_1", "bild_we_2", "bild_hotel_1", "bild_hotel_2"],
+                       "bild_hotel_1", "bild_hotel_2"],
     "lageplan":       ["bild_lageplan"],
     "quartier":       ["bild_quartier", "bild_stadt_gross", "bild_stadt_klein",
                        "bild_standort_aussen", "bild_standort_innen"],
@@ -877,6 +912,8 @@ def fill_image_placeholders(data):
         "bild_standort_innen",
         "bild_rechtlich_1", "bild_rechtlich_2",
         "bild_grundriss_intro_1", "bild_grundriss_intro_2", "bild_grundriss_intro_3",
+        # WE-Grundrisse: nur echte Grundriss-Zeichnungen vom Kunden
+        *{f"bild_we_{n}" for n in range(1, 21)},
     }
 
     queries = UNSPLASH_QUERIES.copy()
@@ -902,8 +939,8 @@ def fill_image_placeholders(data):
                 pair_k   = (n + 1) // 2
                 left_n   = pair_k * 2 - 1
                 right_n  = pair_k * 2
-                has_text = (data.get(f"we_beispiel_{left_n}") or data.get(f"we_bereich_{left_n}")
-                            or data.get(f"we_beispiel_{right_n}") or data.get(f"we_bereich_{right_n}"))
+                has_text = (data.get(f"we_beispiel_{left_n}") or data.get(f"we_nummern_{left_n}")
+                            or data.get(f"we_beispiel_{right_n}") or data.get(f"we_nummern_{right_n}"))
                 if not has_text:
                     continue
         # Picsum für generische Slots (Ausstattung, WE-Typen, etc.)
@@ -1303,7 +1340,7 @@ def generate_expose_with_claude(projektdaten, city_context=""):
         we_typen_hint = (
             f"\nEXTRAHIERTE WE-TYPEN aus WFL-PDFs ({len(we_typen_liste)} Typen):\n"
             + "\n".join(lines)
-            + "\nNutze diese Daten für we_beispiel_N, we_bereich_N und we_flaeche_1-5!\n"
+            + "\nNutze diese Daten für we_beispiel_N, we_nummern_N, we_raum_*_name_N und we_flaeche_*_N!\n"
         )
 
     prompt = (
@@ -1400,7 +1437,7 @@ def generate_expose_with_claude(projektdaten, city_context=""):
         "text_stadt_branche_1/2: max 100 Zeichen\n"
         "feature_N_label: max 28 Zeichen\n"
         "amenity_N: max 28 Zeichen\n"
-        "we_typ_beschreibung: max 160 Zeichen\n"
+        "we_typ_beschreibung_N: max 180 Zeichen\n"
         "besonderheiten: max 60 Zeichen\n"
         "steuerliche_moeglichkeiten: max 80 Zeichen\n"
         "quartier_history/quartier_ref: max 100 Zeichen\n"
@@ -1418,24 +1455,23 @@ def generate_expose_with_claude(projektdaten, city_context=""):
 
         f"## WOHNUNGSTYPEN (aus WFL-Berechnung und Grundrissen):\n"
         f"Analysiere alle WFL-Berechnungs-PDFs und Grundrisse. Das Template zeigt pro Slide ZWEI WE-Typen nebeneinander.\n"
-        f"Jeder WE-Typ hat 5 Raumflächen (we_flaeche_1-5). Im Template sind die Raumnamen bereits aufgedruckt:\n"
-        f"  we_flaeche_1 = Fläche des größten Raums (Wohnen/Schlafen/Wohnzimmer)\n"
-        f"  we_flaeche_2 = Fläche des zweiten Raums (Bad/Dusche oder Schlafzimmer)\n"
-        f"  we_flaeche_3 = Fläche des dritten Raums (Küche/Kochen oder Bad)\n"
-        f"  we_flaeche_4 = Fläche des vierten Raums (Balkon/Terrasse oder Flur)\n"
-        f"  we_flaeche_5 = Gesamtfläche der Wohnung\n"
-        f"WICHTIG: Lies die WFL-Berechnung-PDFs! Dort stehen die echten m²-Werte.\n"
-        f"Format: '23,99 m²' (Komma als Dezimalzeichen, immer mit ' m²')\n\n"
-        f"Feldnamen pro WE-Typ (Paare von 2 nebeneinander):\n"
-        f"- we_beispiel_N: WE-Bezeichnung z.B. 'WE 02' oder 'Typ A' (linke Spalte des Paares)\n"
-        f"- we_beispiel_N+1: WE-Bezeichnung (rechte Spalte)\n"
-        f"- we_bereich_N: Kurzbezeichnung des Wohnungstyps, z.B. '1-Zimmer', '2-Zimmer', 'Studio'\n"
-        f"- we_typ_beschreibung: 2-3 Sätze Beschreibung des ersten Typs im Paar (max 200 Zeichen)\n"
-        f"Slide 1 (immer): Paar 1 (we_beispiel_1+2, we_bereich_1+2, we_flaeche_1-5)\n"
-        f"Slide 2 (wenn ≥2 Typen): Paar 2 (we_beispiel_3+4), leere Strings wenn nicht benötigt\n"
-        f"Slide 3 (wenn ≥3 Typen): Paar 3 (we_beispiel_5+6)\n"
-        f"Und so weiter. ACHTUNG: we_flaeche_1-5 gelten für das erste WE-Paar! Wenn mehrere Slides,\n"
-        f"dann alle WE-Typen haben ähnliche Raumaufteilung.\n\n"
+        f"JEDE Seite (links und rechts) hat EIGENE Raumnamen und Flächen.\n\n"
+        f"Flächen-Format: '23,99 m²' (Komma, immer mit ' m²'). Lies echte Werte aus den WFL-PDFs!\n"
+        f"we_flaeche_5_N = Gesamtfläche der Wohnung (Wohnfläche total)\n\n"
+        f"Feldnamen pro WE-Paar (Paar 1 = linke/rechte Seite mit Suffix _1/_2):\n"
+        f"LINKE SEITE (Suffix _1):\n"
+        f"- we_beispiel_1: WE-Bezeichnung z.B. 'WE 02'\n"
+        f"- we_nummern_1: Kommaliste aller WE-Nummern dieses Typs, z.B. 'WE 01, WE 02, WE 09'\n"
+        f"- we_raum_1_name_1 bis we_raum_5_name_1: Raumnamen (z.B. 'Wohnen/Kochen', 'Schlafen', 'Bad', 'Balkon', 'Flur')\n"
+        f"- we_flaeche_1_1 bis we_flaeche_5_1: Raumflächen in der Reihenfolge der Raumnamen\n"
+        f"- we_typ_beschreibung_1: 2-3 Sätze Typbeschreibung (max 180 Zeichen)\n"
+        f"RECHTE SEITE (Suffix _2):\n"
+        f"- we_beispiel_2, we_nummern_2, we_raum_1_name_2..we_raum_5_name_2\n"
+        f"- we_flaeche_1_2..we_flaeche_5_2, we_typ_beschreibung_2\n\n"
+        f"Paar 1 (immer): Typen 1+2 → Suffix _1/_2\n"
+        f"Paar 2 (wenn ≥2 Typen): we_beispiel_3, we_nummern_3, we_raum_*_name_3, we_flaeche_*_3,\n"
+        f"  we_typ_beschreibung_3 (linke Seite) und _4 (rechte Seite). Leer wenn nicht vorhanden.\n"
+        f"Paar 3 (wenn ≥3 Typen): Suffix _5/_6 analog.\n\n"
 
         + (
         f"## AKTUELLE RECHERCHE-ERGEBNISSE FÜR {stadt.upper()} (Web-Suche, Stand heute):\n"
@@ -1469,7 +1505,7 @@ def generate_expose_with_claude(projektdaten, city_context=""):
 
         f"## ALLE FELDER – PFLICHT:\n"
         f"Jedes Feld MUSS befüllt werden. Leere Strings sind nicht akzeptabel außer bei\n"
-        f"we_beispiel_N/we_bereich_N für nicht vorhandene WE-Typen.\n\n"
+        f"we_beispiel_N/we_nummern_N/we_raum_*_N/we_flaeche_*_N/we_typ_beschreibung_N für nicht vorhandene WE-Typen.\n\n"
         f"{json.dumps(PLATZHALTER, ensure_ascii=False)}"
     )
     resp = requests.post(
@@ -1595,7 +1631,7 @@ def duplicate_we_slides(prs, data):
     Dynamisch: Originale Slide hat Typen 1+2 (a/b).
     Für jedes weitere befüllte Typ-Paar (3+4, 5+6, 7+8, ...) wird ein Duplikat erstellt.
     Unterstützt beliebig viele WE-Typen (nicht nur bis f).
-    Dupliziert nur wenn TEXT-Keys (we_beispiel_N / we_bereich_N) befüllt sind —
+    Dupliziert nur wenn TEXT-Keys (we_beispiel_N / we_nummern_N) befüllt sind —
     Bild-URLs allein triggern keine Duplikation.
     """
     from pptx.oxml import parse_xml
@@ -1609,8 +1645,8 @@ def duplicate_we_slides(prs, data):
     while True:
         left_n  = pair * 2 - 1   # 3, 5, 7, 9, ...
         right_n = pair * 2        # 4, 6, 8, 10, ...
-        if data.get(f"we_beispiel_{left_n}") or data.get(f"we_bereich_{left_n}") \
-                or data.get(f"we_beispiel_{right_n}") or data.get(f"we_bereich_{right_n}"):
+        if data.get(f"we_beispiel_{left_n}") or data.get(f"we_nummern_{left_n}") \
+                or data.get(f"we_beispiel_{right_n}") or data.get(f"we_nummern_{right_n}"):
             extra_slides += 1
             pair += 1
         else:
@@ -1632,6 +1668,23 @@ def duplicate_we_slides(prs, data):
                 break
         if we_idx is not None:
             break
+
+    if we_idx is None:
+        # Try also matching new placeholder names
+        for i, slide in enumerate(prs.slides):
+            for shape in slide.shapes:
+                txt = ""
+                if shape.has_text_frame:
+                    txt = shape.text_frame.text.upper()
+                elif shape.shape_type == 6:
+                    for c in shape.shapes:
+                        if c.has_text_frame:
+                            txt += c.text_frame.text.upper()
+                if "WE_NUMMERN_1" in txt or "WE_RAUM_1_NAME_1" in txt:
+                    we_idx = i
+                    break
+            if we_idx is not None:
+                break
 
     if we_idx is None:
         print("duplicate_we_slides: WE-Slide nicht gefunden – überspringe Buchstaben-Fix")
@@ -1684,11 +1737,22 @@ def duplicate_we_slides(prs, data):
         # Platzhalter umbenennen (rechts vor links um Präfix-Kollisionen zu vermeiden)
         xml_str = xml_str.replace("WE_BEISPIEL_2", f"WE_BEISPIEL_{right_n}")
         xml_str = xml_str.replace("WE_BEISPIEL_1", f"WE_BEISPIEL_{left_n}")
-        xml_str = xml_str.replace("WE_BEREICH_2",  f"WE_BEREICH_{right_n}")
-        xml_str = xml_str.replace("WE_BEREICH_1",  f"WE_BEREICH_{left_n}")
         xml_str = xml_str.replace("BILD_WE_2",     f"BILD_WE_{right_n}")
         xml_str = xml_str.replace("BILD_WE_1",     f"BILD_WE_{left_n}")
-        # WE_FLAECHE_1-5 und WE_TYP_BESCHREIBUNG sind pro Slide geteilt → unverändert
+        # WE_NUMMERN (rechts vor links)
+        xml_str = xml_str.replace("WE_NUMMERN_2", f"WE_NUMMERN_{right_n}")
+        xml_str = xml_str.replace("WE_NUMMERN_1", f"WE_NUMMERN_{left_n}")
+        # WE_TYP_BESCHREIBUNG (rechts vor links)
+        xml_str = xml_str.replace("WE_TYP_BESCHREIBUNG_2", f"WE_TYP_BESCHREIBUNG_{right_n}")
+        xml_str = xml_str.replace("WE_TYP_BESCHREIBUNG_1", f"WE_TYP_BESCHREIBUNG_{left_n}")
+        # WE_RAUM_N_NAME (rechts vor links, für N=1-5)
+        for rn in range(5, 0, -1):
+            xml_str = xml_str.replace(f"WE_RAUM_{rn}_NAME_2", f"WE_RAUM_{rn}_NAME_{right_n}")
+            xml_str = xml_str.replace(f"WE_RAUM_{rn}_NAME_1", f"WE_RAUM_{rn}_NAME_{left_n}")
+        # WE_FLAECHE_N_side (rechts vor links, für N=1-5)
+        for fn in range(5, 0, -1):
+            xml_str = xml_str.replace(f"WE_FLAECHE_{fn}_2", f"WE_FLAECHE_{fn}_{right_n}")
+            xml_str = xml_str.replace(f"WE_FLAECHE_{fn}_1", f"WE_FLAECHE_{fn}_{left_n}")
 
         xml_str = _fix_we_letters(xml_str, left_letter, right_letter)
 
