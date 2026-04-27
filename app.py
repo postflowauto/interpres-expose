@@ -957,19 +957,28 @@ def fill_image_placeholders(data):
         data[slot] = url
         print(f"  {slot} → {url[:70]}")
 
-    # Slots die NUR mit echten Projektfotos befüllt werden sollen.
-    # Kein Picsum-Fallback – falsches Foto ist schlimmer als kein Foto.
+    # Slots die NUR mit echten Projektfotos vom Kunden befüllt werden.
+    # Lieber leerer Platzhalter als falsches Stock-Foto – Kunde kann später
+    # via Preview-UI eigene Fotos hochladen.
     _NO_FALLBACK_SLOTS = {
-        "bild_projekt_aussen", "bild_greenliving_1", "bild_greenliving_2",
-        "bild_collage_1", "bild_collage_2", "bild_collage_3", "bild_collage_4", "bild_collage_5",
-        "bild_hotel_1", "bild_hotel_2",
+        # ── Außenansichten / Renderings / Visualisierungen ──────────────
+        "bild_titel", "bild_projekt", "bild_projekt_aussen",
         "bild_ansicht_1", "bild_ansicht_2",
-        "bild_standort_innen",
+        "bild_greenliving_1", "bild_greenliving_2",
+        # ── Innen / Ausstattung / Hotel-Feeling ──────────────────────────
+        "bild_interior",
+        "bild_ausstattung_1", "bild_ausstattung_2", "bild_ausstattung_3",
+        "bild_ausstattung_4", "bild_ausstattung_5", "bild_ausstattung_6",
+        "bild_hotel_1", "bild_hotel_2",
+        "bild_standort_innen", "bild_standort_aussen",
+        # ── Collagen / Schemata / Rechtliches ───────────────────────────
+        "bild_collage_1", "bild_collage_2", "bild_collage_3", "bild_collage_4", "bild_collage_5",
         "bild_rechtlich_1", "bild_rechtlich_2",
+        # ── Grundrisse / WE-Typen ──────────────────────────────────────
+        "bild_grundriss_1", "bild_grundriss_2", "bild_grundriss_3", "bild_grundriss_4",
         "bild_grundriss_intro_1", "bild_grundriss_intro_2", "bild_grundriss_intro_3",
-        # WE-Grundrisse: nur echte Grundriss-Zeichnungen vom Kunden
         *{f"bild_we_{n}" for n in range(1, 21)},
-        # Amenity-Bilder werden separat unten via Wikimedia + Vision-Validation gefüllt
+        # ── Amenity-Bilder werden separat via Wikimedia + Vision validiert ──
         *{f"bild_amenity_{n}" for n in range(1, 10)},
     }
 
@@ -2985,16 +2994,34 @@ def _run_expose_job(job_id, zip_paths):
         _set(status="processing", phase="Präsentation wird erstellt …")
         print(f"[{job_id}] Schritt 4/6: fill_pptx …")
         tmpl_bytes = requests.get(TEMPLATE_URL, timeout=30).content
-        # Bbox-Map JETZT extrahieren (vor dem Fill, solange tmpl_bytes klein ist)
+        print(f"[{job_id}] Template geladen: {len(tmpl_bytes)//1024} KB")
+
+        # ── Bbox-Map: erst WE-Typen duplizieren, dann bboxes extrahieren ──────
+        # So matchen die slide-Indices das gerenderte PDF (das ja auch die
+        # duplizierten WE-Slides enthält).
         try:
-            bbox_map = extract_bild_placeholders(tmpl_bytes)
-            print(f"[{job_id}] Bbox-Map: {sum(len(s['placeholders']) for s in bbox_map['slides'])} Platzhalter")
+            from pptx import Presentation as _Prs
+            prs_struct = _Prs(io.BytesIO(tmpl_bytes))
+            try:
+                duplicate_we_slides(prs_struct, expose_data)
+            except Exception as dup_err:
+                print(f"[{job_id}]   duplicate_we_slides für bbox: {dup_err}")
+            buf = io.BytesIO()
+            prs_struct.save(buf)
+            expanded_bytes = buf.getvalue()
+            del prs_struct, buf
+            bbox_map = extract_bild_placeholders(expanded_bytes)
+            del expanded_bytes
+            n_placeholders = sum(len(s['placeholders']) for s in bbox_map['slides'])
+            print(f"[{job_id}] Bbox-Map: {n_placeholders} Platzhalter auf "
+                  f"{len(bbox_map['slides'])} Slides "
+                  f"(slide_dim={bbox_map.get('slide_w_emu')}x{bbox_map.get('slide_h_emu')})")
         except Exception as be:
-            print(f"[{job_id}] Bbox-Extraktion Fehler: {be}")
+            import traceback as _tb
+            print(f"[{job_id}] Bbox-Extraktion Fehler: {be}\n{_tb.format_exc()[:500]}")
             bbox_map = {"slide_w_emu": 12192000, "slide_h_emu": 6858000, "slides": []}
 
         pptx_bytes = fill_pptx(tmpl_bytes, expose_data, customer_images=customer_images)
-        # tmpl_bytes wird nicht mehr gebraucht – freigeben
         del tmpl_bytes
         gc.collect()
 
