@@ -930,13 +930,16 @@ def fill_image_placeholders(data):
 
     # Stadtspezifische Slots: Wikipedia REST API (zuverlässig) → Wikimedia-Fallback
     stadtteil = data.get("stadtteil", "")
+    # Stadt-Bilder: Wikipedia/Commons – NUR für echte Stadt-Slots, NICHT für
+    # Projekt-Cover (bild_titel) und nicht für Standort-Außenfoto (das soll
+    # das Kundenbild bleiben, sonst läuft der Eigentum-Renderer rein).
     _CITY_SLOT_SEARCHES = [
-        # (slot,                primary_search,                        commons_fallback_query)
-        ("bild_titel",          stadt,                                 f"{stadt} Stadtansicht Panorama"),
-        ("bild_quartier",       stadtteil or stadt,                    f"{stadt} Stadtquartier Wohngebiet"),
-        ("bild_stadt_gross",    stadt,                                 f"{stadt} Luftbild Stadtpanorama"),
-        ("bild_stadt_klein",    f"{stadt} Innenstadt",                 f"{stadt} Innenstadt Marktplatz"),
-        ("bild_standort_aussen",stadtteil or stadt,                    f"{stadtteil or stadt} Stadtbild Straße"),
+        # (slot,                primary_search,                       commons_fallback_query)
+        ("bild_quartier",       stadtteil or stadt,                   f"{stadt} {stadtteil or ''} Stadtquartier"),
+        ("bild_stadt_gross",    stadt,                                f"{stadt} Luftbild Stadtpanorama"),
+        ("bild_stadt_klein",    f"{stadt} Innenstadt",                f"{stadt} Innenstadt Marktplatz"),
+        ("bild_stadt_presse",   stadt,                                f"{stadt} Skyline Architektur"),
+        ("bild_stadt_branche",  stadt,                                f"{stadt} Wirtschaft Industrie Unternehmen"),
     ]
     for slot, wp_search, commons_q in _CITY_SLOT_SEARCHES:
         if slot not in data:
@@ -1501,42 +1504,49 @@ def generate_expose_with_claude(projektdaten, city_context=""):
         "### Ausstattung:\n"
         "text_ausstattung_detail: max 2 Sätze. Bodenbelag, Heizung, Balkone. Konkret.\n\n"
 
-        "## ⚠️ ZEICHENLIMITS – HALTE DICH STRIKT DARAN! Das Template hat feste Textfelder.\n"
-        "Zu langer Text läuft über die Trennlinien hinaus. Schreibe KNAPP und PRÄGNANT.\n"
+        "## ⚠️ ZEICHENLIMITS – Templatefelder haben feste Größen.\n"
+        "Bleibe IM Limit, aber NUTZE den Platz aus. Premium-Exposé heißt: AUSFÜHRLICH und SPEZIFISCH.\n"
+        "Generische 1-Satz-Antworten = sofort verworfen. Liefere DQN-Niveau (mit Firmennamen, Zahlen, Quellen).\n\n"
         "produkt_beschreibung: max 25 Zeichen (z.B. 'Microapartments' oder '1-2 Zi. möbliert')\n"
-        "text_kapitel_invest/live/stay/know/hotel (NUR die Slogan-Zeile): max 40 Zeichen\n"
+        "text_kapitel_invest/live/stay/know/hotel (Slogan): max 40 Zeichen\n"
         "text_kapitel_invest_1/2, text_kapitel_live_1/2, text_kapitel_stay_1/2, text_kapitel_know_1/2:\n"
-        "  max 120 Zeichen – 1-2 kurze Sätze, projekt-spezifisch und prägnant\n"
+        "  max 130 Zeichen – 1-2 Sätze, projekt-spezifisch\n"
         "text_hotel: max 40 Zeichen\n"
-        "text_intro: max 160 Zeichen – 2 kurze Sätze, emotional, konkret über Projekt + Stadt\n"
-        "text_investment_pitch: max 200 Zeichen – konkret: Preis, KfW, AfA, Rendite-Potenzial\n"
-        "text_greenliving_intro: max 80 Zeichen\n"
-        "text_greenliving_1: max 120 Zeichen\n"
-        "text_greenliving_2: max 120 Zeichen\n"
-        "text_ausstattung_intro: max 80 Zeichen\n"
-        "text_ausstattung_detail: max 120 Zeichen\n"
-        "text_ausstattung_kurz: max 60 Zeichen\n"
-        "text_ausstattung_lang: max 110 Zeichen\n"
-        "text_grundriss_intro: max 90 Zeichen\n"
-        "text_architektur: max 90 Zeichen\n"
-        "text_nachhaltig_1/2/3/4: max 80 Zeichen\n"
-        "text_standort_1/2: max 90 Zeichen\n"
-        "text_projekt_nachhaltig_1/2: max 80 Zeichen\n"
-        "text_stadt_wachstum_1: max 130 Zeichen\n"
-        "text_stadt_wachstum_2: max 120 Zeichen\n"
-        "text_stadt_intro: max 80 Zeichen\n"
-        "text_stadt_wirtschaft_links/rechts: max 100 Zeichen\n"
-        "text_stadt_invest_detail: max 110 Zeichen\n"
-        "text_einwohner_detail/bip_detail/mietsteigerung_detail/studierende_detail: max 70 Zeichen\n"
-        "text_stadt_stat_N_detail: max 70 Zeichen\n"
-        "text_stadt_branche_1/2: max 100 Zeichen\n"
+        "text_intro: ZIEL 280-340 Zeichen – 2-3 Sätze, projektspezifisch, emotional, konkret\n"
+        "text_investment_pitch: ZIEL 280-330 Zeichen – Preis, KfW, AfA, Renditepotenzial konkret\n"
+        "text_greenliving_intro: max 90 Zeichen\n"
+        "text_greenliving_1: ZIEL 200-260 Zeichen – konkrete Anlagen (Fernwärme, PV, KfW-40) + Effekt\n"
+        "text_greenliving_2: ZIEL 200-260 Zeichen – Außenbereiche, Mobilität, Lebensqualität\n"
+        "text_ausstattung_intro: max 90 Zeichen\n"
+        "text_ausstattung_detail: ZIEL 180-240 Zeichen\n"
+        "text_ausstattung_kurz: max 80 Zeichen\n"
+        "text_ausstattung_lang: ZIEL 180-240 Zeichen\n"
+        "text_grundriss_intro: max 110 Zeichen\n"
+        "text_architektur: max 110 Zeichen\n"
+        "text_nachhaltig_1/2/3/4: max 100 Zeichen pro Eintrag\n"
+        "text_standort_1/2: ZIEL 180-260 Zeichen pro Eintrag\n"
+        "text_projekt_nachhaltig_1/2: ZIEL 180-240 Zeichen\n"
+        "text_stadt_intro: ZIEL 280-360 Zeichen – Hauptstadt-Pitch wie DQN-Seite 23\n"
+        "text_stadt_wachstum_1: ZIEL 280-340 Zeichen – Branchenüberblick mit echten Firmennamen\n"
+        "text_stadt_wachstum_2: ZIEL 200-260 Zeichen – konkrete Projekte/Investitionssummen\n"
+        "text_stadt_wirtschaft_links: ZIEL 240-300 Zeichen – Sektor 1 (z.B. Tech/Industrie) detailliert\n"
+        "text_stadt_wirtschaft_rechts: ZIEL 240-300 Zeichen – Sektor 2 (z.B. Logistik/Hafen) detailliert\n"
+        "text_stadt_invest_detail: ZIEL 220-280 Zeichen – DETAIL zur Großinvestition (Firma + Summe + Kontext)\n"
+        "text_einwohner_detail: ZIEL 140-180 Zeichen – Detail zur Einwohnerzahl + Quelle/Trend\n"
+        "text_bip_detail: ZIEL 140-180 Zeichen – BIP-Entwicklung, % Veränderung, Bundesland-Vergleich\n"
+        "text_mietsteigerung_detail: ZIEL 100-160 Zeichen – Mietpreis-Tendenz seit 2017\n"
+        "text_studierende_detail: ZIEL 80-140 Zeichen – Hochschulen, Fachgebiete\n"
+        "text_stadt_stat_N_detail: ZIEL 130-180 Zeichen pro Stat\n"
+        "text_stadt_branche_1/2: ZIEL 240-320 Zeichen pro Branche – mit Firmennamen + Projekten\n"
         "feature_N_label: max 28 Zeichen\n"
         "amenity_N: max 28 Zeichen\n"
         "we_typ_beschreibung_N: max 180 Zeichen\n"
-        "besonderheiten: max 60 Zeichen\n"
-        "steuerliche_moeglichkeiten: max 80 Zeichen\n"
-        "quartier_history/quartier_ref: max 100 Zeichen\n"
-        "zitat_intro: max 130 Zeichen\n\n"
+        "besonderheiten: max 80 Zeichen\n"
+        "steuerliche_moeglichkeiten: max 110 Zeichen\n"
+        "quartier_history: ZIEL 260-340 Zeichen – Geschichte/Charakter des Stadtteils\n"
+        "quartier_ref: max 130 Zeichen\n"
+        "zitat_intro: max 160 Zeichen\n"
+        "quelle_1/2/3/4: kurz wie 'statistik.sachsen-anhalt.de 2024' (max 80 Zeichen)\n\n"
 
         f"## STANDORT-MINUTEN ({stadt} – Slide 5):\n"
         f"min_uni / label_min_uni: Fahrradminuten + Name der nächsten Uni/FH in {stadt}\n"
@@ -1599,21 +1609,41 @@ def generate_expose_with_claude(projektdaten, city_context=""):
         f"stadt_mietsteigerung: Mietsteigerung des Mietniveaus seit 2017/2018, z.B. '+31%'\n"
         f"stadt_studierende: Studierende an Hochschulen, z.B. '21.000'\n"
         f"stadt_bip: BIP der Stadt/Region als formatierte Zahl (optional, falls vorhanden)\n\n"
+        + "\n"
+        f"## REFERENZ-BEISPIELE (Premium-Niveau wie DQN-Exposé):\n"
+        f"So sieht GUTER Stadttext aus – konkrete Firmen, Projekte, Zahlen, Quellen:\n\n"
+        f"text_stadt_intro (Magdeburg-Beispiel, ~330 Zeichen):\n"
+        f"  'Die Landeshauptstadt wächst. Der Stadtteil Neue Neustadt ist heute einer der spannendsten "
+        f"Orte Magdeburgs: gewachsen, urban, im Wandel. {{projekt_name}} entsteht genau hier – zwischen "
+        f"Elbufer und Altstadt, zwischen Universität und Einkaufszentren. Eine Lage, die vieles verbindet: "
+        f"Nähe zur City, kurze Wege, grüne Rückzugsorte und ein hohes Maß an Lebensqualität.'\n\n"
+        f"text_stadt_wirtschaft_links (~280 Zeichen, Sektor mit Firmennamen):\n"
+        f"  'Im Industriepark Eulenberg entstehen neue Flächen für internationale Unternehmen aus den "
+        f"Bereichen Halbleiter, Batterietechnik, Rechenzentren und Pharma. Namen wie CATL – der weltweit "
+        f"größte Hersteller von Lithium-Ionen-Batterien – oder Mercury unterstreichen die Relevanz des Standorts.'\n\n"
+        f"text_stadt_wirtschaft_rechts (~280 Zeichen, anderer Sektor):\n"
+        f"  'Der Magdeburger Hafen – größter Binnenhafen Ostdeutschlands – wird strategisch ausgebaut "
+        f"und entwickelt sich mit Neuansiedlungen wie Amazon und HelloFresh zu einem zentralen Logistikknoten "
+        f"im europäischen Netzwerk.'\n\n"
+        f"text_stadt_invest_detail (~260 Zeichen, eine konkrete Großinvestition):\n"
+        f"  'Die Ferroelectric Memory Company (FMC), ein Dresdner Hightech-Unternehmen, plant einen "
+        f"Produktionsstandort auf rund 35 Hektar im Süden Magdeburgs – mit 3 Mrd. € Investition für "
+        f"energieeffiziente Speicherchips für KI und Rechenzentren.'\n\n"
+        f"text_einwohner_detail (~150 Zeichen):\n"
+        f"  'Magdeburg wächst kontinuierlich und gewinnt als Wohn- und Wirtschaftsstandort zunehmend an Bedeutung.'\n\n"
+        f"DAS IST DAS NIVEAU. Wende es auf {stadt} an mit den ECHTEN Daten aus der Recherche oben.\n"
+        f"Erfinde NICHTS – nutze nur, was wirklich in der Recherche steht.\n\n"
         + (
-        f"BEKANNTE FAKTEN FÜR MAGDEBURG (Stand 2024/2025, verwende diese wenn stadt=Magdeburg):\n"
+        f"## BEKANNTE FAKTEN FÜR MAGDEBURG (zusätzlich, falls Recherche unvollständig):\n"
         f"  stadt_einwohner: '245.278'\n"
         f"  bundesland_bip: '73,4 Mrd.' (Sachsen-Anhalt)\n"
         f"  stadt_mietsteigerung: '+28%' (seit 2017)\n"
         f"  stadt_studierende: '21.000'\n"
-        f"  text_einwohner_detail oder text_bip_detail: Erwähne den Intel-Chip-Werksinvestition "
-        f"(~17 Mrd. Euro Investition in Magdeburg 2024) und die wachsende Technologiebranche.\n"
-        f"  Magdeburg ist die Hauptstadt Sachsen-Anhalts, Uni-Stadt, wächst durch Ansiedlung "
-        f"von Tech-Unternehmen (Intel, etc.).\n\n"
+        f"  Intel-Chip-Werksinvestition (~17 Mrd. €) sowie der Industriepark Eulenberg mit CATL/Mercury sind\n"
+        f"  Schlüsselfakten. Nutze sie konkret in den Stadttexten.\n\n"
         if 'magdeburg' in stadt.lower() else ""
         )
-        + "\n"
-
-        f"## ALLE FELDER – PFLICHT:\n"
+        + f"## ALLE FELDER – PFLICHT:\n"
         f"Jedes Feld MUSS befüllt werden. Leere Strings sind nicht akzeptabel außer bei\n"
         f"we_beispiel_N/we_nummern_N/we_raum_*_N/we_flaeche_*_N/we_typ_beschreibung_N für nicht vorhandene WE-Typen.\n\n"
         f"{json.dumps(PLATZHALTER, ensure_ascii=False)}"
