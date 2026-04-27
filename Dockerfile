@@ -1,16 +1,14 @@
 FROM python:3.11-slim
 
 # System-Abhängigkeiten:
-# - LibreOffice headless: PPTX → PDF Konvertierung
-# - poppler-utils (pdftoppm): PDF → JPG für Slide-Vorschau
-# - Schriftarten: Canva-Sans-Fallback + DejaVu für deutsche Sonderzeichen
+# - poppler-utils (pdftoppm): PDF → JPG für Slide-Vorschau (~30 MB, leichtgewichtig)
+# - PPTX → PDF läuft über CloudConvert API (siehe CLOUDCONVERT_KEY env),
+#   spart ~500 MB RAM gegenüber lokalem LibreOffice headless
+# - Schriftarten: Canva-Fallback + DejaVu für deutsche Sonderzeichen
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libreoffice-impress \
-    libreoffice-core \
     poppler-utils \
     fonts-liberation \
     fonts-dejavu-core \
-    fonts-noto-core \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 

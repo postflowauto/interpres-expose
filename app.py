@@ -2584,52 +2584,132 @@ def _find_libreoffice():
     return None
 
 
-def convert_to_pdf(pptx_bytes, filename):
-    """Konvertiert PPTX-Bytes zu PDF via LibreOffice headless."""
+def _convert_to_pdf_cloudconvert(pptx_bytes, filename, max_wait_s=300):
+    """Konvertiert PPTX → PDF über CloudConvert API.
+    Vermeidet lokale LibreOffice-Installation (RAM-Schoner für Render Starter).
+    """
+    if not CLOUDCONVERT_KEY:
+        raise RuntimeError("CLOUDCONVERT_KEY nicht gesetzt")
+
+    base = "https://api.cloudconvert.com/v2"
+    headers = {"Authorization": f"Bearer {CLOUDCONVERT_KEY}"}
+    print(f"convert_to_pdf (CloudConvert): {filename} ({len(pptx_bytes)//1024} KB)")
+
+    # 1) Job mit drei Tasks anlegen: upload → convert → export
+    job_resp = requests.post(
+        f"{base}/jobs",
+        headers={**headers, "Content-Type": "application/json"},
+        json={
+            "tasks": {
+                "import-1": {"operation": "import/upload"},
+                "convert-1": {
+                    "operation":     "convert",
+                    "input":         "import-1",
+                    "input_format":  "pptx",
+                    "output_format": "pdf",
+                },
+                "export-1": {"operation": "export/url", "input": "convert-1"},
+            }
+        },
+        timeout=30,
+    )
+    job_resp.raise_for_status()
+    job   = job_resp.json()["data"]
+    jobid = job["id"]
+
+    # 2) Upload-URL aus import-Task holen + Datei dorthin POSTen
+    import_task = next(t for t in job["tasks"] if t["name"] == "import-1")
+    form        = import_task["result"]["form"]
+    up_resp = requests.post(
+        form["url"],
+        data=form["parameters"],
+        files={"file": (filename, pptx_bytes,
+                        "application/vnd.openxmlformats-officedocument.presentationml.presentation")},
+        timeout=300,
+    )
+    up_resp.raise_for_status()
+    print(f"  PPTX hochgeladen, warte auf Konvertierung …")
+
+    # 3) Job-Status pollen bis "finished" / "error"
+    deadline = _time.time() + max_wait_s
+    pdf_url  = None
+    while _time.time() < deadline:
+        _time.sleep(3)
+        st_resp = requests.get(f"{base}/jobs/{jobid}", headers=headers, timeout=20)
+        st_resp.raise_for_status()
+        jdata = st_resp.json()["data"]
+        status = jdata.get("status")
+        if status == "finished":
+            export_task = next(t for t in jdata["tasks"] if t["name"] == "export-1")
+            files = (export_task.get("result") or {}).get("files") or []
+            if not files:
+                raise RuntimeError("CloudConvert export-1: keine Dateien")
+            pdf_url = files[0]["url"]
+            break
+        if status == "error":
+            err = ""
+            for t in jdata["tasks"]:
+                if t.get("status") == "error":
+                    err = (t.get("message") or t.get("code") or "unbekannt")
+                    break
+            raise RuntimeError(f"CloudConvert Fehler: {err}")
+
+    if not pdf_url:
+        raise RuntimeError("CloudConvert Timeout nach 5 Minuten")
+
+    # 4) PDF herunterladen
+    pdf_resp = requests.get(pdf_url, timeout=120)
+    pdf_resp.raise_for_status()
+    print(f"  PDF erzeugt (CloudConvert): {len(pdf_resp.content)//1024} KB")
+    return pdf_resp.content
+
+
+def _convert_to_pdf_libreoffice(pptx_bytes, filename):
+    """Fallback: LibreOffice headless lokal (nur wenn installiert UND genug RAM)."""
     import subprocess, tempfile, glob as _glob
 
     lo_bin = _find_libreoffice()
     if not lo_bin:
-        raise RuntimeError(
-            "LibreOffice nicht gefunden. Bitte sicherstellen dass das Docker-Image "
-            "korrekt deployed wurde (render.yaml: runtime: docker)."
-        )
-    print(f"convert_to_pdf: {lo_bin} für {filename} ({len(pptx_bytes)//1024} KB)")
+        raise RuntimeError("LibreOffice nicht gefunden")
+    print(f"convert_to_pdf (LibreOffice): {lo_bin} für {filename} ({len(pptx_bytes)//1024} KB)")
 
     with tempfile.TemporaryDirectory() as tmpdir:
         pptx_path = os.path.join(tmpdir, filename)
         with open(pptx_path, "wb") as f:
             f.write(pptx_bytes)
-
         env = os.environ.copy()
-        env["HOME"] = tmpdir   # LibreOffice braucht beschreibbares HOME
-
+        env["HOME"] = tmpdir
         result = subprocess.run(
             [lo_bin, "--headless", "--norestore", "--nofirststartwizard",
              "--convert-to", "pdf", "--outdir", tmpdir, pptx_path],
             capture_output=True, text=True, timeout=300, env=env
         )
-        print(f"  returncode={result.returncode}")
-        if result.stdout: print(f"  stdout: {result.stdout[:300]}")
-        if result.stderr: print(f"  stderr: {result.stderr[:300]}")
-
         if result.returncode != 0:
-            raise RuntimeError(
-                f"LibreOffice Fehler (rc={result.returncode}): {result.stderr[:300]}"
-            )
-
+            raise RuntimeError(f"LibreOffice rc={result.returncode}: {result.stderr[:300]}")
         pdf_stem = os.path.splitext(filename)[0]
-        matches = _glob.glob(os.path.join(tmpdir, f"{pdf_stem}.pdf"))
-        if not matches:
-            matches = _glob.glob(os.path.join(tmpdir, "*.pdf"))
+        matches = _glob.glob(os.path.join(tmpdir, f"{pdf_stem}.pdf")) \
+                  or _glob.glob(os.path.join(tmpdir, "*.pdf"))
         if not matches:
             raise RuntimeError("LibreOffice hat keine PDF-Datei erzeugt")
-
         with open(matches[0], "rb") as f:
-            pdf_bytes = f.read()
+            return f.read()
 
-    print(f"  PDF erzeugt: {len(pdf_bytes)//1024} KB")
-    return pdf_bytes
+
+def convert_to_pdf(pptx_bytes, filename):
+    """Konvertiert PPTX-Bytes zu PDF.
+    Reihenfolge: CloudConvert (wenn Key gesetzt) → LibreOffice → Fehler.
+    """
+    if CLOUDCONVERT_KEY:
+        try:
+            return _convert_to_pdf_cloudconvert(pptx_bytes, filename)
+        except Exception as e:
+            print(f"  CloudConvert Fehler: {e} → versuche LibreOffice")
+    return _convert_to_pdf_libreoffice(pptx_bytes, filename)
+
+
+def _can_convert_to_pdf():
+    """True wenn entweder CloudConvert-Key oder LibreOffice verfügbar ist."""
+    return bool(CLOUDCONVERT_KEY) or _find_libreoffice() is not None
 
 def assemble_session(session_id):
     """Liest alle Chunks einer Session von /tmp und gibt die assemblierten Bytes zurück."""
@@ -2937,14 +3017,14 @@ def _run_expose_job(job_id, zip_paths):
         slide_jpgs = []
         bbox_map   = []
         try:
-            if _find_libreoffice() and _find_pdftoppm():
+            if _can_convert_to_pdf() and _find_pdftoppm():
                 pdf_bytes = convert_to_pdf(pptx_bytes, f"{projekt_name}.pptx")
                 _set(phase="Slide-Bilder werden gerendert …")
                 jpg_paths = render_pdf_to_jpgs(pdf_bytes, _job_slides_dir(job_id), dpi=110)
                 slide_jpgs = [os.path.basename(p) for p in jpg_paths]
                 print(f"[{job_id}] {len(slide_jpgs)} Slide-JPGs erstellt")
             else:
-                print(f"[{job_id}] LibreOffice/pdftoppm fehlt → Preview wird übersprungen")
+                print(f"[{job_id}] PDF-Konverter oder pdftoppm fehlt → Preview übersprungen")
         except Exception as pe:
             print(f"[{job_id}] Preview-Render Fehler: {pe}")
 
@@ -3194,7 +3274,7 @@ def _run_finalize_job(job_id):
         # Konvertierung
         _set(phase="PDF wird erstellt …")
         out_path = None
-        if _find_libreoffice():
+        if _can_convert_to_pdf():
             try:
                 pdf_bytes = convert_to_pdf(pptx_bytes, f"{projekt_name}.pptx")
                 out_path = _job_pdf_path(job_id)
