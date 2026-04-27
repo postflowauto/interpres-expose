@@ -370,6 +370,42 @@
   }
   .btn-download:hover { background: #d4b87a; }
 
+  /* ── Projektname Input ── */
+  .name-input-section {
+    margin-bottom: 1.2rem;
+  }
+  .name-input-label {
+    display: block;
+    color: #6f88ad;
+    font-size: 0.72rem;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    margin-bottom: 0.5rem;
+  }
+  .name-input-label span {
+    color: #3a5270;
+    text-transform: none;
+    letter-spacing: 0;
+    font-size: 0.7rem;
+    margin-left: 0.4rem;
+  }
+  .name-input {
+    width: 100%;
+    background: rgba(13,27,46,0.5);
+    border: 1.5px solid #1e3450;
+    border-radius: 10px;
+    padding: 0.85rem 1rem;
+    color: #e8ecf2;
+    font-size: 0.9rem;
+    font-family: 'Georgia', 'Times New Roman', serif;
+    transition: border-color 0.2s;
+  }
+  .name-input:focus {
+    outline: none;
+    border-color: #C8A96E;
+  }
+  .name-input::placeholder { color: #2a4060; }
+
   /* ── Preview Panel (Variante B) ── */
   .preview-panel {
     display: none;
@@ -562,6 +598,16 @@
   <div class="card">
     <div class="card-body" id="uploadPanel">
       <p class="card-hint">Lade den Projektdatenraum hoch. Claude analysiert alle Unterlagen und erstellt das Exposé automatisch.</p>
+
+      <!-- Projektname -->
+      <div class="name-input-section">
+        <label class="name-input-label" for="projektnameInput">
+          Projektname <span>(optional – sonst aus den Unterlagen abgeleitet)</span>
+        </label>
+        <input type="text" id="projektnameInput" class="name-input"
+               placeholder="z.B. The Rothenseer, Stadtquartier Linden …"
+               maxlength="60">
+      </div>
 
       <div class="drop-zone" id="dropZone">
         <input type="file" id="fileInput" accept=".zip" multiple>
@@ -914,6 +960,10 @@ generateBtn.addEventListener('click', async () => {
 
     // ── Projektfotos anhängen (immer direkt, nie chunked) ────────────────────
     selectedImages.forEach(img => formData.append('images', img, img.name));
+
+    // ── Projektname (optional, sonst aus PDFs abgeleitet) ────────────────────
+    const projektname = (document.getElementById('projektnameInput').value || '').trim();
+    if (projektname) formData.append('projektname', projektname);
 
     // ── Phase 3: Job starten ─────────────────────────────────────────────────
     setStep(3);

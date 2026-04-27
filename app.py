@@ -2991,6 +2991,17 @@ def _run_expose_job(job_id, zip_paths):
         expose_data = fill_image_placeholders(expose_data)
         gc.collect()
 
+        # ── User-Projektname (falls gesetzt) override Claude-Output ─────────
+        try:
+            job_meta = _read_job(job_id) or {}
+            user_pname = (job_meta.get("user_projektname") or "").strip()
+            if user_pname:
+                print(f"[{job_id}] Override projekt_name: '{expose_data.get('projekt_name','')}' → '{user_pname}'")
+                expose_data["projekt_name"] = user_pname
+                expose_data["logo_initial"] = generate_logo_initial(user_pname)
+        except Exception as e:
+            print(f"[{job_id}] User-Projektname-Override Fehler: {e}")
+
         _set(status="processing", phase="Präsentation wird erstellt …")
         print(f"[{job_id}] Schritt 4/6: fill_pptx …")
         tmpl_bytes = requests.get(TEMPLATE_URL, timeout=30).content
@@ -3196,13 +3207,19 @@ def generate_expose():
         if saved_direct:
             print(f"[{job_id}] {saved_direct} direkte Projektfotos gespeichert")
 
+        # ── Optionaler Projektname vom Kunden (überschreibt Claude-Output) ──
+        user_projektname = (request.form.get("projektname") or "").strip()
+        if user_projektname:
+            print(f"[{job_id}] Kunden-Projektname: {user_projektname!r}")
+
         _write_job(job_id,
                    status="processing",
                    phase="Wird gestartet …",
                    created=_time.time(),
                    pdf_path=None,
                    name=None,
-                   error=None)
+                   error=None,
+                   user_projektname=user_projektname)
 
         t = _threading.Thread(
             target=_run_expose_job,
