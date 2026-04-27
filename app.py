@@ -2968,6 +2968,16 @@ def _run_expose_job(job_id, zip_paths):
             if slot.lower() not in already_filled:
                 already_filled.append(slot.lower())
 
+        # ── Wenn keine Slide-JPGs gerendert werden konnten: kein Preview-UI sinnvoll
+        #     → direkt zu "done" mit dem PPTX (alter Flow)
+        if not slide_jpgs:
+            print(f"[{job_id}] ⚠️  Keine Slide-Bilder → überspringe Preview, gebe PPTX direkt aus")
+            output_path = os.path.join(_JOB_DIR, f"{job_id}.pptx")
+            with open(output_path, "wb") as fh:
+                fh.write(pptx_bytes)
+            _set(status="done", phase="Fertig", pdf_path=output_path, name=projekt_name)
+            return
+
         _set(
             status="preview",
             phase="Bereit für Bilder-Upload",
