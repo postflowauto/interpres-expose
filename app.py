@@ -528,7 +528,6 @@ def _extract_images_from_pdf_bytes(pdf_bytes, pdf_name, seen_hashes):
                         'name': f"{pdf_name}_s{page_num+1}_b{img_idx+1}{ext}",
                         'bytes': raw,
                         'ext': ext,
-                        'b64': base64.b64encode(raw).decode(),
                         'size': len(raw),
                     })
                 except Exception:
@@ -575,7 +574,6 @@ def extract_images_from_zip(zip_bytes):
                     'name': name.split('/')[-1],
                     'bytes': raw,
                     'ext': ext,
-                    'b64': base64.b64encode(raw).decode(),
                     'size': len(raw),
                 })
 
@@ -707,7 +705,8 @@ def classify_and_assign_customer_images(images):
                   else 'image/png' if img['ext'] == '.png'
                   else 'image/webp')
             content.append({"type": "image", "source": {
-                "type": "base64", "media_type": mt, "data": img['b64']
+                "type": "base64", "media_type": mt,
+                "data": img.get('b64') or base64.b64encode(img['bytes']).decode()
             }})
             content.append({"type": "text", "text": f"Bild {i+1}: {img['name']}"})
         content.append({"type": "text", "text": classify_prompt})
@@ -2880,7 +2879,6 @@ def _run_expose_job(job_id, zip_paths):
                         "name": fname,
                         "ext": ext,
                         "bytes": raw,
-                        "b64": base64.b64encode(raw).decode(),
                         "size": len(raw),
                     })
                     print(f"[{job_id}] Direktbild: {fname} ({len(raw)//1024} KB)")
@@ -2975,12 +2973,30 @@ def _run_expose_job(job_id, zip_paths):
         if customer_image_list:
             customer_images = classify_and_assign_customer_images(customer_image_list)
 
+        # ── customer_image_list ist jetzt überflüssig (zugewiesene Bilder sind in
+        #     customer_images, der Rest wird nicht mehr gebraucht). Sofort freigeben.
+        import gc
+        del customer_image_list
+        gc.collect()
+
         expose_data = fill_image_placeholders(expose_data)
+        gc.collect()
 
         _set(status="processing", phase="Präsentation wird erstellt …")
         print(f"[{job_id}] Schritt 4/6: fill_pptx …")
         tmpl_bytes = requests.get(TEMPLATE_URL, timeout=30).content
+        # Bbox-Map JETZT extrahieren (vor dem Fill, solange tmpl_bytes klein ist)
+        try:
+            bbox_map = extract_bild_placeholders(tmpl_bytes)
+            print(f"[{job_id}] Bbox-Map: {sum(len(s['placeholders']) for s in bbox_map['slides'])} Platzhalter")
+        except Exception as be:
+            print(f"[{job_id}] Bbox-Extraktion Fehler: {be}")
+            bbox_map = {"slide_w_emu": 12192000, "slide_h_emu": 6858000, "slides": []}
+
         pptx_bytes = fill_pptx(tmpl_bytes, expose_data, customer_images=customer_images)
+        # tmpl_bytes wird nicht mehr gebraucht – freigeben
+        del tmpl_bytes
+        gc.collect()
 
         projekt_name = expose_data.get("projekt_name", "Expose").replace(" ", "_")
 
@@ -3019,25 +3035,29 @@ def _run_expose_job(job_id, zip_paths):
         try:
             if _can_convert_to_pdf() and _find_pdftoppm():
                 pdf_bytes = convert_to_pdf(pptx_bytes, f"{projekt_name}.pptx")
+                # PPTX wurde an CloudConvert gesendet → kann jetzt aus dem RAM
+                # (ist als Datei unter first_pass_pptx auf Disk)
+                del pptx_bytes
+                gc.collect()
                 _set(phase="Slide-Bilder werden gerendert …")
-                jpg_paths = render_pdf_to_jpgs(pdf_bytes, _job_slides_dir(job_id), dpi=110)
+                # PDF auf Disk schreiben statt in RAM behalten
+                pdf_tmp = os.path.join(_job_dir(job_id), "_first_pass.pdf")
+                with open(pdf_tmp, "wb") as fh:
+                    fh.write(pdf_bytes)
+                pdf_size_kb = len(pdf_bytes) // 1024
+                del pdf_bytes
+                gc.collect()
+                # render_pdf_to_jpgs liest das PDF wieder von Disk – stabil
+                with open(pdf_tmp, "rb") as fh:
+                    jpg_paths = render_pdf_to_jpgs(fh.read(), _job_slides_dir(job_id), dpi=80)
+                try: os.unlink(pdf_tmp)
+                except OSError: pass
                 slide_jpgs = [os.path.basename(p) for p in jpg_paths]
-                print(f"[{job_id}] {len(slide_jpgs)} Slide-JPGs erstellt")
+                print(f"[{job_id}] {len(slide_jpgs)} Slide-JPGs erstellt (PDF war {pdf_size_kb} KB)")
             else:
                 print(f"[{job_id}] PDF-Konverter oder pdftoppm fehlt → Preview übersprungen")
         except Exception as pe:
             print(f"[{job_id}] Preview-Render Fehler: {pe}")
-
-        # ── Schritt 6: Platzhalter-Bboxes für Preview-UI ─────────────────────
-        try:
-            tmpl_for_bbox = tmpl_bytes  # Original-Template hat alle {{BILD_X}} sichtbar
-            bbox_info = extract_bild_placeholders(tmpl_for_bbox)
-            bbox_map = bbox_info
-            print(f"[{job_id}] Bbox-Map: {sum(len(s['placeholders']) for s in bbox_info['slides'])} Platzhalter "
-                  f"auf {len(bbox_info['slides'])} Slides")
-        except Exception as be:
-            print(f"[{job_id}] Bbox-Extraktion Fehler: {be}")
-            bbox_map = {"slide_w_emu": 12192000, "slide_h_emu": 6858000, "slides": []}
 
         # Welche Slots wurden bereits durch automatische Pipeline befüllt?
         already_filled = []
@@ -3048,13 +3068,12 @@ def _run_expose_job(job_id, zip_paths):
             if slot.lower() not in already_filled:
                 already_filled.append(slot.lower())
 
-        # ── Wenn keine Slide-JPGs gerendert werden konnten: kein Preview-UI sinnvoll
-        #     → direkt zu "done" mit dem PPTX (alter Flow)
+        # ── Wenn keine Slide-JPGs gerendert werden konnten: kein Preview sinnvoll
+        #     → direkt zu "done" mit dem PPTX (von Disk lesen)
         if not slide_jpgs:
             print(f"[{job_id}] ⚠️  Keine Slide-Bilder → überspringe Preview, gebe PPTX direkt aus")
             output_path = os.path.join(_JOB_DIR, f"{job_id}.pptx")
-            with open(output_path, "wb") as fh:
-                fh.write(pptx_bytes)
+            shutil.copy(first_pass_pptx, output_path)
             _set(status="done", phase="Fertig", pdf_path=output_path, name=projekt_name)
             return
 
@@ -3066,6 +3085,7 @@ def _run_expose_job(job_id, zip_paths):
             bbox_map=bbox_map,
             already_filled=already_filled,
         )
+        gc.collect()
         print(f"[{job_id}] ✓ Preview bereit – warte auf Kunden-Upload")
 
     except Exception as e:
