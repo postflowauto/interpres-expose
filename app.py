@@ -793,9 +793,9 @@ def _fetch_wikipedia_city_image(city, lang="de"):
     return None
 
 
-def _fetch_wikimedia_image(query):
-    """Sucht ein thematisch passendes Bild via Wikimedia Commons.
-    Für Amenity/Ausstattungsbilder mit spezifischen deutschen Suchbegriffen.
+def _fetch_wikimedia_image(query, top_n=1):
+    """Sucht thematisch passende Bilder via Wikimedia Commons.
+    top_n=1 → eine URL (str|None), top_n>1 → Liste der besten N URLs.
     """
     try:
         resp = requests.get(
@@ -805,7 +805,7 @@ def _fetch_wikimedia_image(query):
                 "generator": "search",
                 "gsrnamespace": 6,
                 "gsrsearch": query,
-                "gsrlimit": 8,
+                "gsrlimit": 12,
                 "prop": "imageinfo",
                 "iiprop": "url|size",
                 "iiurlwidth": 1200,
@@ -815,7 +815,7 @@ def _fetch_wikimedia_image(query):
             timeout=10,
         )
         if resp.status_code != 200:
-            return None
+            return None if top_n == 1 else []
         pages = resp.json().get("query", {}).get("pages", {})
         candidates = []
         for page in pages.values():
@@ -830,11 +830,67 @@ def _fetch_wikimedia_image(query):
                 if w > 0 and h > 0 and w < h:
                     continue
                 candidates.append((w * h, url))
-        if candidates:
-            candidates.sort(reverse=True)
-            return candidates[0][1]
+        candidates.sort(reverse=True)
+        urls = [u for _, u in candidates]
+        if top_n == 1:
+            return urls[0] if urls else None
+        return urls[:top_n]
     except Exception as e:
         print(f"  Wikimedia Fehler für '{query}': {e}")
+    return None if top_n == 1 else []
+
+
+def _validate_image_with_claude_vision(url, expected_subject_de):
+    """Prüft via Claude Vision ob das Bild wirklich `expected_subject_de` zeigt.
+    Gibt True/False zurück. Bei Fehler (kein Key, Timeout, etc.) → False (lieber kein Bild).
+    """
+    if not CLAUDE_API_KEY or not url:
+        return False
+    try:
+        # Bild herunterladen
+        img_resp = requests.get(url, timeout=15, headers={"User-Agent": "interpres-expose/1.0"})
+        if img_resp.status_code != 200 or len(img_resp.content) < 1000:
+            return False
+        ext = url.lower().split("?")[0].rsplit(".", 1)[-1]
+        media_type = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png"}.get(ext, "image/jpeg")
+        b64 = base64.b64encode(img_resp.content).decode()
+        # Sehr knapper JA/NEIN-Prompt für Geschwindigkeit
+        resp = requests.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={"x-api-key": CLAUDE_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json"},
+            json={
+                "model": "claude-haiku-4-5-20251001",
+                "max_tokens": 10,
+                "messages": [{
+                    "role": "user",
+                    "content": [
+                        {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": b64}},
+                        {"type": "text", "text": f"Zeigt dieses Bild eindeutig: {expected_subject_de}? Antworte NUR mit 'ja' oder 'nein'."},
+                    ],
+                }],
+            },
+            timeout=20,
+        )
+        if resp.status_code != 200:
+            return False
+        text = "".join(b.get("text", "") for b in resp.json().get("content", [])).strip().lower()
+        return text.startswith("ja")
+    except Exception as e:
+        print(f"  Vision-Validation Fehler: {e}")
+        return False
+
+
+def _find_validated_amenity_image(query, expected_subject_de, max_tries=4):
+    """Holt mehrere Wikimedia-Treffer, validiert sie der Reihe nach mit Claude Vision.
+    Gibt erste passende URL zurück oder None.
+    """
+    urls = _fetch_wikimedia_image(query, top_n=max_tries) or []
+    for url in urls:
+        if _validate_image_with_claude_vision(url, expected_subject_de):
+            print(f"    ✓ Validiert: {expected_subject_de} → {url[:80]}")
+            return url
+        else:
+            print(f"    ✗ Verworfen: {expected_subject_de} ({url[:80]})")
     return None
 
 
@@ -914,6 +970,8 @@ def fill_image_placeholders(data):
         "bild_grundriss_intro_1", "bild_grundriss_intro_2", "bild_grundriss_intro_3",
         # WE-Grundrisse: nur echte Grundriss-Zeichnungen vom Kunden
         *{f"bild_we_{n}" for n in range(1, 21)},
+        # Amenity-Bilder werden separat unten via Wikimedia + Vision-Validation gefüllt
+        *{f"bild_amenity_{n}" for n in range(1, 10)},
     }
 
     queries = UNSPLASH_QUERIES.copy()
@@ -949,60 +1007,73 @@ def fill_image_placeholders(data):
         data[data_key] = url
         filled += 1
 
-    # Amenity-spezifische Bilder: Wikimedia Commons mit deutschen Fachbegriffen
-    # → viel zuverlässiger als Picsum (gibt thematisch passende Fotos)
-    _AMENITY_QUERY_MAP = {
-        "dachterras":   "Dachterrasse Wohngebäude modern",
-        "balkon":       "Balkon Wohnung modern",
-        "terras":       "Terrasse Außenbereich modern Wohnen",
-        "fahrrad":      "Fahrradkeller Fahrradabstellraum Wohnhaus",
-        "spindel":      "Abstellraum Einlagerung modern",
-        "gemeinschaft": "Gemeinschaftsraum Aufenthaltsraum modern",
-        "smart":        "Smart Home Steuerung Wohnhaus",
-        "smart-lock":   "Türschloss elektronisch Zugangssystem",
-        "sanitär":      "modernes Badezimmer Dusche Wohnhaus",
-        "bad":          "modernes Badezimmer Dusche Wohnhaus",
-        "boden":        "Parkett Holzboden Wohnung modern",
-        "außenanlage":  "Außenanlage Grünfläche Wohnanlage",
-        "außen":        "Wohngebäude Außenansicht Neubau",
-        "aufzug":       "Fahrstuhl Aufzug modernes Wohnhaus",
-        "gym":          "Fitnessstudio Fitnessraum modern",
-        "pool":         "Schwimmbad Schwimmbecken modern",
-        "küche":        "moderne Einbauküche Wohnung",
-        "keller":       "Kellerraum Abstellraum Wohnhaus",
-        "tiefgarage":   "Tiefgarage Parkhaus Wohnanlage",
-        "parken":       "Stellplatz Parkplatz Wohngebäude",
-        "solar":        "Photovoltaik Solaranlage Dach Wohnhaus",
-        "photovoltaik": "Photovoltaikanlage Solarpanel Gebäude",
-        "fernwärme":    "Fernwärme Heizungsanlage modernes Gebäude",
-        "concierge":    "Empfang Rezeption modernes Wohnhaus",
-        "post":         "Paketstation Briefkasten Wohnhaus",
-        "e-bike":       "E-Bike Fahrrad Ladestation urban",
-        "möbli":        "möbliertes Apartment Wohnen modern",
-        "möbel":        "möbliertes Zimmer modernes Interieur",
-    }
+    # Amenity-spezifische Bilder: Wikimedia Commons + Claude Vision Validierung
+    # (kw, query, validation-subject) – Subject ist das, was Claude im Bild sehen muss
+    _AMENITY_QUERY_MAP = [
+        ("dachterras",   "Dachterrasse Wohngebäude",         "eine Dachterrasse oder einen begehbaren Dachgarten"),
+        ("balkon",       "Balkon Wohnung modern",            "einen Balkon an einem Wohngebäude"),
+        ("terras",       "Terrasse Außenbereich Wohnen",     "eine Terrasse mit Sitzgelegenheit"),
+        ("fahrrad",      "Fahrradkeller Fahrradabstellraum", "einen Fahrradabstellraum oder Fahrradkeller"),
+        ("e-bike",       "E-Bike Ladestation Fahrradraum",   "Fahrräder oder eine Fahrrad-Ladestation"),
+        ("bike",         "Fahrradabstellplatz Wohnhaus",     "Fahrräder vor oder in einem Gebäude"),
+        ("spindel",      "Abstellraum Einlagerung modern",   "einen Abstellraum oder Lagerraum"),
+        ("gemeinschaft", "Gemeinschaftsraum Lounge",         "einen Gemeinschaftsraum oder Aufenthaltsraum"),
+        ("lounge",       "Lounge Aufenthaltsraum modern",    "einen Lounge-/Aufenthaltsraum"),
+        ("smart-lock",   "elektronisches Türschloss",        "ein elektronisches/digitales Türschloss"),
+        ("smart",        "Smart Home Steuerung",             "Smart-Home-Geräte oder ein Tablet/Display"),
+        ("sanitär",      "modernes Badezimmer Dusche",       "ein modernes Badezimmer mit Dusche"),
+        ("bad",          "modernes Badezimmer Dusche",       "ein modernes Badezimmer"),
+        ("boden",        "Parkett Holzboden Wohnung",        "Parkett- oder Holzboden in einer Wohnung"),
+        ("außenanlage",  "Grünfläche Außenanlage Wohnanlage","eine Grünfläche oder Außenanlage"),
+        ("aufzug",       "Fahrstuhl Aufzug Wohnhaus",        "einen Aufzug oder Fahrstuhl"),
+        ("gym",          "Fitnessstudio Fitnessraum",        "ein Fitnessstudio mit Geräten"),
+        ("fitness",      "Fitnessstudio Fitnessraum",        "ein Fitnessstudio mit Geräten"),
+        ("pool",         "Schwimmbad Schwimmbecken",         "ein Schwimmbad oder Pool"),
+        ("küche",        "moderne Einbauküche Wohnung",      "eine moderne Küche oder Einbauküche"),
+        ("tiefgarage",   "Tiefgarage Parkhaus",              "eine Tiefgarage oder Garage"),
+        ("parken",       "Stellplatz Parkplatz",             "einen Parkplatz oder Stellplatz"),
+        ("stellplat",    "Stellplatz Parkplatz",             "einen Parkplatz oder Stellplatz"),
+        ("solar",        "Photovoltaik Solaranlage Dach",    "eine Solaranlage oder Photovoltaik-Module"),
+        ("photovoltaik", "Photovoltaikanlage Solarpanel",    "Photovoltaik-/Solar-Module auf einem Dach"),
+        ("fernwärme",    "Heizkörper Heizung Gebäude",       "eine Heizungsanlage, Wärmestation oder Heizkörper"),
+        ("concierge",    "Empfang Rezeption Lobby",          "einen Empfangs- oder Rezeptionsbereich"),
+        ("paket",        "Paketstation Briefkasten",         "eine Paketstation oder Briefkastenanlage"),
+        ("post",         "Paketstation Briefkasten",         "eine Paketstation oder Briefkastenanlage"),
+        ("möbli",        "möbliertes Apartment Wohnen",      "ein möbliertes Apartment-Innenraum"),
+        ("möbel",        "möbliertes Zimmer Interieur",      "ein möbliertes Zimmer mit Designmöbeln"),
+        ("dach",         "Gründach Dachbegrünung",           "ein begrüntes Dach oder eine Dachterrasse"),
+        ("garten",       "Gartenanlage Wohnanlage",          "eine Garten- oder Grünanlage"),
+        ("ladestat",     "E-Auto Ladestation Wallbox",       "eine E-Auto-Ladestation oder Wallbox"),
+        ("café",         "Café Innenraum modern",            "ein Café-Innenraum"),
+    ]
+    amenity_validated = 0
+    amenity_skipped   = 0
     for n in range(1, 10):
         amenity_val = str(data.get(f"amenity_{n}", "")).strip().lower()
         bild_key = f"bild_amenity_{n}"
         if bild_key not in data or data.get(bild_key):
             continue
-        matched_query = None
-        for kw, q in _AMENITY_QUERY_MAP.items():
+        if not amenity_val:
+            continue
+        match = None
+        for kw, q, subject in _AMENITY_QUERY_MAP:
             if kw in amenity_val:
-                matched_query = q
+                match = (q, subject)
                 break
-        if not matched_query:
-            matched_query = "modernes Apartment Wohnen Ausstattung"
-        # Wikimedia Commons mit spezifischem deutschem Suchbegriff
-        url = _fetch_wikimedia_image(matched_query)
+        if not match:
+            # Generischer Fallback: einfach die Amenity-Bezeichnung selbst suchen
+            match = (f"{amenity_val} Wohngebäude modern", f"{amenity_val} im Wohnumfeld")
+        query, subject = match
+        url = _find_validated_amenity_image(query, subject, max_tries=4)
         if url:
             data[bild_key] = url
+            amenity_validated += 1
         else:
-            # Picsum nur als letzter Fallback
-            seed = abs(hash(matched_query)) % 1000
-            data[bild_key] = f"https://picsum.photos/seed/{seed}/1200/800"
+            # KEIN Picsum-Fallback – lieber leerer Slot als falsches Bild
+            amenity_skipped += 1
 
-    print(f"fill_image_placeholders: {filled} Slots mit Picsum-Fallback befüllt")
+    print(f"fill_image_placeholders: {filled} Picsum-Slots, {amenity_validated} validierte Amenities, "
+          f"{amenity_skipped} übersprungen (kein passendes Bild)")
     return data
 
 
@@ -1051,50 +1122,66 @@ def _osm_lageplan_url(lat, lon, zoom=15):
 
 def _search_city_info(stadt, stadtteil=""):
     """Sucht aktuelle Infos zur Stadt via Tavily API.
-    Gibt einen zusammengefassten Text-Block zurück, den Claude für Stadtstatistiken nutzen kann.
+    Gibt strukturierten Text-Block mit Quellen-URLs zurück.
     """
     if not TAVILY_API_KEY:
         print(f"  TAVILY_API_KEY fehlt – kein Web-Search für '{stadt}'")
         return ""
 
+    # Mehrere fokussierte Queries für unterschiedliche Themenbereiche
     queries = [
-        f"{stadt} Immobilienmarkt Mietpreise Wohnungsmarkt 2024 2025",
-        f"{stadt} Wirtschaft Investitionen Unternehmen Arbeitgeber Wachstum",
-        f"{stadt} Bevölkerung Einwohner Infrastruktur Stadtentwicklung aktuell",
+        (f"{stadt} Einwohner aktuell Statistik Bevölkerung", "demografie"),
+        (f"{stadt} Mietpreise Wohnungsmarkt Mietsteigerung Neubau 2024 2025", "mietmarkt"),
+        (f"{stadt} BIP Wirtschaftsleistung Bundesland Wachstum", "wirtschaftskraft"),
+        (f"{stadt} Universität Hochschule Studierende Forschung", "bildung"),
+        (f"{stadt} größte Arbeitgeber Unternehmen Industriepark Investitionen", "arbeitgeber"),
+        (f"{stadt} Infrastrukturprojekte Bahnhof Verkehr Stadtentwicklung 2024 2025", "infrastruktur"),
+        (f"{stadt} Logistik Hafen Industrie Ansiedlungen", "industrie"),
     ]
     if stadtteil and stadtteil.lower() != stadt.lower():
-        queries.append(f"{stadtteil} {stadt} Stadtentwicklung neue Projekte")
+        queries.append((f"{stadtteil} {stadt} Stadtteil Entwicklung Projekte", "stadtteil"))
 
-    results = []
-    for q in queries:
+    sections = []
+    all_sources = []  # für quelle_1-4
+    for q, topic in queries:
         try:
             resp = requests.post(
                 "https://api.tavily.com/search",
                 json={
                     "api_key": TAVILY_API_KEY,
                     "query": q,
-                    "search_depth": "basic",
-                    "max_results": 3,
+                    "search_depth": "advanced",  # tiefer für bessere Snippets
+                    "max_results": 4,
                     "include_answer": True,
                     "include_raw_content": False,
                 },
-                timeout=20,
+                timeout=25,
             )
-            if resp.status_code == 200:
-                data = resp.json()
-                if data.get("answer"):
-                    results.append(f"[{q}]\n{data['answer']}")
-                for r in data.get("results", [])[:2]:
-                    snippet = (r.get("content") or r.get("snippet") or "")[:400]
-                    if snippet:
-                        results.append(snippet)
-            else:
+            if resp.status_code != 200:
                 print(f"  Tavily Fehler {resp.status_code} für '{q}': {resp.text[:100]}")
+                continue
+            d = resp.json()
+            block = [f"### {topic.upper()}: {q}"]
+            if d.get("answer"):
+                block.append(f"ZUSAMMENFASSUNG: {d['answer']}")
+            for r in d.get("results", [])[:3]:
+                title = (r.get("title") or "").strip()
+                url   = (r.get("url") or "").strip()
+                cnt   = (r.get("content") or r.get("snippet") or "")[:500]
+                if cnt:
+                    block.append(f"- {title} [{url}]\n  {cnt}")
+                if url:
+                    all_sources.append({"topic": topic, "title": title, "url": url})
+            sections.append("\n".join(block))
         except Exception as e:
             print(f"  Tavily Exception für '{q}': {e}")
 
-    combined = "\n\n---\n\n".join(results)
-    print(f"  Tavily: {len(results)} Ergebnisse für '{stadt}', {len(combined)} Zeichen")
+    combined = "\n\n".join(sections)
+    if all_sources:
+        combined += "\n\n### VERWENDBARE QUELLEN (für quelle_1-4):\n"
+        for s in all_sources[:8]:
+            combined += f"- [{s['topic']}] {s['title']} — {s['url']}\n"
+    print(f"  Tavily: {len(sections)} Themen-Sektionen, {len(all_sources)} Quellen, {len(combined)} Zeichen")
     return combined
 
 
@@ -1474,11 +1561,26 @@ def generate_expose_with_claude(projektdaten, city_context=""):
         f"Paar 3 (wenn ≥3 Typen): Suffix _5/_6 analog.\n\n"
 
         + (
-        f"## AKTUELLE RECHERCHE-ERGEBNISSE FÜR {stadt.upper()} (Web-Suche, Stand heute):\n"
-        f"Nutze diese Informationen für alle Stadtfelder (text_stadt_*, stadt_einwohner, "
-        f"stadt_mietsteigerung, text_einwohner_detail, text_bip_detail etc.).\n"
-        f"Extrahiere konkrete Zahlen, Unternehmen, Projekte, Entwicklungen:\n\n"
-        f"{city_context}\n\n"
+        f"## AKTUELLE RECHERCHE FÜR {stadt.upper()} (Web-Suche heute, Stand 2024/2025):\n"
+        f"Diese Recherche enthält ZUSAMMENFASSUNGEN, ARTIKEL-SNIPPETS und QUELLEN-URLs.\n"
+        f"DEINE PFLICHT:\n"
+        f"1. Lies ALLE Sektionen.\n"
+        f"2. Extrahiere für die Stadttexte KONKRETE FAKTEN: echte Firmennamen (z.B. 'Intel', "
+        f"'CATL', 'Amazon', 'HelloFresh'), benannte Projekte (z.B. 'Knoten Magdeburg 400 Mio €', "
+        f"'Industriepark Eulenberg'), exakte Zahlen mit Jahresangabe ('245.279 Einwohner 2024').\n"
+        f"3. KEINE generischen Floskeln wie 'wachsende Wirtschaft' oder 'attraktive Lage' - immer mit "
+        f"einem konkreten Beleg (Firma, Projekt, Zahl, Investitionssumme).\n"
+        f"4. Fülle quelle_1, quelle_2, quelle_3, quelle_4 mit den TATSÄCHLICHEN URLs aus der Recherche "
+        f"(NICHT erfundene oder Beispiel-URLs!). Format: kurz wie 'statistik.sachsen-anhalt.de 2024' "
+        f"oder 'IHK Magdeburg 2024' – aber die URL aus der Recherche muss dahinterstehen können.\n"
+        f"5. text_stadt_branche_1/2 und text_einwohner_detail/text_bip_detail/text_mietsteigerung_detail/"
+        f"text_studierende_detail MÜSSEN spezifisch sein – mindestens EINE genannte Firma, EIN benanntes "
+        f"Projekt oder EINE konkrete Zahl pro Feld.\n"
+        f"6. WIEDERHOLE NICHTS – jeder Abschnitt nennt andere Fakten. Nicht überall 'Intel investiert "
+        f"17 Mrd €' wiederholen.\n\n"
+        f"--- RECHERCHE-DATEN ---\n"
+        f"{city_context}\n"
+        f"--- ENDE RECHERCHE ---\n\n"
         if city_context else ""
         )
         + f"## STADTSTATISTIKEN ({stadt}):\n"
@@ -2277,6 +2379,191 @@ def fill_pptx(template_bytes, data, customer_images=None):
     prs.save(out)
     return out.getvalue()
 
+# ── Slot-Labels für Preview-UI: gibt {bild_key: human-readable label} zurück ──
+_SLOT_LABELS = {
+    "bild_titel":              "Titelbild (Außenansicht)",
+    "bild_projekt_aussen":     "Projekt – Außenansicht",
+    "bild_projekt":            "Projekt – Bild",
+    "bild_quartier":           "Quartier / Umgebung",
+    "bild_greenliving_1":      "Green Living – Bild 1",
+    "bild_greenliving_2":      "Green Living – Bild 2",
+    "bild_interior":           "Innenraum / Interior",
+    "bild_ausstattung_1":      "Ausstattung 1",
+    "bild_ausstattung_2":      "Ausstattung 2",
+    "bild_ausstattung_3":      "Ausstattung 3",
+    "bild_ausstattung_4":      "Ausstattung 4",
+    "bild_ausstattung_5":      "Ausstattung 5",
+    "bild_ausstattung_6":      "Ausstattung 6",
+    "bild_ansicht_1":          "Außenansicht 1",
+    "bild_ansicht_2":          "Außenansicht 2",
+    "bild_standort_innen":     "Standort innen",
+    "bild_standort_aussen":    "Standort außen",
+    "bild_lageplan":           "Lageplan",
+    "bild_stadt_gross":        "Stadtbild groß",
+    "bild_stadt_klein":        "Stadtbild klein",
+    "bild_grundriss_intro_1":  "Grundriss-Intro 1",
+    "bild_grundriss_intro_2":  "Grundriss-Intro 2",
+    "bild_grundriss_intro_3":  "Grundriss-Intro 3",
+    "bild_grundriss_1":        "Grundriss 1",
+    "bild_grundriss_2":        "Grundriss 2",
+    "bild_grundriss_3":        "Grundriss 3",
+    "bild_grundriss_4":        "Grundriss 4",
+    "bild_collage_1":          "Collage 1",
+    "bild_collage_2":          "Collage 2",
+    "bild_collage_3":          "Collage 3",
+    "bild_collage_4":          "Collage 4",
+    "bild_collage_5":          "Collage 5",
+    "bild_hotel_1":            "Hotel-Feeling 1",
+    "bild_hotel_2":            "Hotel-Feeling 2",
+    "bild_rechtlich_1":        "Rechtliches – Bild 1",
+    "bild_rechtlich_2":        "Rechtliches – Bild 2",
+    "bild_stadt_presse":       "Stadtbild – Presse",
+    "bild_stadt_branche":      "Stadtbild – Branche",
+}
+def _slot_label(key):
+    if key in _SLOT_LABELS:
+        return _SLOT_LABELS[key]
+    m = re.match(r"^bild_amenity_(\d+)$", key)
+    if m:
+        return f"Ausstattung Amenity {m.group(1)}"
+    m = re.match(r"^bild_we_(\d+)$", key)
+    if m:
+        return f"WE-Grundriss {m.group(1)}"
+    return key.replace("_", " ").title()
+
+
+def extract_bild_placeholders(pptx_bytes):
+    """Scannt das (gefüllte oder leere) PPTX und extrahiert für jeden {{BILD_*}}
+    Platzhalter die absolute Slide-Position in EMU sowie die Slide-Größe.
+
+    Gibt zurück:
+      {
+        "slide_w_emu": int, "slide_h_emu": int,
+        "slides": [
+          {"index": 0, "placeholders": [
+              {"slot": "bild_titel", "x": 12345, "y": 12345, "w": 1234, "h": 1234,
+               "label": "Titelbild"}
+          ]}, ...
+        ]
+      }
+    Positionen kommen aus der Gruppe (grpSpPr/xfrm) bzw. dem Shape selbst.
+    """
+    NS_A = 'http://schemas.openxmlformats.org/drawingml/2006/main'
+    NS_P = 'http://schemas.openxmlformats.org/presentationml/2006/main'
+    BILD_RE = re.compile(r'\{\{\s*(BILD_[A-Z0-9_]+)\s*(?:\|[^}]*)?\}\}', re.IGNORECASE)
+
+    prs = Presentation(io.BytesIO(pptx_bytes))
+    sw  = int(prs.slide_width  or 12192000)
+    sh  = int(prs.slide_height or 6858000)
+
+    out_slides = []
+    for s_idx, slide in enumerate(prs.slides):
+        placeholders = []
+        seen_slots = set()
+
+        def _record(slot, x, y, w, h):
+            slot_l = slot.lower()
+            if slot_l in seen_slots:
+                return
+            seen_slots.add(slot_l)
+            placeholders.append({
+                "slot":  slot_l,
+                "x":     int(x or 0),
+                "y":     int(y or 0),
+                "w":     int(w or 0),
+                "h":     int(h or 0),
+                "label": _slot_label(slot_l),
+            })
+
+        for shape in slide.shapes:
+            # Group shapes: scan children for BILD_-Text-Platzhalter
+            if shape.shape_type == 6:
+                grpSpPr = shape._element.find(f'{{{NS_P}}}grpSpPr')
+                xfrm    = grpSpPr.find(f'{{{NS_A}}}xfrm') if grpSpPr is not None else None
+                off     = xfrm.find(f'{{{NS_A}}}off')     if xfrm    is not None else None
+                ext     = xfrm.find(f'{{{NS_A}}}ext')     if xfrm    is not None else None
+                gx = int(off.get('x', 0)) if off is not None else 0
+                gy = int(off.get('y', 0)) if off is not None else 0
+                gw = int(ext.get('cx', 0)) if ext is not None else 0
+                gh = int(ext.get('cy', 0)) if ext is not None else 0
+                for child in shape.shapes:
+                    if not child.has_text_frame:
+                        continue
+                    txt = child.text_frame.text
+                    m = BILD_RE.search(txt)
+                    if m:
+                        _record(m.group(1), gx, gy, gw, gh)
+                        break
+            elif shape.has_text_frame:
+                m = BILD_RE.search(shape.text_frame.text)
+                if m:
+                    _record(m.group(1), shape.left, shape.top, shape.width, shape.height)
+
+        if placeholders:
+            out_slides.append({"index": s_idx, "placeholders": placeholders})
+
+    return {
+        "slide_w_emu": sw,
+        "slide_h_emu": sh,
+        "slides":      out_slides,
+    }
+
+
+def _find_pdftoppm():
+    """Sucht den pdftoppm Binary (poppler-utils)."""
+    import shutil as _shutil
+    p = _shutil.which("pdftoppm")
+    if p:
+        return p
+    for c in ("/usr/bin/pdftoppm", "/usr/local/bin/pdftoppm", "/opt/homebrew/bin/pdftoppm"):
+        if os.path.isfile(c):
+            return c
+    return None
+
+
+def render_pdf_to_jpgs(pdf_bytes, out_dir, dpi=110):
+    """Konvertiert PDF zu einzelnen JPG-Slide-Bildern via pdftoppm.
+    Schreibt slide_1.jpg, slide_2.jpg, ... ins out_dir.
+    Gibt sortierte Liste der Pfade zurück.
+    """
+    import subprocess, tempfile
+    bin_path = _find_pdftoppm()
+    if not bin_path:
+        raise RuntimeError("pdftoppm nicht gefunden (poppler-utils im Image fehlt)")
+
+    os.makedirs(out_dir, exist_ok=True)
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
+        f.write(pdf_bytes)
+        pdf_path = f.name
+    try:
+        prefix = os.path.join(out_dir, "slide")
+        result = subprocess.run(
+            [bin_path, "-jpeg", "-r", str(dpi), pdf_path, prefix],
+            capture_output=True, text=True, timeout=180
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"pdftoppm Fehler: {result.stderr[:300]}")
+    finally:
+        try: os.unlink(pdf_path)
+        except OSError: pass
+
+    import glob as _glob
+    files = sorted(_glob.glob(os.path.join(out_dir, "slide-*.jpg")))
+    # Normalize to slide_<n>.jpg (1-based, no zero-pad)
+    normalized = []
+    for p in files:
+        m = re.search(r'slide-(\d+)\.jpg$', p)
+        if not m:
+            continue
+        n = int(m.group(1))
+        new_path = os.path.join(out_dir, f"slide_{n}.jpg")
+        if new_path != p:
+            os.rename(p, new_path)
+        normalized.append(new_path)
+    normalized.sort(key=lambda p: int(re.search(r'slide_(\d+)\.jpg$', p).group(1)))
+    return normalized
+
+
 def _find_libreoffice():
     """Sucht den LibreOffice-Binary an allen bekannten Pfaden."""
     import shutil
@@ -2423,6 +2710,28 @@ def _job_meta_path(job_id):
 
 def _job_pdf_path(job_id):
     return os.path.join(_JOB_DIR, f"{job_id}.pdf")
+
+def _job_dir(job_id):
+    """Per-Job Working-Dir für State + Slide-JPGs + Uploads."""
+    d = os.path.join(_JOB_DIR, f"work_{job_id}")
+    os.makedirs(d, exist_ok=True)
+    return d
+
+def _job_state_path(job_id):
+    return os.path.join(_job_dir(job_id), "state.json")
+
+def _job_pptx_path(job_id):
+    return os.path.join(_job_dir(job_id), "first_pass.pptx")
+
+def _job_slides_dir(job_id):
+    d = os.path.join(_job_dir(job_id), "slides")
+    os.makedirs(d, exist_ok=True)
+    return d
+
+def _job_uploads_dir(job_id):
+    d = os.path.join(_job_dir(job_id), "uploads")
+    os.makedirs(d, exist_ok=True)
+    return d
 
 def _write_job(job_id, **fields):
     """Schreibt/aktualisiert Job-Metadaten atomar."""
@@ -2589,36 +2898,85 @@ def _run_expose_job(job_id, zip_paths):
         expose_data = fill_image_placeholders(expose_data)
 
         _set(status="processing", phase="Präsentation wird erstellt …")
-        print(f"[{job_id}] Schritt 4/5: fill_pptx …")
+        print(f"[{job_id}] Schritt 4/6: fill_pptx …")
         tmpl_bytes = requests.get(TEMPLATE_URL, timeout=30).content
         pptx_bytes = fill_pptx(tmpl_bytes, expose_data, customer_images=customer_images)
 
         projekt_name = expose_data.get("projekt_name", "Expose").replace(" ", "_")
 
-        _set(status="processing", phase="PDF wird erstellt …")
-        print(f"[{job_id}] Schritt 5/5: PDF-Konvertierung via LibreOffice …")
+        # ── State persistieren (für Second-Pass / Finalize) ───────────────────
+        first_pass_pptx = _job_pptx_path(job_id)
+        with open(first_pass_pptx, "wb") as fh:
+            fh.write(pptx_bytes)
 
-        lo_available = _find_libreoffice() is not None
-        if lo_available:
+        # Auto-zugeordnete Kundenbilder speichern (damit Second-Pass sie behalten kann)
+        customer_images_files = {}
+        for slot, raw in (customer_images or {}).items():
+            ext = ".jpg"
             try:
+                if raw[:4] == b"\x89PNG":
+                    ext = ".png"
+            except Exception:
+                pass
+            cpath = os.path.join(_job_dir(job_id), f"auto_{slot}{ext}")
+            with open(cpath, "wb") as fh:
+                fh.write(raw)
+            customer_images_files[slot] = cpath
+
+        with open(_job_state_path(job_id), "w") as fh:
+            json.dump({
+                "expose_data": expose_data,
+                "customer_images_files": customer_images_files,
+                "projekt_name": projekt_name,
+            }, fh, ensure_ascii=False)
+
+        # ── Schritt 5: PPTX → PDF → JPGs für Preview ─────────────────────────
+        _set(status="processing", phase="Vorschau wird erstellt …")
+        print(f"[{job_id}] Schritt 5/6: PDF + Slide-Bilder für Vorschau …")
+
+        slide_jpgs = []
+        bbox_map   = []
+        try:
+            if _find_libreoffice() and _find_pdftoppm():
                 pdf_bytes = convert_to_pdf(pptx_bytes, f"{projekt_name}.pptx")
-                output_path = _job_pdf_path(job_id)
-                with open(output_path, "wb") as fh:
-                    fh.write(pdf_bytes)
-                _set(status="done", phase="Fertig", pdf_path=output_path, name=projekt_name)
-                print(f"[{job_id}] ✓ PDF fertig: {len(pdf_bytes)//1024} KB")
-            except Exception as pdf_err:
-                print(f"[{job_id}] PDF-Fehler: {pdf_err} → Fallback PPTX")
-                output_path = os.path.join(_JOB_DIR, f"{job_id}.pptx")
-                with open(output_path, "wb") as fh:
-                    fh.write(pptx_bytes)
-                _set(status="done", phase="Fertig", pdf_path=output_path, name=projekt_name)
-        else:
-            print(f"[{job_id}] LibreOffice nicht verfügbar → gebe PPTX aus")
-            output_path = os.path.join(_JOB_DIR, f"{job_id}.pptx")
-            with open(output_path, "wb") as fh:
-                fh.write(pptx_bytes)
-            _set(status="done", phase="Fertig", pdf_path=output_path, name=projekt_name)
+                _set(phase="Slide-Bilder werden gerendert …")
+                jpg_paths = render_pdf_to_jpgs(pdf_bytes, _job_slides_dir(job_id), dpi=110)
+                slide_jpgs = [os.path.basename(p) for p in jpg_paths]
+                print(f"[{job_id}] {len(slide_jpgs)} Slide-JPGs erstellt")
+            else:
+                print(f"[{job_id}] LibreOffice/pdftoppm fehlt → Preview wird übersprungen")
+        except Exception as pe:
+            print(f"[{job_id}] Preview-Render Fehler: {pe}")
+
+        # ── Schritt 6: Platzhalter-Bboxes für Preview-UI ─────────────────────
+        try:
+            tmpl_for_bbox = tmpl_bytes  # Original-Template hat alle {{BILD_X}} sichtbar
+            bbox_info = extract_bild_placeholders(tmpl_for_bbox)
+            bbox_map = bbox_info
+            print(f"[{job_id}] Bbox-Map: {sum(len(s['placeholders']) for s in bbox_info['slides'])} Platzhalter "
+                  f"auf {len(bbox_info['slides'])} Slides")
+        except Exception as be:
+            print(f"[{job_id}] Bbox-Extraktion Fehler: {be}")
+            bbox_map = {"slide_w_emu": 12192000, "slide_h_emu": 6858000, "slides": []}
+
+        # Welche Slots wurden bereits durch automatische Pipeline befüllt?
+        already_filled = []
+        for k in expose_data:
+            if k.startswith("bild_") and isinstance(expose_data[k], str) and expose_data[k]:
+                already_filled.append(k.lower())
+        for slot in (customer_images or {}):
+            if slot.lower() not in already_filled:
+                already_filled.append(slot.lower())
+
+        _set(
+            status="preview",
+            phase="Bereit für Bilder-Upload",
+            name=projekt_name,
+            slide_jpgs=slide_jpgs,
+            bbox_map=bbox_map,
+            already_filled=already_filled,
+        )
+        print(f"[{job_id}] ✓ Preview bereit – warte auf Kunden-Upload")
 
     except Exception as e:
         import traceback as tb
@@ -2733,15 +3091,25 @@ def job_status(job_id):
     job = _read_job(job_id)
     if not job:
         return jsonify({"error": "Job nicht gefunden"}), 404
-    if job["status"] == "processing":
+    status = job.get("status", "processing")
+    if status == "processing":
         return jsonify({"status": "processing", "phase": job.get("phase", "")})
-    elif job["status"] == "error":
+    if status == "error":
         return jsonify({"status": "error", "error": job.get("error", "Unbekannter Fehler")}), 500
-    else:  # done
+    if status == "preview":
+        # Preview bereit – noch kein Download
+        return jsonify({
+            "status":         "preview",
+            "phase":          job.get("phase", "Bereit für Upload"),
+            "name":           job.get("name", "Expose"),
+            "slide_count":    len(job.get("slide_jpgs", []) or []),
+            "bbox_map":       job.get("bbox_map", {}),
+            "already_filled": job.get("already_filled", []),
+        })
+    if status == "done":
         pdf_path = job.get("pdf_path")
         if not pdf_path or not os.path.exists(pdf_path):
-            return jsonify({"error": "PDF nicht mehr verfügbar"}), 410
-        # Dateiformat anhand Endung erkennen (PPTX oder PDF)
+            return jsonify({"error": "Datei nicht mehr verfügbar"}), 410
         ext = os.path.splitext(pdf_path)[1].lower()
         if ext == ".pdf":
             mimetype = "application/pdf"
@@ -2749,12 +3117,215 @@ def job_status(job_id):
         else:
             mimetype = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
             dl_name  = f"{job.get('name', 'Expose')}_Expose.pptx"
-        return send_file(
-            pdf_path,
-            mimetype=mimetype,
-            as_attachment=True,
-            download_name=dl_name
-        )
+        return send_file(pdf_path, mimetype=mimetype,
+                         as_attachment=True, download_name=dl_name)
+    return jsonify({"error": f"Unbekannter Job-Status: {status}"}), 500
+
+
+@app.route("/job/<job_id>/slide/<int:n>", methods=["GET", "OPTIONS"])
+def job_slide_image(job_id, n):
+    """Liefert die Slide-JPG-Datei für die Preview-Ansicht."""
+    if request.method == "OPTIONS":
+        return make_response("", 204)
+    # Token darf in Query-Param stehen (für <img src=…>)
+    token = request.headers.get("X-API-Token") or request.args.get("token")
+    if token != API_TOKEN:
+        return jsonify({"error": "Unauthorized"}), 401
+    path = os.path.join(_job_slides_dir(job_id), f"slide_{n}.jpg")
+    if not os.path.exists(path):
+        return jsonify({"error": "Slide nicht gefunden"}), 404
+    return send_file(path, mimetype="image/jpeg")
+
+
+def _run_finalize_job(job_id):
+    """Second-Pass: liest gespeicherten State + User-Uploads, refillt Template,
+    konvertiert zu PDF (falls möglich) und setzt Status=done."""
+    def _set(**kw):
+        _write_job(job_id, **kw)
+
+    try:
+        _set(status="processing", phase="Finale Datei wird erstellt …")
+        state_path = _job_state_path(job_id)
+        with open(state_path) as fh:
+            state = json.load(fh)
+        expose_data         = state["expose_data"]
+        projekt_name        = state.get("projekt_name", "Expose")
+        cust_files          = state.get("customer_images_files", {}) or {}
+
+        # Auto-zugeordnete Bilder zuerst laden
+        customer_images = {}
+        for slot, fpath in cust_files.items():
+            try:
+                with open(fpath, "rb") as fh:
+                    customer_images[slot] = fh.read()
+            except Exception:
+                pass
+
+        # User-Uploads OVERRIDEN auto-Zuweisungen
+        ud = _job_uploads_dir(job_id)
+        if os.path.isdir(ud):
+            for fname in os.listdir(ud):
+                # Format: <slot>.<ext>
+                base, ext = os.path.splitext(fname)
+                slot = base.lower()
+                if not slot.startswith("bild_"):
+                    continue
+                with open(os.path.join(ud, fname), "rb") as fh:
+                    customer_images[slot] = fh.read()
+                # Wenn User ein Bild für einen Slot hochlädt, sollte die alte URL nicht
+                # konkurrieren – auf "" setzen, damit fill_pptx das Kunden-Bild nimmt.
+                expose_data[slot] = ""
+
+        # Template laden + neu füllen
+        _set(phase="Template wird befüllt …")
+        tmpl_bytes = requests.get(TEMPLATE_URL, timeout=30).content
+        pptx_bytes = fill_pptx(tmpl_bytes, expose_data, customer_images=customer_images)
+
+        # Konvertierung
+        _set(phase="PDF wird erstellt …")
+        out_path = None
+        if _find_libreoffice():
+            try:
+                pdf_bytes = convert_to_pdf(pptx_bytes, f"{projekt_name}.pptx")
+                out_path = _job_pdf_path(job_id)
+                with open(out_path, "wb") as fh:
+                    fh.write(pdf_bytes)
+            except Exception as pe:
+                print(f"[{job_id}] Final PDF-Fehler: {pe}")
+                out_path = None
+        if not out_path:
+            out_path = os.path.join(_JOB_DIR, f"{job_id}.pptx")
+            with open(out_path, "wb") as fh:
+                fh.write(pptx_bytes)
+
+        _set(status="done", phase="Fertig", pdf_path=out_path, name=projekt_name)
+        print(f"[{job_id}] ✓ Final fertig: {out_path}")
+    except Exception as e:
+        import traceback as tb
+        err = f"{e}\n{tb.format_exc()}"
+        print(f"[{job_id}] ✗ Finalize Fehler: {err[:500]}")
+        _set(status="error", phase="Fehler", error=str(e))
+
+
+@app.route("/job/<job_id>/upload", methods=["POST", "OPTIONS"])
+def job_upload_image(job_id):
+    """Speichert ein vom User hochgeladenes Bild für einen bestimmten Slot.
+    Multipart: field 'image' (Datei) + 'slot' (z.B. 'bild_titel')."""
+    if request.method == "OPTIONS":
+        return make_response("", 204)
+    if request.headers.get("X-API-Token") != API_TOKEN:
+        return jsonify({"error": "Unauthorized"}), 401
+    job = _read_job(job_id)
+    if not job:
+        return jsonify({"error": "Job nicht gefunden"}), 404
+    if job.get("status") not in ("preview", "done"):
+        return jsonify({"error": f"Job nicht im Preview-Status (ist: {job.get('status')})"}), 400
+
+    slot = (request.form.get("slot") or "").strip().lower()
+    if not slot.startswith("bild_"):
+        return jsonify({"error": "Ungültiger Slot"}), 400
+    img = request.files.get("image")
+    if not img or not img.filename:
+        return jsonify({"error": "Keine Bilddatei"}), 400
+    ext = os.path.splitext(img.filename)[1].lower()
+    if ext not in (".jpg", ".jpeg", ".png", ".webp"):
+        return jsonify({"error": "Nur JPG/PNG/WEBP erlaubt"}), 400
+
+    ud = _job_uploads_dir(job_id)
+    # Vorherige Datei für diesen Slot löschen (egal welche Extension)
+    for fname in os.listdir(ud):
+        if os.path.splitext(fname)[0].lower() == slot:
+            try: os.remove(os.path.join(ud, fname))
+            except OSError: pass
+    target = os.path.join(ud, f"{slot}{ext}")
+    img.save(target)
+    print(f"[{job_id}] Upload: {slot} → {os.path.basename(target)} ({os.path.getsize(target)//1024} KB)")
+    return jsonify({"ok": True, "slot": slot, "size": os.path.getsize(target)})
+
+
+@app.route("/job/<job_id>/upload/<slot>", methods=["DELETE", "OPTIONS"])
+def job_remove_upload(job_id, slot):
+    """Entfernt das vom User hochgeladene Bild für einen Slot."""
+    if request.method == "OPTIONS":
+        return make_response("", 204)
+    if request.headers.get("X-API-Token") != API_TOKEN:
+        return jsonify({"error": "Unauthorized"}), 401
+    slot = slot.lower()
+    if not slot.startswith("bild_"):
+        return jsonify({"error": "Ungültiger Slot"}), 400
+    ud = _job_uploads_dir(job_id)
+    removed = 0
+    if os.path.isdir(ud):
+        for fname in os.listdir(ud):
+            if os.path.splitext(fname)[0].lower() == slot:
+                try:
+                    os.remove(os.path.join(ud, fname))
+                    removed += 1
+                except OSError:
+                    pass
+    return jsonify({"ok": True, "removed": removed})
+
+
+@app.route("/job/<job_id>/finalize", methods=["POST", "OPTIONS"])
+def job_finalize(job_id):
+    """Startet Second-Pass im Hintergrund. Gibt sofort 202 zurück."""
+    if request.method == "OPTIONS":
+        return make_response("", 204)
+    if request.headers.get("X-API-Token") != API_TOKEN:
+        return jsonify({"error": "Unauthorized"}), 401
+    job = _read_job(job_id)
+    if not job:
+        return jsonify({"error": "Job nicht gefunden"}), 404
+    if not os.path.exists(_job_state_path(job_id)):
+        return jsonify({"error": "Kein Job-State zum Finalisieren"}), 400
+
+    _write_job(job_id, status="processing", phase="Finale Datei wird vorbereitet …")
+    t = _threading.Thread(target=_run_finalize_job, args=(job_id,), daemon=True)
+    t.start()
+    return jsonify({"ok": True, "job_id": job_id})
+
+
+@app.route("/job/<job_id>/uploaded", methods=["GET", "OPTIONS"])
+def job_list_uploads(job_id):
+    """Listet aktuell hochgeladene User-Bilder pro Slot."""
+    if request.method == "OPTIONS":
+        return make_response("", 204)
+    if request.headers.get("X-API-Token") != API_TOKEN:
+        return jsonify({"error": "Unauthorized"}), 401
+    ud = _job_uploads_dir(job_id)
+    items = {}
+    if os.path.isdir(ud):
+        for fname in os.listdir(ud):
+            slot = os.path.splitext(fname)[0].lower()
+            items[slot] = {
+                "filename": fname,
+                "size":     os.path.getsize(os.path.join(ud, fname)),
+            }
+    return jsonify({"uploads": items})
+
+
+@app.route("/job/<job_id>/uploaded/<slot>/preview", methods=["GET", "OPTIONS"])
+def job_uploaded_preview(job_id, slot):
+    """Liefert das hochgeladene Bild zur Anzeige im Frontend."""
+    if request.method == "OPTIONS":
+        return make_response("", 204)
+    token = request.headers.get("X-API-Token") or request.args.get("token")
+    if token != API_TOKEN:
+        return jsonify({"error": "Unauthorized"}), 401
+    ud = _job_uploads_dir(job_id)
+    slot = slot.lower()
+    if not os.path.isdir(ud):
+        return jsonify({"error": "Keine Uploads"}), 404
+    for fname in os.listdir(ud):
+        if os.path.splitext(fname)[0].lower() == slot:
+            mt = "image/jpeg"
+            ext = os.path.splitext(fname)[1].lower()
+            if ext == ".png":
+                mt = "image/png"
+            elif ext == ".webp":
+                mt = "image/webp"
+            return send_file(os.path.join(ud, fname), mimetype=mt)
+    return jsonify({"error": "Slot nicht hochgeladen"}), 404
 
 
 @app.route("/debug-images", methods=["GET"])
