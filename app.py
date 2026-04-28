@@ -435,23 +435,27 @@ def get_pdf_priority(filename):
             return priority
     return 99
 
-def extract_pdfs_from_zip(zip_bytes):
+def extract_pdfs_from_zip(zip_path, work_dir):
     """
-    Extrahiert PDFs aus ZIP inkl. verschachtelter Ordner (Haus A/, Haus B/ etc.)
+    Extrahiert PDFs aus ZIP. Speichert auf Disk unter work_dir/pdfs/,
+    behält nur Pfade in der Liste (NICHT bytes/base64) → spart RAM.
+    base64 wird on-demand erzeugt (siehe analyze_pdfs_with_claude).
     Gibt max 20 relevanteste PDFs zurück.
     """
     all_pdfs = []
+    pdfs_dir = os.path.join(work_dir, "pdfs")
+    os.makedirs(pdfs_dir, exist_ok=True)
+    seen_paths = set()
 
     try:
-        with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+        with zipfile.ZipFile(zip_path) as zf:
             for name in zf.namelist():
                 if not name.lower().endswith('.pdf'):
                     continue
                 if '__MACOSX' in name or name.startswith('.'):
                     continue
-
-                data = zf.read(name)
-                if len(data) < 1000:
+                info = zf.getinfo(name)
+                if info.file_size < 1000:
                     continue
 
                 parts = name.split('/')
@@ -459,11 +463,25 @@ def extract_pdfs_from_zip(zip_bytes):
                 filename = parts[-1]
                 priority = get_pdf_priority(filename)
 
+                # Stream auf Disk, nicht in RAM
+                disk_name = f"{len(all_pdfs)}_{filename}".replace('/', '_')[:120]
+                disk_path = os.path.join(pdfs_dir, disk_name)
+                if disk_path in seen_paths:
+                    disk_path = os.path.join(pdfs_dir, f"{len(all_pdfs)}b_{filename}")
+                seen_paths.add(disk_path)
+                with zf.open(name) as src, open(disk_path, "wb") as dst:
+                    while True:
+                        chunk = src.read(64 * 1024)
+                        if not chunk:
+                            break
+                        dst.write(chunk)
+
                 all_pdfs.append({
                     "name": filename,
                     "folder": folder,
                     "priority": priority,
-                    "base64": base64.b64encode(data).decode(),
+                    "path": disk_path,
+                    "size": info.file_size,
                 })
 
     except Exception as e:
@@ -540,74 +558,142 @@ def _extract_images_from_pdf_bytes(pdf_bytes, pdf_name, seen_hashes):
     return images
 
 
-def extract_images_from_zip(zip_bytes):
+def extract_images_from_zip(zip_path, work_dir):
     """
     Extrahiert Bilder aus ZIP:
     1. Direkte Bilddateien (.jpg/.png/.webp)
     2. In PDFs eingebettete Bilder (via PyMuPDF, dedupliziert)
-    Sortiert absteigend nach Größe → größte/wichtigste Bilder zuerst.
-    Gibt max. 30 Bilder zurück.
+
+    Speichert ALLE Bilder auf Disk (work_dir/imgs/), behält nur Pfade in der
+    Liste – kein bytes-Field! Bytes werden on-demand geladen wenn gebraucht.
+    Gibt max. 15 Bilder zurück (sortiert nach Größe).
     """
     import hashlib
     IMAGE_EXTS = {'.jpg', '.jpeg', '.png', '.webp'}
+    imgs_dir = os.path.join(work_dir, "imgs")
+    os.makedirs(imgs_dir, exist_ok=True)
     images = []
     seen_hashes = set()
+    img_counter = 0
+
+    def _save(name, raw, ext):
+        """Schreibt rohe Bild-Bytes auf Disk und gibt einen Eintrag zurück."""
+        nonlocal img_counter
+        img_counter += 1
+        safe_name = f"{img_counter}_{name.replace('/', '_')[:80]}"
+        if not safe_name.lower().endswith(ext):
+            safe_name += ext
+        path = os.path.join(imgs_dir, safe_name)
+        with open(path, "wb") as fh:
+            fh.write(raw)
+        return {
+            'name': safe_name,
+            'path': path,
+            'ext':  ext,
+            'size': len(raw),
+        }
+
     try:
-        with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+        with zipfile.ZipFile(zip_path) as zf:
             names = zf.namelist()
 
-            # 1. Direkte Bilddateien
+            # 1. Direkte Bilddateien (Streaming)
             for name in names:
                 if '__MACOSX' in name or name.startswith('.'):
                     continue
                 ext = os.path.splitext(name.lower())[1]
                 if ext not in IMAGE_EXTS:
                     continue
+                info = zf.getinfo(name)
+                if info.file_size < 8000:  # Skip Thumbnails
+                    continue
+                # Lese minimal in RAM für Hash + Save
                 raw = zf.read(name)
-                if len(raw) < 8000:  # Skip Thumbnails
+                if len(raw) < 8000:
                     continue
                 h = hashlib.md5(raw).hexdigest()
                 if h in seen_hashes:
+                    del raw
                     continue
                 seen_hashes.add(h)
-                images.append({
-                    'name': name.split('/')[-1],
-                    'bytes': raw,
-                    'ext': ext,
-                    'size': len(raw),
-                })
+                images.append(_save(name.split('/')[-1], raw, ext))
+                del raw
 
-            # 2. Aus PDFs extrahieren — max 8 größte PDFs (RAM-Limit)
+            # 2. Aus PDFs extrahieren – Streaming pro PDF, max 6 PDFs
             pdf_entries = [
                 (n, zf.getinfo(n).file_size)
                 for n in names
                 if n.lower().endswith('.pdf')
                 and '__MACOSX' not in n and not n.startswith('.')
             ]
-            pdf_entries.sort(key=lambda x: x[1], reverse=True)  # größte zuerst
-            for pdf_name_in_zip, _ in pdf_entries[:8]:
-                if len(images) >= 20:  # früh stoppen
+            pdf_entries.sort(key=lambda x: x[1], reverse=True)
+            for pdf_name_in_zip, _ in pdf_entries[:6]:
+                if len(images) >= 15:
                     break
                 try:
-                    pdf_raw = zf.read(pdf_name_in_zip)
-                    pdf_imgs = _extract_images_from_pdf_bytes(
-                        pdf_raw, pdf_name_in_zip.split('/')[-1], seen_hashes
+                    # Stream PDF auf Disk, dann mit fitz.open(path) öffnen
+                    tmp_pdf = os.path.join(imgs_dir, f"_tmp_{img_counter}.pdf")
+                    with zf.open(pdf_name_in_zip) as src, open(tmp_pdf, "wb") as dst:
+                        while True:
+                            chunk = src.read(64 * 1024)
+                            if not chunk:
+                                break
+                            dst.write(chunk)
+                    pdf_imgs = _extract_images_from_pdf_path(
+                        tmp_pdf, pdf_name_in_zip.split('/')[-1],
+                        seen_hashes, _save
                     )
-                    del pdf_raw  # sofort freigeben
                     images.extend(pdf_imgs)
                     print(f"  PDF {pdf_name_in_zip.split('/')[-1]}: {len(pdf_imgs)} Bilder")
+                    try: os.unlink(tmp_pdf)
+                    except OSError: pass
                 except Exception as e:
                     print(f"  PDF lesen Fehler ({pdf_name_in_zip}): {e}")
 
     except Exception as e:
         print(f"extract_images_from_zip Fehler: {e}")
 
-    # Sortieren: größte zuerst (= wichtigste/Hero-Bilder)
     images.sort(key=lambda x: x.get('size', 0), reverse=True)
-    images = images[:15]  # max 15 statt 30 → weniger RAM
-    print(f"Bilder gesamt: {len(images)} (sortiert nach Größe)")
-    for i, img in enumerate(images[:10]):
+    images = images[:15]
+    print(f"Bilder gesamt: {len(images)} (auf Disk unter {imgs_dir})")
+    for i, img in enumerate(images[:8]):
         print(f"    {i+1}. {img['name']} ({img['size']//1024} KB)")
+    return images
+
+
+def _extract_images_from_pdf_path(pdf_path, pdf_name, seen_hashes, save_fn):
+    """Extrahiert Bilder aus PDF (auf Disk) via PyMuPDF. save_fn() schreibt sie weiter."""
+    import hashlib
+    images = []
+    try:
+        import fitz
+        doc = fitz.open(pdf_path)
+        n_pages = min(len(doc), 3)
+        for page_num in range(n_pages):
+            for img_idx, img in enumerate(doc[page_num].get_images(full=True)):
+                xref = img[0]
+                try:
+                    base = doc.extract_image(xref)
+                    raw  = base["image"]
+                    ext  = "." + base["ext"]
+                    if ext not in {'.jpg', '.jpeg', '.png', '.webp', '.bmp'}:
+                        continue
+                    if len(raw) < 20000:
+                        continue
+                    h = hashlib.md5(raw).hexdigest()
+                    if h in seen_hashes:
+                        continue
+                    seen_hashes.add(h)
+                    images.append(save_fn(
+                        f"{pdf_name}_s{page_num+1}_b{img_idx+1}{ext}", raw, ext
+                    ))
+                except Exception:
+                    continue
+        doc.close()
+    except ImportError:
+        print("  PyMuPDF nicht verfügbar")
+    except Exception as e:
+        print(f"  PDF-Bild-Extract Fehler: {e}")
     return images
 
 
@@ -632,6 +718,13 @@ def classify_and_assign_customer_images(images):
     if not images:
         return {}
 
+    # Helfer: Bytes für ein Bild lesen (von Disk wenn 'path', sonst aus 'bytes')
+    def _img_bytes(img):
+        if img.get('path') and os.path.exists(img['path']):
+            with open(img['path'], 'rb') as fh:
+                return fh.read()
+        return img.get('bytes', b'')
+
     # Regelbasierter Fallback (anhand Dateiname). Nutzt nur Kategorien, die
     # tatsächlich in CUSTOMER_IMAGE_SLOTS existieren – alles andere ignoriert.
     def _rule_based(images):
@@ -644,13 +737,12 @@ def classify_and_assign_customer_images(images):
                 cat = 'lageplan'
             elif any(k in name_lower for k in ('quartier', 'strasse', 'straße', 'stadt', 'neighborhood', 'umgebung')):
                 cat = 'quartier'
-            # Alle anderen Bilder: kein Auto-Mapping (User lädt sie via Preview hoch)
             if cat is None or cat not in CUSTOMER_IMAGE_SLOTS:
                 continue
             slots = CUSTOMER_IMAGE_SLOTS[cat]
             idx = slot_counters[cat]
             if idx < len(slots):
-                result[slots[idx]] = img['bytes']
+                result[slots[idx]] = _img_bytes(img)
                 slot_counters[cat] += 1
         return result
 
@@ -689,11 +781,14 @@ def classify_and_assign_customer_images(images):
             mt = ('image/jpeg' if img['ext'] in ('.jpg', '.jpeg')
                   else 'image/png' if img['ext'] == '.png'
                   else 'image/webp')
+            # Bytes on-demand von Disk (oder bytes-Field falls direkt gesetzt)
+            raw = _img_bytes(img)
             content.append({"type": "image", "source": {
                 "type": "base64", "media_type": mt,
-                "data": img.get('b64') or base64.b64encode(img['bytes']).decode()
+                "data": base64.b64encode(raw).decode()
             }})
             content.append({"type": "text", "text": f"Bild {i+1}: {img['name']}"})
+            del raw
         content.append({"type": "text", "text": classify_prompt})
 
         try:
@@ -739,7 +834,7 @@ def classify_and_assign_customer_images(images):
     for cat in by_category:
         by_category[cat].sort(reverse=True)
 
-    # Slots befüllen
+    # Slots befüllen – Bytes erst hier on-demand von Disk lesen
     result = {}
     for cat, items in by_category.items():
         slots = CUSTOMER_IMAGE_SLOTS[cat]
@@ -747,7 +842,7 @@ def classify_and_assign_customer_images(images):
             if slot_idx >= len(slots):
                 break
             img = all_images[global_idx]
-            result[slots[slot_idx]] = img['bytes']
+            result[slots[slot_idx]] = _img_bytes(img)
             print(f"  {img['name']} ({size//1024} KB) → {slots[slot_idx]} [{cat}]")
 
     print(f"classify_customer_images: {len(result)} Bilder zugewiesen (Claude Vision)")
@@ -1361,10 +1456,18 @@ def _calculate_proximity_data(adresse, stadt, lat, lon):
 
 def analyze_pdfs_with_claude(pdfs):
     content = []
+    # PDFs werden hier on-demand von Disk gelesen (statt vorher base64-Bytes
+    # im RAM zu halten). Nach dem API-Call wird content[] gedroppt.
     for pdf in pdfs:
+        b64 = pdf.get("base64")  # Backwards-compat
+        if not b64 and pdf.get("path"):
+            with open(pdf["path"], "rb") as fh:
+                b64 = base64.b64encode(fh.read()).decode()
+        if not b64:
+            continue
         content.append({
             "type": "document",
-            "source": {"type": "base64", "media_type": "application/pdf", "data": pdf["base64"]},
+            "source": {"type": "base64", "media_type": "application/pdf", "data": b64},
             "title": f"{pdf['folder']} / {pdf['name']}"
         })
     content.append({
@@ -1933,7 +2036,9 @@ def fill_pptx(template_bytes, data, customer_images=None):
             if k.startswith(prefix):
                 return i
         return 99
-    bild_keys_with_url_sorted = sorted(bild_keys_with_url, key=_sort_key)[:25]
+    # RAM-Limit verschärft: max 12 Wikimedia/Picsum-Bilder gleichzeitig
+    # (12 × ~400KB = ~5 MB statt vorher 25 × ~400KB = ~10 MB)
+    bild_keys_with_url_sorted = sorted(bild_keys_with_url, key=_sort_key)[:12]
     print(f"fill_pptx: {len(bild_keys_total)} bild_* Keys, "
           f"{len(bild_keys_with_url)} URLs, lade {len(bild_keys_with_url_sorted)} (RAM-Limit)")
 
@@ -1942,14 +2047,19 @@ def fill_pptx(template_bytes, data, customer_images=None):
         try:
             resp = requests.get(value, timeout=15)
             if resp.status_code == 200:
-                image_data[key] = resp.content
-                print(f"  ✓ Bild geladen: {key} ({len(resp.content)//1024} KB)")
+                # Nur einbinden wenn < 1 MB (sonst zu groß für RAM-Buffer)
+                if len(resp.content) < 1_000_000:
+                    image_data[key] = resp.content
+                    print(f"  ✓ Bild geladen: {key} ({len(resp.content)//1024} KB)")
+                else:
+                    print(f"  ⚠️  Bild zu groß übersprungen: {key} ({len(resp.content)//1024} KB)")
             else:
                 print(f"  ✗ Bild HTTP-Fehler {key}: {resp.status_code}")
         except Exception as e:
             print(f"  ✗ Bild Download-Fehler {key}: {e}")
 
-    print(f"  image_data gesamt: {len(image_data)} Bilder")
+    print(f"  image_data gesamt: {len(image_data)} Bilder "
+          f"(~{sum(len(v) for v in image_data.values())//1024} KB)")
 
     def make_replacement_map(data):
         """Build a case-insensitive lookup: UPPER_KEY -> value.
@@ -2930,28 +3040,27 @@ def _run_expose_job(job_id, zip_paths):
                     continue
                 fpath = os.path.join(input_dir, fname)
                 try:
-                    with open(fpath, "rb") as fh:
-                        raw = fh.read()
+                    # Direktbilder: Pfad speichern, NICHT bytes (RAM sparen)
                     customer_image_list.append({
                         "name": fname,
-                        "ext": ext,
-                        "bytes": raw,
-                        "size": len(raw),
+                        "ext":  ext,
+                        "path": fpath,
+                        "size": os.path.getsize(fpath),
                     })
-                    print(f"[{job_id}] Direktbild: {fname} ({len(raw)//1024} KB)")
+                    print(f"[{job_id}] Direktbild: {fname} ({os.path.getsize(fpath)//1024} KB)")
                 except Exception as e:
                     print(f"[{job_id}] Direktbild Fehler {fname}: {e}")
         direct_image_count = len(customer_image_list)
 
+        # Working-Dir für extrahierte Files (PDFs + Bilder)
+        work_dir = _job_dir(job_id)
         for zip_path in zip_paths:
             try:
-                with open(zip_path, "rb") as f:
-                    zip_bytes = f.read()
-                pdfs.extend(extract_pdfs_from_zip(zip_bytes))
-                customer_image_list.extend(extract_images_from_zip(zip_bytes))
+                # NEU: ZIP wird per Path geöffnet (kein zip_bytes im RAM!)
+                pdfs.extend(extract_pdfs_from_zip(zip_path, work_dir))
+                customer_image_list.extend(extract_images_from_zip(zip_path, work_dir))
                 print(f"[{job_id}] ZIP {os.path.basename(zip_path)}: "
                       f"{len(pdfs)} PDFs, {len(customer_image_list)} Bilder")
-                del zip_bytes  # ZIP-Bytes sofort freigeben → RAM sparen
                 import gc; gc.collect()
             except Exception as e:
                 print(f"[{job_id}] ZIP-Fehler {zip_path}: {e}")
