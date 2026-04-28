@@ -885,6 +885,58 @@ def _fetch_wikipedia_city_image(city, lang="de"):
     return None
 
 
+def _fetch_city_landmark_image(stadt, landmark_type="dom"):
+    """Lädt das Wikipedia-Hauptbild eines Wahrzeichens der Stadt.
+    Garantiert ein echtes Foto der Stadt (nicht generisch wie Unsplash).
+
+    landmark_type: 'dom' | 'hbf' | 'park' | 'altstadt' | 'rathaus' | 'markt'
+    """
+    if not stadt:
+        return None
+    s = stadt.strip()
+    # Pattern pro landmark_type, in Reihenfolge (erstes Bild gewinnt)
+    patterns = {
+        "dom":      [f"{s}er Dom", f"Dom zu {s}", f"Kathedrale {s}", f"{s} Dom"],
+        "hbf":      [f"Hauptbahnhof {s}", f"{s} Hauptbahnhof", f"Bahnhof {s}"],
+        "park":     [f"Stadtpark {s}", f"Bürgerpark {s}", f"{s} Stadtpark", f"{s}er Stadtpark"],
+        "altstadt": [f"Altstadt {s}", f"{s}er Altstadt", f"Marktplatz {s}", f"Rathausplatz {s}"],
+        "rathaus":  [f"Rathaus {s}", f"{s}er Rathaus", f"Altes Rathaus {s}"],
+        "markt":    [f"Marktplatz {s}", f"{s}er Markt", f"Hauptmarkt {s}"],
+        "skyline":  [f"Skyline {s}", f"Panorama {s}", f"{s} Skyline", f"{s} Stadtansicht"],
+        "fluss":    [f"Elbe {s}", f"Donau {s}", f"Rhein {s}", f"Main {s}", f"Oder {s}"],
+        "uni":      [f"Universität {s}", f"{s}er Universität", f"Hochschule {s}"],
+    }
+    candidates = patterns.get(landmark_type, [s])
+
+    for query in candidates:
+        title = query.replace(" ", "_")
+        for wiki_lang in ["de", "en"]:
+            try:
+                resp = requests.get(
+                    f"https://{wiki_lang}.wikipedia.org/api/rest_v1/page/summary/{requests.utils.quote(title)}",
+                    headers={"User-Agent": "interpres-expose/1.0"},
+                    timeout=10,
+                )
+                if resp.status_code != 200:
+                    continue
+                d = resp.json()
+                img = ((d.get("originalimage") or {}).get("source") or
+                       (d.get("thumbnail") or {}).get("source"))
+                if not img:
+                    continue
+                low = img.lower()
+                if ".svg/" in low or low.split("?")[0].endswith(".svg"):
+                    continue
+                if any(b in low for b in ('wappen', 'coa_', 'coat_of_arms', '_flag', 'logo_')):
+                    continue
+                if low.split("?")[0].rsplit(".", 1)[-1] in ("jpg", "jpeg", "png"):
+                    print(f"  Wahrzeichen ({landmark_type}/{query}): {img[:80]}")
+                    return img
+            except Exception as e:
+                print(f"  Wahrzeichen Fehler '{query}' ({wiki_lang}): {e}")
+    return None
+
+
 def _fetch_wikimedia_image(query, top_n=1):
     """Sucht thematisch passende Bilder via Wikimedia Commons.
     top_n=1 → eine URL (str|None), top_n>1 → Liste der besten N URLs.
@@ -1035,37 +1087,42 @@ def fill_image_placeholders(data):
     # Stadt-Bilder: Wikipedia/Commons – NUR für echte Stadt-Slots, NICHT für
     # Projekt-Cover (bild_titel) und nicht für Standort-Außenfoto (das soll
     # das Kundenbild bleiben, sonst läuft der Eigentum-Renderer rein).
-    # (slot, wikipedia-search, wikimedia-fallback, unsplash-fallback)
+    # (slot, landmark_type, unsplash_query)
+    # landmark_type wählt den Wikipedia-Wahrzeichen-Artikel (Dom, Hbf, Park ...)
+    # → garantiert echte Stadt-Fotos statt zufälliger Stock-Photos.
     _CITY_SLOT_SEARCHES = [
-        ("bild_quartier",      stadtteil or stadt,        f"{stadt} {stadtteil or ''} Stadtquartier",         f"{stadt} {stadtteil or 'street'} architecture"),
-        ("bild_stadt_gross",   stadt,                     f"{stadt} Luftbild Stadtpanorama",                  f"{stadt} skyline aerial"),
-        ("bild_stadt_klein",   f"{stadt} Innenstadt",     f"{stadt} Innenstadt Marktplatz",                   f"{stadt} downtown city center"),
-        ("bild_stadt_presse",  stadt,                     f"{stadt} Skyline Architektur",                     f"{stadt} cityscape architecture"),
-        ("bild_stadt_branche", stadt,                     f"{stadt} Wirtschaft Industrie Unternehmen",        f"{stadt} business industry buildings"),
+        ("bild_quartier",      "altstadt", f"{stadtteil or stadt} {stadt} historic architecture"),
+        ("bild_stadt_gross",   "skyline",  f"{stadt} skyline panorama"),
+        ("bild_stadt_klein",   "markt",    f"{stadt} marketplace downtown"),
+        ("bild_stadt_presse",  "dom",      f"{stadt} cathedral landmark"),
+        ("bild_stadt_branche", "hbf",      f"{stadt} train station modern"),
     ]
-    for slot, wp_search, commons_q, unsplash_q in _CITY_SLOT_SEARCHES:
+    for slot, landmark_type, unsplash_q in _CITY_SLOT_SEARCHES:
         if slot not in data:
             continue
         if data.get(slot) and str(data[slot]).startswith("http"):
             continue
         if not stadt:
             continue
-        # 1. Wikipedia REST (filtert Wappen/SVG raus)
-        url = _fetch_wikipedia_city_image(wp_search)
-        # 2. Unsplash mit englischem Search-Term (zuverlässiger als Wikimedia)
+        # 1. Wikipedia-Wahrzeichen-Artikel (Dom, Hbf, etc.) – ECHTE Stadt-Fotos
+        url = _fetch_city_landmark_image(stadt, landmark_type)
+        # 2. Wikipedia REST mit Stadt selbst (filtert Wappen/SVG raus)
+        if not url:
+            url = _fetch_wikipedia_city_image(stadt)
+        # 3. Unsplash search mit englischem Begriff
         if not url:
             url = fetch_unsplash_image(unsplash_q)
             if url and "picsum.photos" in url:
-                url = None  # Picsum-Fallback aus Unsplash-Wrapper ablehnen
-        # 3. Wikimedia Commons mit deutschem Begriff
+                url = None
+        # 4. Wikimedia Commons Suche
         if not url:
-            url = _fetch_wikimedia_image(commons_q)
-        # 4. Allerletzter Notfall: Picsum mit Stadt-Seed
+            url = _fetch_wikimedia_image(f"{stadt} {landmark_type}")
+        # 5. Allerletzter Notfall: Picsum
         if not url:
             seed = abs(hash(unsplash_q)) % 1000
             url = f"https://picsum.photos/seed/{seed}/1200/800"
         data[slot] = url
-        print(f"  {slot} → {url[:70]}")
+        print(f"  {slot} ({landmark_type}) → {url[:70]}")
 
     # Slots die NUR mit echten Projektfotos vom Kunden befüllt werden.
     # Lieber leerer Platzhalter als falsches Stock-Foto – Kunde kann später
@@ -1437,12 +1494,19 @@ def _calculate_proximity_data(adresse, stadt, lat, lon):
         for k in cats:
             cats[k].sort()
 
+        def _truncate(s, maxlen=18):
+            """Kürzt Namen auf maxlen Zeichen mit … wenn nötig (verhindert
+            Layoutbruch in den schmalen Template-Spalten)."""
+            s = (s or "").strip()
+            if len(s) <= maxlen:
+                return s
+            return s[:maxlen - 1].rstrip() + "…"
+
         def _near(cat, default, default_min, mode="walk"):
             pois = cats.get(cat, [])
             if pois:
                 d, n = pois[0]
-                n = n[:22]  # truncate long names
-                return n, (_walk(d) if mode == "walk" else _bike(d))
+                return _truncate(n), (_walk(d) if mode == "walk" else _bike(d))
             return default, default_min
 
         # Einkaufen (walking)
@@ -1458,9 +1522,9 @@ def _calculate_proximity_data(adresse, stadt, lat, lon):
         # Ärzte (walking)
         docs = cats.get("doctors", [])
         if len(docs) >= 1:
-            d, n = docs[0]; result["arzt_1_name"] = n[:22]; result["min_arzt_1"] = _walk(d)
+            d, n = docs[0]; result["arzt_1_name"] = _truncate(n); result["min_arzt_1"] = _walk(d)
         if len(docs) >= 2:
-            d, n = docs[1]; result["arzt_2_name"] = n[:22]; result["min_arzt_2"] = _walk(d)
+            d, n = docs[1]; result["arzt_2_name"] = _truncate(n); result["min_arzt_2"] = _walk(d)
         n, m = _near("pharmacy", "Apotheke", "3")
         result["arzt_3_name"] = n; result["min_arzt_3"] = m
         n, m = _near("hospital", "Krankenhaus", "12")
@@ -1482,11 +1546,11 @@ def _calculate_proximity_data(adresse, stadt, lat, lon):
         grund = [(d, n) for d, n in schools if "gymnasium" not in n.lower()]
         gyms  = [(d, n) for d, n in schools if "gymnasium" in n.lower()]
         if grund:
-            d, n = grund[0]; result["bildung_2_name"] = n[:22]; result["min_bildung_2"] = _walk(d)
+            d, n = grund[0]; result["bildung_2_name"] = _truncate(n); result["min_bildung_2"] = _walk(d)
         if gyms:
-            d, n = gyms[0]; result["bildung_3_name"] = n[:22]; result["min_bildung_3"] = _walk(d)
+            d, n = gyms[0]; result["bildung_3_name"] = _truncate(n); result["min_bildung_3"] = _walk(d)
         elif len(schools) >= 2:
-            d, n = schools[1]; result["bildung_3_name"] = n[:22]; result["min_bildung_3"] = _walk(d)
+            d, n = schools[1]; result["bildung_3_name"] = _truncate(n); result["min_bildung_3"] = _walk(d)
 
         n, m = _near("university", "Universität", "15", "bike")
         result["bildung_4_name"] = n; result["min_bildung_4"] = m
@@ -3167,13 +3231,24 @@ def _run_expose_job(job_id, zip_paths):
             expose_data = {**PLATZHALTER, **raw_expose}
             expose_data["logo_initial"] = generate_logo_initial(expose_data.get("projekt_name", ""))
 
-            # Schritt 2b: Proximity-Daten (Einkaufen/Ärzte/Sport/Bildung) berechnen
+            # Schritt 2b: Proximity-Daten + Lageplan
+            lat = lon = None
             if geo_result:
                 lat, lon, _ = geo_result
                 print(f"[{job_id}] Schritt 2b: Proximity via Overpass …")
                 proximity = _calculate_proximity_data(adresse, stadt, lat, lon)
                 expose_data.update(proximity)
-                # Lageplan via OpenStreetMap
+            else:
+                # Fallback: Stadt allein geocodieren (ohne Adresse)
+                # → Lageplan zeigt zumindest die Stadt-Mitte, nicht leer
+                if stadt:
+                    fallback_geo = _geocode_address("", stadt)
+                    if fallback_geo:
+                        lat, lon, _ = fallback_geo
+                        print(f"[{job_id}]   Stadt-Fallback-Geocoding: ({lat:.4f}, {lon:.4f})")
+
+            # Lageplan setzen wenn wir Koordinaten haben
+            if lat is not None and lon is not None:
                 expose_data["bild_lageplan"] = _osm_lageplan_url(lat, lon)
                 print(f"[{job_id}]   Lageplan URL: {expose_data['bild_lageplan']}")
 
