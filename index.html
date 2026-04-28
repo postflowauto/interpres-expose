@@ -1222,7 +1222,7 @@ function renderSlotList(slotList, alreadyFilled) {
     lbl.textContent = item.label || item.slot;
     const meta = document.createElement('div');
     meta.className = 'slot-card-meta';
-    meta.textContent = item.slide ? `Folie ${item.slide}` : item.slot;
+    meta.textContent = item.slide ? `Folie ${item.slide} · ${item.slot}` : item.slot;
     info.appendChild(lbl);
     info.appendChild(meta);
 

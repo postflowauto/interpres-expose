@@ -865,7 +865,19 @@ def _fetch_wikipedia_city_image(city, lang="de"):
                 d = resp.json()
                 img = ((d.get("originalimage") or {}).get("source") or
                        (d.get("thumbnail") or {}).get("source"))
-                if img and img.lower().split("?")[0].rsplit(".", 1)[-1] in ("jpg", "jpeg", "png"):
+                if not img:
+                    continue
+                # Filter: SVG (Wappen, Logos, rasterisierte Vektoren) ablehnen.
+                # Wikipedia rendert SVGs zu PNG, Pfad enthält dann '.svg/' im Mittelteil.
+                low = img.lower()
+                if ".svg/" in low or low.split("?")[0].endswith(".svg"):
+                    print(f"  Wikipedia ({wiki_lang}) '{city}' → SVG/Wappen abgelehnt")
+                    continue
+                # Auch Wappen explizit blocken (URL enthält 'wappen', 'coa', 'flag')
+                if any(b in low for b in ('wappen', 'coa_', 'coat_of_arms', '_flag', 'logo_')):
+                    print(f"  Wikipedia ({wiki_lang}) '{city}' → Wappen/Logo abgelehnt")
+                    continue
+                if low.split("?")[0].rsplit(".", 1)[-1] in ("jpg", "jpeg", "png"):
                     print(f"  Wikipedia ({wiki_lang}) '{city}': {img[:80]}")
                     return img
         except Exception as e:
@@ -1014,29 +1026,34 @@ def fill_image_placeholders(data):
     # Stadt-Bilder: Wikipedia/Commons – NUR für echte Stadt-Slots, NICHT für
     # Projekt-Cover (bild_titel) und nicht für Standort-Außenfoto (das soll
     # das Kundenbild bleiben, sonst läuft der Eigentum-Renderer rein).
+    # (slot, wikipedia-search, wikimedia-fallback, unsplash-fallback)
     _CITY_SLOT_SEARCHES = [
-        # (slot,                primary_search,                       commons_fallback_query)
-        ("bild_quartier",       stadtteil or stadt,                   f"{stadt} {stadtteil or ''} Stadtquartier"),
-        ("bild_stadt_gross",    stadt,                                f"{stadt} Luftbild Stadtpanorama"),
-        ("bild_stadt_klein",    f"{stadt} Innenstadt",                f"{stadt} Innenstadt Marktplatz"),
-        ("bild_stadt_presse",   stadt,                                f"{stadt} Skyline Architektur"),
-        ("bild_stadt_branche",  stadt,                                f"{stadt} Wirtschaft Industrie Unternehmen"),
+        ("bild_quartier",      stadtteil or stadt,        f"{stadt} {stadtteil or ''} Stadtquartier",         f"{stadt} {stadtteil or 'street'} architecture"),
+        ("bild_stadt_gross",   stadt,                     f"{stadt} Luftbild Stadtpanorama",                  f"{stadt} skyline aerial"),
+        ("bild_stadt_klein",   f"{stadt} Innenstadt",     f"{stadt} Innenstadt Marktplatz",                   f"{stadt} downtown city center"),
+        ("bild_stadt_presse",  stadt,                     f"{stadt} Skyline Architektur",                     f"{stadt} cityscape architecture"),
+        ("bild_stadt_branche", stadt,                     f"{stadt} Wirtschaft Industrie Unternehmen",        f"{stadt} business industry buildings"),
     ]
-    for slot, wp_search, commons_q in _CITY_SLOT_SEARCHES:
+    for slot, wp_search, commons_q, unsplash_q in _CITY_SLOT_SEARCHES:
         if slot not in data:
             continue
         if data.get(slot) and str(data[slot]).startswith("http"):
-            continue  # already filled by customer image
+            continue
         if not stadt:
             continue
-        # 1. Wikipedia REST API – most reliable, always the official city photo
+        # 1. Wikipedia REST (filtert Wappen/SVG raus)
         url = _fetch_wikipedia_city_image(wp_search)
+        # 2. Unsplash mit englischem Search-Term (zuverlässiger als Wikimedia)
         if not url:
-            # 2. Wikimedia Commons with specific German search term
+            url = fetch_unsplash_image(unsplash_q)
+            if url and "picsum.photos" in url:
+                url = None  # Picsum-Fallback aus Unsplash-Wrapper ablehnen
+        # 3. Wikimedia Commons mit deutschem Begriff
+        if not url:
             url = _fetch_wikimedia_image(commons_q)
+        # 4. Allerletzter Notfall: Picsum mit Stadt-Seed
         if not url:
-            # 3. Last resort: Picsum
-            seed = abs(hash(commons_q)) % 1000
+            seed = abs(hash(unsplash_q)) % 1000
             url = f"https://picsum.photos/seed/{seed}/1200/800"
         data[slot] = url
         print(f"  {slot} → {url[:70]}")
@@ -1099,47 +1116,53 @@ def fill_image_placeholders(data):
         data[data_key] = url
         filled += 1
 
-    # Amenity-spezifische Bilder: Wikimedia Commons + Claude Vision Validierung
-    # (kw, query, validation-subject) – Subject ist das, was Claude im Bild sehen muss
-    _AMENITY_QUERY_MAP = [
-        ("dachterras",   "Dachterrasse Wohngebäude",         "eine Dachterrasse oder einen begehbaren Dachgarten"),
-        ("balkon",       "Balkon Wohnung modern",            "einen Balkon an einem Wohngebäude"),
-        ("terras",       "Terrasse Außenbereich Wohnen",     "eine Terrasse mit Sitzgelegenheit"),
-        ("fahrrad",      "Fahrradkeller Fahrradabstellraum", "einen Fahrradabstellraum oder Fahrradkeller"),
-        ("e-bike",       "E-Bike Ladestation Fahrradraum",   "Fahrräder oder eine Fahrrad-Ladestation"),
-        ("bike",         "Fahrradabstellplatz Wohnhaus",     "Fahrräder vor oder in einem Gebäude"),
-        ("spindel",      "Abstellraum Einlagerung modern",   "einen Abstellraum oder Lagerraum"),
-        ("gemeinschaft", "Gemeinschaftsraum Lounge",         "einen Gemeinschaftsraum oder Aufenthaltsraum"),
-        ("lounge",       "Lounge Aufenthaltsraum modern",    "einen Lounge-/Aufenthaltsraum"),
-        ("smart-lock",   "elektronisches Türschloss",        "ein elektronisches/digitales Türschloss"),
-        ("smart",        "Smart Home Steuerung",             "Smart-Home-Geräte oder ein Tablet/Display"),
-        ("sanitär",      "modernes Badezimmer Dusche",       "ein modernes Badezimmer mit Dusche"),
-        ("bad",          "modernes Badezimmer Dusche",       "ein modernes Badezimmer"),
-        ("boden",        "Parkett Holzboden Wohnung",        "Parkett- oder Holzboden in einer Wohnung"),
-        ("außenanlage",  "Grünfläche Außenanlage Wohnanlage","eine Grünfläche oder Außenanlage"),
-        ("aufzug",       "Fahrstuhl Aufzug Wohnhaus",        "einen Aufzug oder Fahrstuhl"),
-        ("gym",          "Fitnessstudio Fitnessraum",        "ein Fitnessstudio mit Geräten"),
-        ("fitness",      "Fitnessstudio Fitnessraum",        "ein Fitnessstudio mit Geräten"),
-        ("pool",         "Schwimmbad Schwimmbecken",         "ein Schwimmbad oder Pool"),
-        ("küche",        "moderne Einbauküche Wohnung",      "eine moderne Küche oder Einbauküche"),
-        ("tiefgarage",   "Tiefgarage Parkhaus",              "eine Tiefgarage oder Garage"),
-        ("parken",       "Stellplatz Parkplatz",             "einen Parkplatz oder Stellplatz"),
-        ("stellplat",    "Stellplatz Parkplatz",             "einen Parkplatz oder Stellplatz"),
-        ("solar",        "Photovoltaik Solaranlage Dach",    "eine Solaranlage oder Photovoltaik-Module"),
-        ("photovoltaik", "Photovoltaikanlage Solarpanel",    "Photovoltaik-/Solar-Module auf einem Dach"),
-        ("fernwärme",    "Heizkörper Heizung Gebäude",       "eine Heizungsanlage, Wärmestation oder Heizkörper"),
-        ("concierge",    "Empfang Rezeption Lobby",          "einen Empfangs- oder Rezeptionsbereich"),
-        ("paket",        "Paketstation Briefkasten",         "eine Paketstation oder Briefkastenanlage"),
-        ("post",         "Paketstation Briefkasten",         "eine Paketstation oder Briefkastenanlage"),
-        ("möbli",        "möbliertes Apartment Wohnen",      "ein möbliertes Apartment-Innenraum"),
-        ("möbel",        "möbliertes Zimmer Interieur",      "ein möbliertes Zimmer mit Designmöbeln"),
-        ("dach",         "Gründach Dachbegrünung",           "ein begrüntes Dach oder eine Dachterrasse"),
-        ("garten",       "Gartenanlage Wohnanlage",          "eine Garten- oder Grünanlage"),
-        ("ladestat",     "E-Auto Ladestation Wallbox",       "eine E-Auto-Ladestation oder Wallbox"),
-        ("café",         "Café Innenraum modern",            "ein Café-Innenraum"),
+    # Amenity-Bilder: Unsplash als PRIMÄR (zuverlässiger als Wikimedia für
+    # spezifische Begriffe wie Fahrradabstellplatz, Solaranlage etc.).
+    # Mapping: Keyword → englischer Unsplash-Suchbegriff (englisch funktioniert
+    # auf Unsplash deutlich besser).
+    _AMENITY_UNSPLASH = [
+        ("dachterras",   "rooftop terrace garden modern"),
+        ("balkon",       "modern apartment balcony"),
+        ("terras",       "outdoor terrace residential modern"),
+        ("fahrrad",      "bicycle parking storage room"),
+        ("e-bike",       "electric bike charging station"),
+        ("bike",         "bicycle parking modern"),
+        ("spindel",      "storage room basement organized"),
+        ("gemeinschaft", "community lounge modern interior"),
+        ("lounge",       "lounge interior modern minimal"),
+        ("smart-lock",   "smart door lock keyless entry"),
+        ("smart",        "smart home tablet control"),
+        ("sanitär",      "modern bathroom shower minimal"),
+        ("bad",          "modern bathroom luxury"),
+        ("boden",        "wooden floor parquet apartment"),
+        ("außenanlage",  "modern building landscaping garden"),
+        ("aufzug",       "modern elevator interior"),
+        ("gym",          "modern gym equipment fitness"),
+        ("fitness",      "fitness studio modern equipment"),
+        ("pool",         "modern swimming pool architecture"),
+        ("küche",        "modern kitchen apartment"),
+        ("tiefgarage",   "underground garage parking"),
+        ("parken",       "parking garage modern"),
+        ("stellplat",    "parking spot modern building"),
+        ("solar",        "solar panels rooftop building"),
+        ("photovoltaik", "photovoltaic solar panels modern"),
+        ("fernwärme",    "modern heating radiator interior"),
+        ("concierge",    "hotel reception lobby modern"),
+        ("paket",        "parcel locker delivery box"),
+        ("post",         "mailbox modern apartment building"),
+        ("möbli",        "furnished modern apartment interior"),
+        ("möbel",        "modern furniture interior design"),
+        ("dach",         "green roof rooftop garden"),
+        ("garten",       "modern garden landscaping residential"),
+        ("ladestat",     "electric vehicle charging station home"),
+        ("café",         "modern cafe interior"),
+        ("internet",     "fiber internet router home"),
+        ("glasfaser",    "fiber optic cable network"),
+        ("barriere",     "accessible apartment ramp design"),
+        ("aufzüge",      "modern elevator architecture"),
     ]
-    amenity_validated = 0
-    amenity_skipped   = 0
+    amenity_filled = 0
+    amenity_skipped = 0
     for n in range(1, 10):
         amenity_val = str(data.get(f"amenity_{n}", "")).strip().lower()
         bild_key = f"bild_amenity_{n}"
@@ -1147,25 +1170,34 @@ def fill_image_placeholders(data):
             continue
         if not amenity_val:
             continue
-        match = None
-        for kw, q, subject in _AMENITY_QUERY_MAP:
+        # Suchbegriff matchen
+        unsplash_q = None
+        for kw, q in _AMENITY_UNSPLASH:
             if kw in amenity_val:
-                match = (q, subject)
+                unsplash_q = q
                 break
-        if not match:
-            # Generischer Fallback: einfach die Amenity-Bezeichnung selbst suchen
-            match = (f"{amenity_val} Wohngebäude modern", f"{amenity_val} im Wohnumfeld")
-        query, subject = match
-        url = _find_validated_amenity_image(query, subject, max_tries=4)
+        if not unsplash_q:
+            # Generischer Fallback: amenity_val ins Englische übersetzt geht meist nicht,
+            # also einfach modern apartment + amenity_val nehmen
+            unsplash_q = f"modern apartment {amenity_val} amenity"
+        # 1. Unsplash (primär)
+        url = fetch_unsplash_image(unsplash_q)
+        # fetch_unsplash_image fällt auf Picsum zurück – das wollen wir hier NICHT
+        if url and "picsum.photos" in url:
+            url = None
+        # 2. Wikimedia als Fallback
+        if not url:
+            url = _fetch_wikimedia_image(unsplash_q.split()[0] + " " + (amenity_val.split()[0] if amenity_val else ""))
         if url:
             data[bild_key] = url
-            amenity_validated += 1
+            amenity_filled += 1
+            print(f"  ✓ {bild_key} ({amenity_val[:30]}) → {url[:60]}")
         else:
-            # KEIN Picsum-Fallback – lieber leerer Slot als falsches Bild
             amenity_skipped += 1
+            print(f"  ✗ {bild_key} ({amenity_val[:30]}) → kein Bild gefunden")
 
-    print(f"fill_image_placeholders: {filled} Picsum-Slots, {amenity_validated} validierte Amenities, "
-          f"{amenity_skipped} übersprungen (kein passendes Bild)")
+    print(f"fill_image_placeholders: {filled} Picsum-Slots, {amenity_filled} Amenities befüllt, "
+          f"{amenity_skipped} leer (kein Bild gefunden)")
     return data
 
 
@@ -3302,22 +3334,40 @@ def _run_expose_job(job_id, zip_paths):
             if slot.lower() not in already_filled:
                 already_filled.append(slot.lower())
 
-        # ── Flache Slot-Liste als Fallback (immer verfügbar, auch wenn bbox=0) ──
-        # Aus den freien BILD_*-Slots in der bbox_map – plus alle, die der Kunde
-        # noch ersetzen könnte. Nach Slide-Index gruppiert für die UI.
+        # ── Slot-Liste: ZUERST aus bbox_map versuchen (mit Slide-Indizes),
+        #     SONST Fallback aus PLATZHALTER (alle bild_*-Slots, ohne Slide-Index).
         slot_list = []
+        seen_slots = set()
+        # 1) Bbox-basiert (mit korrektem Slide-Index)
         for s in bbox_map.get("slides", []):
             for ph in s.get("placeholders", []):
+                if ph["slot"] in seen_slots:
+                    continue
+                seen_slots.add(ph["slot"])
+                if ph["slot"] in already_filled:
+                    continue
                 slot_list.append({
-                    "slot":     ph["slot"],
-                    "label":    ph.get("label", ph["slot"]),
-                    "slide":    s["index"] + 1,  # 1-based für UI
-                    "filled":   ph["slot"] in already_filled,
+                    "slot":  ph["slot"],
+                    "label": ph.get("label", ph["slot"]),
+                    "slide": s["index"] + 1,
                 })
-        # Nur unbefüllte Slots, sortiert nach Slide-Index
-        slot_list = [s for s in slot_list if not s["filled"]]
-        slot_list.sort(key=lambda x: (x["slide"], x["slot"]))
-        print(f"[{job_id}] Slot-Liste (Upload-Kandidaten): {len(slot_list)} Slots")
+        # 2) Fallback aus PLATZHALTER: jeder bild_*-Slot, der nicht befüllt ist
+        for k in PLATZHALTER:
+            if not k.startswith("bild_"):
+                continue
+            if k in seen_slots:
+                continue
+            if k in already_filled:
+                continue
+            seen_slots.add(k)
+            slot_list.append({
+                "slot":  k,
+                "label": _slot_label(k),
+                "slide": 0,  # unbekannte Slide-Position
+            })
+        slot_list.sort(key=lambda x: (x["slide"] or 99, x["slot"]))
+        print(f"[{job_id}] Slot-Liste: {len(slot_list)} Upload-Kandidaten "
+              f"({sum(1 for s in slot_list if s['slide'])} mit Slide-Index)")
 
         # ── Wenn keine Slide-JPGs gerendert werden konnten: kein Preview sinnvoll
         #     → direkt zu "done" mit dem PPTX (von Disk lesen)
