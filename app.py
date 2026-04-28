@@ -2547,8 +2547,9 @@ def _find_pdftoppm():
 
 def render_pdf_to_jpgs(pdf_bytes, out_dir, dpi=110):
     """Konvertiert PDF zu einzelnen JPG-Slide-Bildern via pdftoppm.
+    Rendert SEITENWEISE statt in einem großen Batch – das hält den
+    Memory-Peak niedrig (auf Render Starter mit 512 MiB sonst OOM).
     Schreibt slide_1.jpg, slide_2.jpg, ... ins out_dir.
-    Gibt sortierte Liste der Pfade zurück.
     """
     import subprocess, tempfile
     bin_path = _find_pdftoppm()
@@ -2559,14 +2560,45 @@ def render_pdf_to_jpgs(pdf_bytes, out_dir, dpi=110):
     with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
         f.write(pdf_bytes)
         pdf_path = f.name
+
     try:
+        # Erst Seitenanzahl feststellen via pdfinfo (oder fallback: pdftoppm einzeln)
+        page_count = None
+        try:
+            pdfinfo = subprocess.run(["pdfinfo", pdf_path],
+                                     capture_output=True, text=True, timeout=30)
+            for line in pdfinfo.stdout.splitlines():
+                if line.startswith("Pages:"):
+                    page_count = int(line.split()[1])
+                    break
+        except Exception:
+            pass
+        if not page_count:
+            page_count = 50  # Defensive Obergrenze
+
+        print(f"  pdftoppm: rendere {page_count} Seiten einzeln @ {dpi} DPI …")
         prefix = os.path.join(out_dir, "slide")
-        result = subprocess.run(
-            [bin_path, "-jpeg", "-r", str(dpi), pdf_path, prefix],
-            capture_output=True, text=True, timeout=180
-        )
-        if result.returncode != 0:
-            raise RuntimeError(f"pdftoppm Fehler: {result.stderr[:300]}")
+        for n in range(1, page_count + 1):
+            result = subprocess.run(
+                [bin_path, "-jpeg", "-r", str(dpi), "-f", str(n), "-l", str(n),
+                 pdf_path, prefix],
+                capture_output=True, text=True, timeout=60
+            )
+            if result.returncode != 0:
+                # Wenn keine Datei rauskam → wahrscheinlich Ende des PDFs
+                print(f"  Seite {n}: rc={result.returncode} → stop")
+                break
+            # Prüfen ob die Seite tatsächlich erzeugt wurde
+            import glob as _glob
+            if not _glob.glob(os.path.join(out_dir, f"slide-{n}.jpg")) and \
+               not _glob.glob(os.path.join(out_dir, f"slide-{n:02d}.jpg")) and \
+               not _glob.glob(os.path.join(out_dir, f"slide-{n:03d}.jpg")):
+                # Keine Datei für diese Seite → wahrscheinlich Ende
+                break
+            if n % 5 == 0:
+                # gc nach jedem 5er-Block
+                import gc as _gc
+                _gc.collect()
     finally:
         try: os.unlink(pdf_path)
         except OSError: pass
@@ -3142,7 +3174,7 @@ def _run_expose_job(job_id, zip_paths):
                 gc.collect()
                 # render_pdf_to_jpgs liest das PDF wieder von Disk – stabil
                 with open(pdf_tmp, "rb") as fh:
-                    jpg_paths = render_pdf_to_jpgs(fh.read(), _job_slides_dir(job_id), dpi=80)
+                    jpg_paths = render_pdf_to_jpgs(fh.read(), _job_slides_dir(job_id), dpi=72)
                 try: os.unlink(pdf_tmp)
                 except OSError: pass
                 slide_jpgs = [os.path.basename(p) for p in jpg_paths]
