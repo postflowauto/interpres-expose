@@ -3106,7 +3106,7 @@ def _run_expose_job(job_id, zip_paths):
         print(f"[{job_id}] Schritt 5/6: PDF + Slide-Bilder für Vorschau …")
 
         slide_jpgs = []
-        bbox_map   = []
+        bbox_map   = {"slide_w_emu": 12192000, "slide_h_emu": 6858000, "slides": []}
         try:
             if _can_convert_to_pdf() and _find_pdftoppm():
                 pdf_bytes = convert_to_pdf(pptx_bytes, f"{projekt_name}.pptx")
