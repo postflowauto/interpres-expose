@@ -3022,49 +3022,56 @@ def _run_expose_job(job_id, zip_paths):
         gc.collect()
 
         # ── User-Projektname (falls gesetzt) override Claude-Output ─────────
+        # Wirkt auf alle Felder, die Claude aus projekt_name ableitet.
         try:
             job_meta = _read_job(job_id) or {}
             user_pname = (job_meta.get("user_projektname") or "").strip()
+            claude_pname = expose_data.get("projekt_name", "")
+            print(f"[{job_id}] Projektname: claude={claude_pname!r}, user={user_pname!r}")
             if user_pname:
-                print(f"[{job_id}] Override projekt_name: '{expose_data.get('projekt_name','')}' → '{user_pname}'")
+                # Hauptfelder
                 expose_data["projekt_name"] = user_pname
                 expose_data["logo_initial"] = generate_logo_initial(user_pname)
+                # Felder die Claude evtl. mit dem alten Namen befüllt hat
+                # (Slogans, Headlines, Mentions im Text). Wir ersetzen auch im
+                # ganzen expose_data alle Vorkommen des alten Namens.
+                if claude_pname and claude_pname.strip() and claude_pname != user_pname:
+                    replaced_in = []
+                    for k, v in list(expose_data.items()):
+                        if isinstance(v, str) and claude_pname in v:
+                            expose_data[k] = v.replace(claude_pname, user_pname)
+                            replaced_in.append(k)
+                    if replaced_in:
+                        print(f"[{job_id}]   Projektname in {len(replaced_in)} Feldern ersetzt: {replaced_in[:8]}")
+                print(f"[{job_id}] ✓ Projektname final: {user_pname!r}")
         except Exception as e:
-            print(f"[{job_id}] User-Projektname-Override Fehler: {e}")
+            import traceback as _tbb
+            print(f"[{job_id}] Projektname-Override Fehler: {e}\n{_tbb.format_exc()[:300]}")
 
         _set(status="processing", phase="Präsentation wird erstellt …")
         print(f"[{job_id}] Schritt 4/6: fill_pptx …")
         tmpl_bytes = requests.get(TEMPLATE_URL, timeout=30).content
         print(f"[{job_id}] Template geladen: {len(tmpl_bytes)//1024} KB")
 
-        # ── Bbox-Map: erst WE-Typen duplizieren, dann bboxes extrahieren ──────
-        # So matchen die slide-Indices das gerenderte PDF (das ja auch die
-        # duplizierten WE-Slides enthält).
+        pptx_bytes = fill_pptx(tmpl_bytes, expose_data, customer_images=customer_images)
+        del tmpl_bytes
+        gc.collect()
+
+        # ── Bbox-Map aus der FINALEN PPTX extrahieren ────────────────────────
+        # {{BILD_*}}-Platzhalter, die fill_pptx NICHT mit Bildern befüllt hat,
+        # bleiben als Text-Platzhalter erhalten – genau die Slots, die der
+        # Kunde via Preview-UI mit eigenen Fotos befüllen soll.
+        # Slide-Indices stimmen 1:1 mit den gerenderten JPGs überein.
         try:
-            from pptx import Presentation as _Prs
-            prs_struct = _Prs(io.BytesIO(tmpl_bytes))
-            try:
-                duplicate_we_slides(prs_struct, expose_data)
-            except Exception as dup_err:
-                print(f"[{job_id}]   duplicate_we_slides für bbox: {dup_err}")
-            buf = io.BytesIO()
-            prs_struct.save(buf)
-            expanded_bytes = buf.getvalue()
-            del prs_struct, buf
-            bbox_map = extract_bild_placeholders(expanded_bytes)
-            del expanded_bytes
+            bbox_map = extract_bild_placeholders(pptx_bytes)
             n_placeholders = sum(len(s['placeholders']) for s in bbox_map['slides'])
-            print(f"[{job_id}] Bbox-Map: {n_placeholders} Platzhalter auf "
-                  f"{len(bbox_map['slides'])} Slides "
+            print(f"[{job_id}] Bbox-Map (finale PPTX): {n_placeholders} freie Slots "
+                  f"auf {len(bbox_map['slides'])} Slides "
                   f"(slide_dim={bbox_map.get('slide_w_emu')}x{bbox_map.get('slide_h_emu')})")
         except Exception as be:
             import traceback as _tb
             print(f"[{job_id}] Bbox-Extraktion Fehler: {be}\n{_tb.format_exc()[:500]}")
             bbox_map = {"slide_w_emu": 12192000, "slide_h_emu": 6858000, "slides": []}
-
-        pptx_bytes = fill_pptx(tmpl_bytes, expose_data, customer_images=customer_images)
-        del tmpl_bytes
-        gc.collect()
 
         projekt_name = expose_data.get("projekt_name", "Expose").replace(" ", "_")
 
@@ -3136,6 +3143,23 @@ def _run_expose_job(job_id, zip_paths):
             if slot.lower() not in already_filled:
                 already_filled.append(slot.lower())
 
+        # ── Flache Slot-Liste als Fallback (immer verfügbar, auch wenn bbox=0) ──
+        # Aus den freien BILD_*-Slots in der bbox_map – plus alle, die der Kunde
+        # noch ersetzen könnte. Nach Slide-Index gruppiert für die UI.
+        slot_list = []
+        for s in bbox_map.get("slides", []):
+            for ph in s.get("placeholders", []):
+                slot_list.append({
+                    "slot":     ph["slot"],
+                    "label":    ph.get("label", ph["slot"]),
+                    "slide":    s["index"] + 1,  # 1-based für UI
+                    "filled":   ph["slot"] in already_filled,
+                })
+        # Nur unbefüllte Slots, sortiert nach Slide-Index
+        slot_list = [s for s in slot_list if not s["filled"]]
+        slot_list.sort(key=lambda x: (x["slide"], x["slot"]))
+        print(f"[{job_id}] Slot-Liste (Upload-Kandidaten): {len(slot_list)} Slots")
+
         # ── Wenn keine Slide-JPGs gerendert werden konnten: kein Preview sinnvoll
         #     → direkt zu "done" mit dem PPTX (von Disk lesen)
         if not slide_jpgs:
@@ -3151,6 +3175,7 @@ def _run_expose_job(job_id, zip_paths):
             name=projekt_name,
             slide_jpgs=slide_jpgs,
             bbox_map=bbox_map,
+            slot_list=slot_list,
             already_filled=already_filled,
         )
         gc.collect()
@@ -3288,6 +3313,7 @@ def job_status(job_id):
             "name":           job.get("name", "Expose"),
             "slide_count":    len(job.get("slide_jpgs", []) or []),
             "bbox_map":       job.get("bbox_map", {}),
+            "slot_list":      job.get("slot_list", []),
             "already_filled": job.get("already_filled", []),
         })
     if status == "done":

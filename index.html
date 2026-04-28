@@ -515,6 +515,86 @@
     opacity: 0.85;
   }
 
+  /* Slot-Liste (Fallback wenn bbox=0 oder als alternative Auswahl) */
+  .slot-list-section {
+    margin-top: 1.5rem;
+    padding-top: 1.2rem;
+    border-top: 1px solid #1a2d45;
+  }
+  .slot-list-title {
+    color: #C8A96E;
+    font-size: 0.72rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    margin-bottom: 0.8rem;
+  }
+  .slot-list-hint {
+    color: #4a6080;
+    font-size: 0.72rem;
+    margin-bottom: 0.8rem;
+    line-height: 1.5;
+  }
+  .slot-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.5rem;
+    max-height: 30vh;
+    overflow-y: auto;
+    padding: 0 0.3rem 0.3rem 0;
+  }
+  .slot-grid::-webkit-scrollbar { width: 5px; }
+  .slot-grid::-webkit-scrollbar-thumb { background: #1e3450; border-radius: 3px; }
+
+  .slot-card {
+    background: rgba(13,27,46,0.5);
+    border: 1px solid #1e3450;
+    border-radius: 7px;
+    padding: 0.55rem 0.7rem;
+    cursor: pointer;
+    transition: all 0.15s;
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+  }
+  .slot-card:hover {
+    border-color: #C8A96E;
+    background: rgba(200,169,110,0.06);
+  }
+  .slot-card.uploaded {
+    border-color: #4caf50;
+    background: rgba(76,175,80,0.05);
+  }
+  .slot-card-thumb {
+    width: 36px; height: 36px;
+    border-radius: 5px;
+    object-fit: cover;
+    background: #08111e;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1rem;
+    color: #2a4060;
+  }
+  .slot-card-info {
+    flex: 1;
+    min-width: 0;
+  }
+  .slot-card-label {
+    color: #d4dbe6;
+    font-size: 0.74rem;
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .slot-card-meta {
+    color: #4a6080;
+    font-size: 0.66rem;
+    margin-top: 0.1rem;
+  }
+  .slot-card.uploaded .slot-card-label { color: #6dc28b; }
+
   .preview-actions {
     display: flex;
     gap: 0.8rem;
@@ -685,6 +765,14 @@
         <span><strong id="previewSlideCount">0</strong> Folien</span>
       </div>
       <div class="slide-list" id="slideList"></div>
+
+      <!-- Fallback / zusätzliche Liste aller Bild-Slots -->
+      <div class="slot-list-section" id="slotListSection" style="display:none">
+        <div class="slot-list-title">Alle Bild-Slots</div>
+        <div class="slot-list-hint">Klicke auf einen Slot, um eigene Fotos hochzuladen. Grün = bereits hochgeladen.</div>
+        <div class="slot-grid" id="slotGrid"></div>
+      </div>
+
       <div class="preview-actions">
         <button class="btn-secondary" id="skipPreviewBtn">Ohne Upload fortfahren</button>
         <button class="btn-primary-full" id="finalizeBtn">Finalisieren & Download</button>
@@ -1083,13 +1171,60 @@ function showPreview(job_id, data) {
 
   document.getElementById('previewSlideCount').textContent = data.slide_count || 0;
 
-  // Slot-Anzahl gesamt
-  let slotCount = 0;
-  (currentBboxMap.slides || []).forEach(s => slotCount += s.placeholders.length);
+  // Slot-Anzahl gesamt: bevorzugt aus slot_list, fallback bbox_map
+  const slotList = data.slot_list || [];
+  let slotCount = slotList.length;
+  if (slotCount === 0) {
+    (currentBboxMap.slides || []).forEach(s => slotCount += s.placeholders.length);
+  }
   document.getElementById('previewSlotCount').textContent = slotCount;
   document.getElementById('previewUploadCount').textContent = 0;
 
   renderSlideList(job_id, data.slide_count || 0, currentBboxMap, data.already_filled || []);
+  renderSlotList(slotList, data.already_filled || []);
+}
+
+// Slot-Liste als Karten-Grid (immer angezeigt, robust gegen bbox-Fehler)
+function renderSlotList(slotList, alreadyFilled) {
+  const grid    = document.getElementById('slotGrid');
+  const section = document.getElementById('slotListSection');
+  grid.innerHTML = '';
+
+  if (!slotList || slotList.length === 0) {
+    section.style.display = 'none';
+    return;
+  }
+  section.style.display = 'block';
+
+  slotList.forEach(item => {
+    const card = document.createElement('div');
+    card.className = 'slot-card';
+    card.dataset.slot = item.slot;
+
+    const thumb = document.createElement('div');
+    thumb.className = 'slot-card-thumb';
+    thumb.textContent = '🖼️';
+
+    const info = document.createElement('div');
+    info.className = 'slot-card-info';
+    const lbl = document.createElement('div');
+    lbl.className = 'slot-card-label';
+    lbl.textContent = item.label || item.slot;
+    const meta = document.createElement('div');
+    meta.className = 'slot-card-meta';
+    meta.textContent = item.slide ? `Folie ${item.slide}` : item.slot;
+    info.appendChild(lbl);
+    info.appendChild(meta);
+
+    card.appendChild(thumb);
+    card.appendChild(info);
+
+    card.addEventListener('click', () => {
+      activeUploadSlot = item.slot;
+      document.getElementById('slotFileInput').click();
+    });
+    grid.appendChild(card);
+  });
 }
 
 function renderSlideList(job_id, slideCount, bboxMap, alreadyFilled) {
@@ -1207,16 +1342,27 @@ document.getElementById('slotFileInput').addEventListener('change', async e => {
     userUploadedSlots.add(slot);
     document.getElementById('previewUploadCount').textContent = userUploadedSlots.size;
 
-    // Box als gefüllt markieren + Thumbnail einblenden
+    // Box auf Slide als gefüllt markieren + Thumbnail
+    const objURL = URL.createObjectURL(file);
     document.querySelectorAll(`.bbox[data-slot="${slot}"]`).forEach(box => {
       box.classList.add('filled');
-      // alte thumb entfernen
       const oldThumb = box.querySelector('img.uploaded-thumb');
       if (oldThumb) oldThumb.remove();
       const thumb = document.createElement('img');
       thumb.className = 'uploaded-thumb';
-      thumb.src = URL.createObjectURL(file);
+      thumb.src = objURL;
       box.insertBefore(thumb, box.firstChild);
+    });
+    // Slot-Card-Liste: ebenfalls als gefüllt markieren + Mini-Thumb
+    document.querySelectorAll(`.slot-card[data-slot="${slot}"]`).forEach(card => {
+      card.classList.add('uploaded');
+      const thumb = card.querySelector('.slot-card-thumb');
+      if (thumb) {
+        thumb.textContent = '';
+        thumb.style.backgroundImage = `url(${objURL})`;
+        thumb.style.backgroundSize  = 'cover';
+        thumb.style.backgroundPosition = 'center';
+      }
     });
   } catch (err) {
     alert(`Upload-Fehler: ${err.message}`);
