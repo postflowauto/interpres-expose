@@ -612,22 +612,14 @@ def extract_images_from_zip(zip_bytes):
 
 
 # Mapping: welche bild_* Slots können Kundenbilder aufnehmen (in Prioritätsreihenfolge)
+# Nur diese Kategorien werden automatisch klassifiziert. Alle Projekt-Fotos
+# (Außenansichten, Innenraum, Wohnungstypen, Grundrisse, Hotel-Feeling, Collagen)
+# sowie Amenity-Fotos bleiben LEER und werden vom Kunden via Preview-UI
+# hochgeladen – das verhindert falsche Auto-Zuweisungen wie Fahrradbilder
+# in einem Dachterrasse-Slot.
 CUSTOMER_IMAGE_SLOTS = {
-    "aussenansicht":  ["bild_titel", "bild_projekt_aussen", "bild_ansicht_1", "bild_ansicht_2",
-                       "bild_greenliving_1", "bild_greenliving_2"],
-    "grundriss":      ["bild_we_1", "bild_we_2", "bild_we_3", "bild_we_4",
-                       "bild_we_5", "bild_we_6", "bild_we_7", "bild_we_8",
-                       "bild_grundriss_1", "bild_grundriss_2", "bild_grundriss_3", "bild_grundriss_4",
-                       "bild_grundriss_intro_1", "bild_grundriss_intro_2", "bild_grundriss_intro_3"],
-    "innenansicht":   ["bild_interior", "bild_ausstattung_1", "bild_ausstattung_2", "bild_ausstattung_3",
-                       "bild_ausstattung_4", "bild_ausstattung_5", "bild_ausstattung_6",
-                       "bild_hotel_1", "bild_hotel_2"],
     "lageplan":       ["bild_lageplan"],
-    "quartier":       ["bild_quartier", "bild_stadt_gross", "bild_stadt_klein",
-                       "bild_standort_aussen", "bild_standort_innen"],
-    "amenity":        ["bild_amenity_1", "bild_amenity_2", "bild_amenity_3", "bild_amenity_4",
-                       "bild_amenity_5", "bild_amenity_6", "bild_amenity_7", "bild_amenity_8", "bild_amenity_9"],
-    "collage":        ["bild_collage_1", "bild_collage_2", "bild_collage_3", "bild_collage_4", "bild_collage_5"],
+    "quartier":       ["bild_quartier", "bild_stadt_gross", "bild_stadt_klein"],
 }
 
 
@@ -3021,32 +3013,64 @@ def _run_expose_job(job_id, zip_paths):
         expose_data = fill_image_placeholders(expose_data)
         gc.collect()
 
-        # ── User-Projektname (falls gesetzt) override Claude-Output ─────────
-        # Wirkt auf alle Felder, die Claude aus projekt_name ableitet.
+        # ── Kundennamen (Entwickler + Projekttitel) overriden Claude-Output ──
+        # Beide werden unabhängig voneinander angewendet:
+        #   entwickler_name  → ENTWICKLER_NAME (z.B. "SBB")
+        #   entwickler_name_gross → großgeschrieben
+        #   logo_initial     → erster Buchstabe des Entwicklernamens
+        #   projekt_titel    → PROJEKT_TITEL (z.B. "The Rothenseer – Modern …")
+        #   projekt_name     → kurzer Name aus Projekttitel (für Dateinamen etc.)
         try:
             job_meta = _read_job(job_id) or {}
-            user_pname = (job_meta.get("user_projektname") or "").strip()
-            claude_pname = expose_data.get("projekt_name", "")
-            print(f"[{job_id}] Projektname: claude={claude_pname!r}, user={user_pname!r}")
-            if user_pname:
-                # Hauptfelder
-                expose_data["projekt_name"] = user_pname
-                expose_data["logo_initial"] = generate_logo_initial(user_pname)
-                # Felder die Claude evtl. mit dem alten Namen befüllt hat
-                # (Slogans, Headlines, Mentions im Text). Wir ersetzen auch im
-                # ganzen expose_data alle Vorkommen des alten Namens.
-                if claude_pname and claude_pname.strip() and claude_pname != user_pname:
-                    replaced_in = []
+            user_entw = (job_meta.get("user_entwicklername") or "").strip()
+            user_titel = (job_meta.get("user_projekttitel")   or "").strip()
+            claude_entw  = expose_data.get("entwickler_name", "")
+            claude_titel = expose_data.get("projekt_titel",   "")
+            claude_pname = expose_data.get("projekt_name",    "")
+            print(f"[{job_id}] Namen: entw_claude={claude_entw!r} → user={user_entw!r} | "
+                  f"titel_claude={claude_titel!r} → user={user_titel!r}")
+
+            if user_entw:
+                expose_data["entwickler_name"]       = user_entw
+                expose_data["entwickler_name_gross"] = user_entw.upper()
+                expose_data["logo_initial"]          = generate_logo_initial(user_entw)
+                # Replace alle Vorkommen des alten Namens
+                if claude_entw and claude_entw != user_entw:
+                    n = 0
                     for k, v in list(expose_data.items()):
-                        if isinstance(v, str) and claude_pname in v:
-                            expose_data[k] = v.replace(claude_pname, user_pname)
-                            replaced_in.append(k)
-                    if replaced_in:
-                        print(f"[{job_id}]   Projektname in {len(replaced_in)} Feldern ersetzt: {replaced_in[:8]}")
-                print(f"[{job_id}] ✓ Projektname final: {user_pname!r}")
+                        if isinstance(v, str) and claude_entw in v and k not in (
+                                "entwickler_name", "entwickler_name_gross"):
+                            expose_data[k] = v.replace(claude_entw, user_entw)
+                            n += 1
+                    if n: print(f"[{job_id}]   Entwicklername in {n} Feldern ersetzt")
+
+            if user_titel:
+                expose_data["projekt_titel"] = user_titel
+                # projekt_name = erstes Komma/Bindestrich-Segment des Titels (für Dateinamen)
+                short = re.split(r'[–\-,:]', user_titel)[0].strip() or user_titel
+                expose_data["projekt_name"] = short
+                if claude_titel and claude_titel != user_titel:
+                    n = 0
+                    for k, v in list(expose_data.items()):
+                        if isinstance(v, str) and claude_titel in v and k != "projekt_titel":
+                            expose_data[k] = v.replace(claude_titel, user_titel)
+                            n += 1
+                    if n: print(f"[{job_id}]   Projekttitel in {n} Feldern ersetzt")
+                if claude_pname and claude_pname != short:
+                    n = 0
+                    for k, v in list(expose_data.items()):
+                        if isinstance(v, str) and claude_pname in v and k not in (
+                                "projekt_name", "projekt_titel"):
+                            expose_data[k] = v.replace(claude_pname, short)
+                            n += 1
+                    if n: print(f"[{job_id}]   Projektname-Kurz in {n} Feldern ersetzt")
+
+            print(f"[{job_id}] ✓ Final: entwickler={expose_data.get('entwickler_name')!r}, "
+                  f"projekt_titel={expose_data.get('projekt_titel')!r}, "
+                  f"projekt_name={expose_data.get('projekt_name')!r}")
         except Exception as e:
             import traceback as _tbb
-            print(f"[{job_id}] Projektname-Override Fehler: {e}\n{_tbb.format_exc()[:300]}")
+            print(f"[{job_id}] Namen-Override Fehler: {e}\n{_tbb.format_exc()[:300]}")
 
         _set(status="processing", phase="Präsentation wird erstellt …")
         print(f"[{job_id}] Schritt 4/6: fill_pptx …")
@@ -3262,10 +3286,15 @@ def generate_expose():
         if saved_direct:
             print(f"[{job_id}] {saved_direct} direkte Projektfotos gespeichert")
 
-        # ── Optionaler Projektname vom Kunden (überschreibt Claude-Output) ──
-        user_projektname = (request.form.get("projektname") or "").strip()
-        if user_projektname:
-            print(f"[{job_id}] Kunden-Projektname: {user_projektname!r}")
+        # ── Optionale Kundennamen (überschreiben Claude-Output) ──────────────
+        user_entwicklername = (request.form.get("entwicklername") or "").strip()
+        user_projekttitel   = (request.form.get("projekttitel")   or "").strip()
+        # Kompatibilität: alter 'projektname' Parameter mappt auf Projekttitel
+        if not user_projekttitel:
+            user_projekttitel = (request.form.get("projektname") or "").strip()
+        if user_entwicklername or user_projekttitel:
+            print(f"[{job_id}] Kunden-Namen: entwickler={user_entwicklername!r}, "
+                  f"titel={user_projekttitel!r}")
 
         _write_job(job_id,
                    status="processing",
@@ -3274,7 +3303,8 @@ def generate_expose():
                    pdf_path=None,
                    name=None,
                    error=None,
-                   user_projektname=user_projektname)
+                   user_entwicklername=user_entwicklername,
+                   user_projekttitel=user_projekttitel)
 
         t = _threading.Thread(
             target=_run_expose_job,

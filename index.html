@@ -679,14 +679,22 @@
     <div class="card-body" id="uploadPanel">
       <p class="card-hint">Lade den Projektdatenraum hoch. Claude analysiert alle Unterlagen und erstellt das Exposé automatisch.</p>
 
-      <!-- Projektname -->
+      <!-- Entwicklername + Projekttitel -->
       <div class="name-input-section">
-        <label class="name-input-label" for="projektnameInput">
-          Projektname <span>(optional – sonst aus den Unterlagen abgeleitet)</span>
+        <label class="name-input-label" for="entwicklernameInput">
+          Entwicklername <span>(z.B. SBB, Urban Units, Quartier 27)</span>
         </label>
-        <input type="text" id="projektnameInput" class="name-input"
-               placeholder="z.B. The Rothenseer, Stadtquartier Linden …"
-               maxlength="60">
+        <input type="text" id="entwicklernameInput" class="name-input"
+               placeholder="Kurzer Marken-/Firmenname …"
+               maxlength="40">
+      </div>
+      <div class="name-input-section">
+        <label class="name-input-label" for="projekttitelInput">
+          Projekttitel <span>(z.B. The Rothenseer – Moderne Apartments)</span>
+        </label>
+        <input type="text" id="projekttitelInput" class="name-input"
+               placeholder="Vollständiger Projekttitel …"
+               maxlength="80">
       </div>
 
       <div class="drop-zone" id="dropZone">
@@ -1049,9 +1057,11 @@ generateBtn.addEventListener('click', async () => {
     // ── Projektfotos anhängen (immer direkt, nie chunked) ────────────────────
     selectedImages.forEach(img => formData.append('images', img, img.name));
 
-    // ── Projektname (optional, sonst aus PDFs abgeleitet) ────────────────────
-    const projektname = (document.getElementById('projektnameInput').value || '').trim();
-    if (projektname) formData.append('projektname', projektname);
+    // ── Entwicklername + Projekttitel (beide optional) ──────────────────────
+    const entwicklername = (document.getElementById('entwicklernameInput').value || '').trim();
+    const projekttitel   = (document.getElementById('projekttitelInput').value   || '').trim();
+    if (entwicklername) formData.append('entwicklername', entwicklername);
+    if (projekttitel)   formData.append('projekttitel',   projekttitel);
 
     // ── Phase 3: Job starten ─────────────────────────────────────────────────
     setStep(3);
