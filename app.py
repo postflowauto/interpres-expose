@@ -987,20 +987,29 @@ def _find_validated_amenity_image(query, expected_subject_de, max_tries=4):
 
 
 def fetch_unsplash_image(query):
-    """Holt Bild-URL von Unsplash. Bei fehlendem/ungültigem Key → Picsum-Fallback."""
+    """Holt Bild-URL von Unsplash via /search/photos (relevanteste Treffer).
+    Vorher: /photos/random → unzuverlässig (lieferte oft unrelated photos).
+    Bei fehlendem Key oder 0 Treffern → Picsum-Fallback.
+    """
     if UNSPLASH_ACCESS_KEY:
         try:
             resp = requests.get(
-                "https://api.unsplash.com/photos/random",
-                params={"query": query, "orientation": "landscape"},
+                "https://api.unsplash.com/search/photos",
+                params={"query": query, "orientation": "landscape", "per_page": 5},
                 headers={"Authorization": f"Client-ID {UNSPLASH_ACCESS_KEY}"},
                 timeout=10
             )
-            print(f"  Unsplash [{resp.status_code}] query={query!r}")
+            print(f"  Unsplash [{resp.status_code}] search={query!r}")
             if resp.status_code == 200:
-                url = resp.json()["urls"]["regular"]
-                print(f"    → {url[:80]}")
-                return url
+                results = resp.json().get("results", [])
+                if not results:
+                    print(f"    → 0 Treffer")
+                else:
+                    # Top-Treffer (relevanteste Match)
+                    url = results[0]["urls"]["regular"]
+                    alt = (results[0].get("alt_description") or "")[:60]
+                    print(f"    → '{alt}' / {url[:60]}")
+                    return url
             else:
                 print(f"    Fehler-Body: {resp.text[:120]}")
         except Exception as e:
@@ -1170,24 +1179,27 @@ def fill_image_placeholders(data):
             continue
         if not amenity_val:
             continue
-        # Suchbegriff matchen
-        unsplash_q = None
+        # Mehrere Suchbegriffe versuchen: erst gemapptes Keyword, dann amenity_val
+        # selbst, dann generisch. Erstes Treffer gewinnt.
+        candidates = []
         for kw, q in _AMENITY_UNSPLASH:
             if kw in amenity_val:
-                unsplash_q = q
+                candidates.append(q)
                 break
-        if not unsplash_q:
-            # Generischer Fallback: amenity_val ins Englische übersetzt geht meist nicht,
-            # also einfach modern apartment + amenity_val nehmen
-            unsplash_q = f"modern apartment {amenity_val} amenity"
-        # 1. Unsplash (primär)
-        url = fetch_unsplash_image(unsplash_q)
-        # fetch_unsplash_image fällt auf Picsum zurück – das wollen wir hier NICHT
-        if url and "picsum.photos" in url:
-            url = None
-        # 2. Wikimedia als Fallback
+        # IMMER auch amenity_val selbst probieren (oft schon English-tauglich)
+        candidates.append(f"{amenity_val} modern interior")
+        candidates.append(f"modern apartment {amenity_val.split()[0] if amenity_val else 'amenity'}")
+
+        url = None
+        for q in candidates:
+            url = fetch_unsplash_image(q)
+            if url and "picsum.photos" in url:
+                url = None
+                continue
+            if url:
+                break
         if not url:
-            url = _fetch_wikimedia_image(unsplash_q.split()[0] + " " + (amenity_val.split()[0] if amenity_val else ""))
+            url = _fetch_wikimedia_image(amenity_val + " modern")
         if url:
             data[bild_key] = url
             amenity_filled += 1
@@ -1647,18 +1659,18 @@ def generate_expose_with_claude(projektdaten, city_context=""):
         "text_nachhaltig_1/2/3/4: max 100 Zeichen pro Eintrag\n"
         "text_standort_1/2: ZIEL 180-260 Zeichen pro Eintrag\n"
         "text_projekt_nachhaltig_1/2: ZIEL 180-240 Zeichen\n"
-        "text_stadt_intro: ZIEL 280-360 Zeichen – Hauptstadt-Pitch wie DQN-Seite 23\n"
-        "text_stadt_wachstum_1: ZIEL 280-340 Zeichen – Branchenüberblick mit echten Firmennamen\n"
-        "text_stadt_wachstum_2: ZIEL 200-260 Zeichen – konkrete Projekte/Investitionssummen\n"
-        "text_stadt_wirtschaft_links: ZIEL 240-300 Zeichen – Sektor 1 (z.B. Tech/Industrie) detailliert\n"
-        "text_stadt_wirtschaft_rechts: ZIEL 240-300 Zeichen – Sektor 2 (z.B. Logistik/Hafen) detailliert\n"
-        "text_stadt_invest_detail: ZIEL 220-280 Zeichen – DETAIL zur Großinvestition (Firma + Summe + Kontext)\n"
-        "text_einwohner_detail: ZIEL 140-180 Zeichen – Detail zur Einwohnerzahl + Quelle/Trend\n"
-        "text_bip_detail: ZIEL 140-180 Zeichen – BIP-Entwicklung, % Veränderung, Bundesland-Vergleich\n"
-        "text_mietsteigerung_detail: ZIEL 100-160 Zeichen – Mietpreis-Tendenz seit 2017\n"
-        "text_studierende_detail: ZIEL 80-140 Zeichen – Hochschulen, Fachgebiete\n"
-        "text_stadt_stat_N_detail: ZIEL 130-180 Zeichen pro Stat\n"
-        "text_stadt_branche_1/2: ZIEL 240-320 Zeichen pro Branche – mit Firmennamen + Projekten\n"
+        "text_stadt_intro: max 220 Zeichen – Hauptstadt-Pitch in 2 Sätzen, NICHT überlaufen\n"
+        "text_stadt_wachstum_1: max 200 Zeichen – Branchenüberblick mit Firmennamen\n"
+        "text_stadt_wachstum_2: max 160 Zeichen – konkrete Projekte/Investitionssummen\n"
+        "text_stadt_wirtschaft_links: max 200 Zeichen – Sektor 1 detailliert, KOMPAKT\n"
+        "text_stadt_wirtschaft_rechts: max 200 Zeichen – Sektor 2 detailliert, KOMPAKT\n"
+        "text_stadt_invest_detail: max 180 Zeichen – DETAIL zur Großinvestition\n"
+        "text_einwohner_detail: max 130 Zeichen – Detail zur Einwohnerzahl\n"
+        "text_bip_detail: max 130 Zeichen – BIP-Entwicklung, % Veränderung\n"
+        "text_mietsteigerung_detail: max 110 Zeichen – Mietpreis-Tendenz\n"
+        "text_studierende_detail: max 110 Zeichen – Hochschulen, Fachgebiete\n"
+        "text_stadt_stat_N_detail: max 130 Zeichen pro Stat\n"
+        "text_stadt_branche_1/2: max 220 Zeichen pro Branche\n"
         "feature_N_label: max 28 Zeichen\n"
         "amenity_N: max 28 Zeichen\n"
         "we_typ_beschreibung_N: max 180 Zeichen\n"
@@ -2056,21 +2068,22 @@ def fill_pptx(template_bytes, data, customer_images=None):
     bild_keys_with_url = [k for k in bild_keys_total
                           if isinstance(data[k], str) and data[k].startswith("http")
                           and k not in image_data]
-    # Max 25 Hintergrundbilder laden (RAM-Limit: 25×400KB=~10MB)
-    # Priorität: Titelbilder > Außen > Stadt > Ausstattung > Rest
-    _PRIO_PREFIXES = ["bild_titel", "bild_projekt", "bild_quartier", "bild_greenliving",
-                      "bild_interior", "bild_ausstattung", "bild_stadt", "bild_lageplan",
+    # Priorität: Stadt-Bilder zuerst (sonst gehen sie verloren), dann Amenities,
+    # dann Picsum-Fallbacks. Mit Disk-Streaming + 1MB-Limit pro Bild ist 25 OK.
+    _PRIO_PREFIXES = ["bild_stadt", "bild_quartier", "bild_lageplan",
+                      "bild_amenity",
+                      "bild_titel", "bild_projekt", "bild_greenliving",
+                      "bild_interior", "bild_ausstattung",
                       "bild_ansicht", "bild_standort", "bild_grundriss_intro",
-                      "bild_we_1", "bild_we_2", "bild_amenity", "bild_collage",
+                      "bild_we_1", "bild_we_2", "bild_collage",
                       "bild_hotel", "bild_rechtlich"]
     def _sort_key(k):
         for i, prefix in enumerate(_PRIO_PREFIXES):
             if k.startswith(prefix):
                 return i
         return 99
-    # RAM-Limit verschärft: max 12 Wikimedia/Picsum-Bilder gleichzeitig
-    # (12 × ~400KB = ~5 MB statt vorher 25 × ~400KB = ~10 MB)
-    bild_keys_with_url_sorted = sorted(bild_keys_with_url, key=_sort_key)[:12]
+    # Cap auf 25 (max 1 MB pro Bild → max ~15 MB Spitze, verkraftbar)
+    bild_keys_with_url_sorted = sorted(bild_keys_with_url, key=_sort_key)[:25]
     print(f"fill_pptx: {len(bild_keys_total)} bild_* Keys, "
           f"{len(bild_keys_with_url)} URLs, lade {len(bild_keys_with_url_sorted)} (RAM-Limit)")
 
