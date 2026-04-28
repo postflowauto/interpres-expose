@@ -632,26 +632,21 @@ def classify_and_assign_customer_images(images):
     if not images:
         return {}
 
-    # Regelbasierter Fallback (anhand Dateiname)
+    # Regelbasierter Fallback (anhand Dateiname). Nutzt nur Kategorien, die
+    # tatsächlich in CUSTOMER_IMAGE_SLOTS existieren – alles andere ignoriert.
     def _rule_based(images):
         slot_counters = {cat: 0 for cat in CUSTOMER_IMAGE_SLOTS}
         result = {}
         for img in images:
             name_lower = img['name'].lower()
-            if any(k in name_lower for k in ('grundriss', 'floor', 'plan', 'gr_')):
-                cat = 'grundriss'
-            elif any(k in name_lower for k in ('lageplan', 'lage', 'map', 'karte')):
+            cat = None
+            if any(k in name_lower for k in ('lageplan', 'lage', 'map', 'karte', 'site-plan')):
                 cat = 'lageplan'
-            elif any(k in name_lower for k in ('aussen', 'außen', 'exterior', 'fassade', 'ansicht')):
-                cat = 'aussenansicht'
-            elif any(k in name_lower for k in ('innen', 'interior', 'zimmer', 'küche', 'bad', 'wohn')):
-                cat = 'innenansicht'
-            elif any(k in name_lower for k in ('quartier', 'strasse', 'straße', 'stadt', 'neighborhood')):
+            elif any(k in name_lower for k in ('quartier', 'strasse', 'straße', 'stadt', 'neighborhood', 'umgebung')):
                 cat = 'quartier'
-            elif any(k in name_lower for k in ('amenity', 'bike', 'solar', 'gym', 'garten', 'dach')):
-                cat = 'amenity'
-            else:
-                cat = 'aussenansicht'  # Standard-Fallback
+            # Alle anderen Bilder: kein Auto-Mapping (User lädt sie via Preview hoch)
+            if cat is None or cat not in CUSTOMER_IMAGE_SLOTS:
+                continue
             slots = CUSTOMER_IMAGE_SLOTS[cat]
             idx = slot_counters[cat]
             if idx < len(slots):
@@ -672,18 +667,16 @@ def classify_and_assign_customer_images(images):
         for cat, slots in CUSTOMER_IMAGE_SLOTS.items()
     )
     classify_prompt = (
-        "Analysiere diese Immobilien-Bilder und weise jedem Bild EINE passende Kategorie zu.\n\n"
+        "Analysiere diese Immobilien-Bilder und weise jedem Bild EINE passende Kategorie zu, "
+        "ODER 'skip' wenn keine Kategorie passt.\n\n"
         "Kategorien:\n" + slot_list + "\n\n"
         "STRENGE REGELN:\n"
-        "- grundriss: NUR Grundriss-Zeichnungen mit Raumaufteilung/Wänden/Maßen (technische Zeichnung)\n"
-        "- lageplan: NUR Karten/Stadtpläne/Lagepläne (Vogelperspektive auf Stadt/Quartier)\n"
-        "- aussenansicht: Gebäude-Außenfotos, Fassade, Architektur, Rendering von außen\n"
-        "- innenansicht: Innenräume, Wohnung, Möbel, Küche, Bad, Visualisierungen von innen\n"
-        "- quartier: Straßen, Stadtteile, Nachbarschaft, urbane Umgebung\n"
-        "- amenity: Einzelne Features (Fahrrad, Solar, Gym, Garten, Aufzug, Concierge)\n"
-        "- collage: Logos, Schemata, Diagramme, dekorative Grafiken (NIEMALS Fotos hier!)\n\n"
+        "- lageplan: NUR Karten/Stadtpläne/Lagepläne (Vogelperspektive auf Stadt/Quartier mit Markierungen)\n"
+        "- quartier: Straßen, Stadtteile, Nachbarschaft, urbane Umgebung mit Stadtcharakter\n"
+        "- skip: Alles andere (Renderings, Innenräume, Grundrisse, Fahrradbilder, "
+        "Logos, etc.) – diese Bilder werden vom Nutzer manuell zugewiesen.\n\n"
         "Antworte NUR mit JSON: {\"1\": \"kategorie\", \"2\": \"kategorie\", ...}\n"
-        "Jedes Bild bekommt genau EINE Kategorie. Keine Erklärungen."
+        "Jedes Bild bekommt genau EINE Kategorie oder 'skip'. Keine Erklärungen."
     )
 
     all_assignments = {}  # global_idx → category
@@ -724,10 +717,10 @@ def classify_and_assign_customer_images(images):
             print(f"  Batch {batch_start//BATCH_SIZE + 1}: {len(batch_assignments)} Bilder klassifiziert")
         except Exception as e:
             print(f"  Batch {batch_start//BATCH_SIZE + 1} Claude-Fehler: {e}")
-            # Fallback nur für diesen Batch
+            # Fallback: keine Auto-Zuweisung für diesen Batch
             for i, img in enumerate(batch):
                 if (batch_start + i) not in all_assignments:
-                    all_assignments[batch_start + i] = 'aussenansicht'
+                    all_assignments[batch_start + i] = 'skip'
 
     if not all_assignments:
         print("classify_customer_images: keine Klassifizierung → regelbasierter Fallback")
@@ -736,9 +729,10 @@ def classify_and_assign_customer_images(images):
     # Sortiere Bilder pro Kategorie nach Größe (größte zuerst → wichtigste Slots)
     by_category = {cat: [] for cat in CUSTOMER_IMAGE_SLOTS}
     for global_idx, cat in all_assignments.items():
-        cat = cat.strip().lower()
+        cat = cat.strip().lower() if isinstance(cat, str) else ''
+        # Unbekannte oder 'skip'-Kategorien werden nicht zugewiesen
         if cat not in CUSTOMER_IMAGE_SLOTS:
-            cat = 'aussenansicht'
+            continue
         by_category[cat].append((all_images[global_idx]['size'], global_idx))
 
     # Innerhalb jeder Kategorie: größte zuerst
