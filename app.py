@@ -48,7 +48,7 @@ CLOUDCONVERT_KEY = os.environ.get("CLOUDCONVERT_KEY", "")
 UNSPLASH_ACCESS_KEY = os.environ.get("UNSPLASH_ACCESS_KEY", "")
 TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY", "")
 TEST_MODE = os.environ.get("TEST_MODE", "false").lower() == "true"
-TEMPLATE_URL = "https://raw.githubusercontent.com/postflowauto/interpres-expose/main/urbanunits_Marketing_Expose_v3.pdf-20.pptx"
+TEMPLATE_URL = "https://raw.githubusercontent.com/postflowauto/interpres-expose/main/urbanunits_Marketing_Expose_v3.pdf-19.pptx"
 
 # Dummy-Daten für TEST_MODE (kein Claude-API-Call)
 DUMMY_PROJEKTDATEN = {
@@ -339,9 +339,16 @@ PLATZHALTER = {
     "bildung_2_name": "Grundschule", "min_bildung_2": "8",
     "bildung_3_name": "Gymnasium",   "min_bildung_3": "10",
     "bildung_4_name": "Universität", "min_bildung_4": "15",
-    # ── WE-Typen ──────────────────────────────────────────────────────────────
-    "we_beispiel_1": "", "we_nummern_1": "",
-    "we_beispiel_2": "", "we_nummern_2": "",
+    # ── WE-Typen (v19-Schema: 1 Typ pro Slide, 2 Beispiel-WEs pro Slide) ─────
+    # Geteilte Felder pro Typ (LINKE und RECHTE Spalte zeigen denselben Typ):
+    "we_flaeche_1": "", "we_flaeche_2": "", "we_flaeche_3": "",
+    "we_flaeche_4": "", "we_flaeche_5": "",
+    "we_typ_beschreibung": "",
+    # Per-Spalte Felder (LINKES und RECHTES Beispiel-WE):
+    "we_beispiel_1": "", "we_bereich_1": "",
+    "we_beispiel_2": "", "we_bereich_2": "",
+    # Backwards-Compat (v20-Schema, falls altes Template gewählt wird):
+    "we_nummern_1": "", "we_nummern_2": "",
     "we_raum_1_name_1": "", "we_raum_2_name_1": "", "we_raum_3_name_1": "",
     "we_raum_4_name_1": "", "we_raum_5_name_1": "",
     "we_flaeche_1_1": "", "we_flaeche_2_1": "", "we_flaeche_3_1": "",
@@ -352,6 +359,13 @@ PLATZHALTER = {
     "we_flaeche_1_2": "", "we_flaeche_2_2": "", "we_flaeche_3_2": "",
     "we_flaeche_4_2": "", "we_flaeche_5_2": "",
     "we_typ_beschreibung_2": "",
+    # v19: Beispiel-WEs für Typ 2..8 (jeder Typ = 1 Slide mit 2 Beispielen)
+    **{f"we_flaeche_{n}_typ{t}": "" for t in range(2, 9) for n in range(1, 6)},
+    **{f"we_typ_beschreibung_typ{t}": "" for t in range(2, 9)},
+    "we_bereich_3": "", "we_bereich_4": "",
+    "we_bereich_5": "", "we_bereich_6": "",
+    "we_bereich_7": "", "we_bereich_8": "",
+    # v20-Backwards
     "we_beispiel_3": "", "we_nummern_3": "",
     "we_beispiel_4": "", "we_nummern_4": "",
     "we_raum_1_name_3": "", "we_raum_2_name_3": "", "we_raum_3_name_3": "",
@@ -376,6 +390,7 @@ PLATZHALTER = {
     "we_flaeche_1_6": "", "we_flaeche_2_6": "", "we_flaeche_3_6": "",
     "we_flaeche_4_6": "", "we_flaeche_5_6": "",
     "we_typ_beschreibung_6": "",
+    "we_beispiel_7": "", "we_beispiel_8": "",
     "feature_1_zahl": "", "feature_1_label": "",
     "feature_2_zahl": "100", "feature_2_label": "Prozent möbliert",
     "feature_3_zahl": "24", "feature_3_label": "Stunden Zugang per Smart-Lock-System",
@@ -1774,20 +1789,14 @@ def generate_expose_with_claude(projektdaten, city_context=""):
         f"zu Fuß), nimm es NICHT (lieber näheres Highlight wählen). Format: nur Zahl, z.B. '8'\n"
         f"  Faustregel: Fuß-Minuten = (km × 12), Fahrrad = (km × 4)\n\n"
 
-        f"## WOHNUNGSTYPEN (aus WFL-Berechnung und Grundrissen):\n"
-        f"Analysiere alle WFL-Berechnungs-PDFs und Grundrisse. Das Template zeigt pro Slide ZWEI WE-Typen nebeneinander.\n"
-        f"JEDE Seite (links und rechts) hat EIGENE Raumnamen und Flächen.\n\n"
+        f"## WOHNUNGSTYPEN (Template v19 – 1 Typ pro Slide, 2 Beispiel-WEs nebeneinander):\n"
+        f"Analysiere alle WFL-Berechnungs-PDFs und Grundrisse.\n"
+        f"WICHTIG: Pro Wohnungstyp wird EIN Slide erzeugt. Die zwei Spalten links/rechts auf jedem\n"
+        f"Slide zeigen ZWEI Beispiel-WEs DESSELBEN Typs (z.B. links 'WE 02', rechts 'WE 09' –\n"
+        f"beide Studios mit gleicher Aufteilung). Beide Seiten teilen sich Raumflächen + Beschreibung.\n\n"
         f"Flächen-Format: '23,99 m²' (Komma, immer mit ' m²'). Lies echte Werte aus den WFL-PDFs!\n"
-        f"we_flaeche_5_N = Gesamtfläche der Wohnung (Wohnfläche total)\n\n"
-        f"⚠️ ALLE 5 RAUMZEILEN MÜSSEN BEFÜLLT SEIN (sonst leere Zeilen im Template):\n"
-        f"- 1-Zimmer-Studio: we_raum_1_name='Wohnen/Kochen', we_raum_2_name='Bad', "
-        f"we_raum_3_name='Flur', we_raum_4_name='Balkon' oder 'Loggia' oder 'Terrasse', "
-        f"we_raum_5_name='Gesamt' (mit Gesamtfläche)\n"
-        f"- 2-Zimmer-Wohnung: we_raum_1='Wohnen/Kochen', we_raum_2='Schlafen', "
-        f"we_raum_3='Bad', we_raum_4='Balkon'/'Terrasse', we_raum_5='Gesamt'\n"
-        f"NIEMALS we_raum_4_name leer lassen – wenn kein Außenbereich, dann 'Abstellraum' "
-        f"oder 'Diele'. Die Zeile darf nicht leer bleiben.\n\n"
-        f"⚠️ we_typ_beschreibung_N: SEHR KURZ im DQN-Stil!\n"
+        f"we_flaeche_5 = Gesamtfläche der Wohnung (Wohnfläche total)\n\n"
+        f"⚠️ we_typ_beschreibung: SEHR KURZ im DQN-Stil!\n"
         f"NUR 1 Zeile, max 50 Zeichen. Stil:\n"
         f"  '1-Zimmer-Wohnung mit Balkon, Barrierefrei'\n"
         f"  '2-Zimmer-Wohnung mit Terrasse, Bad rechts'\n"
@@ -1795,20 +1804,30 @@ def generate_expose_with_claude(projektdaten, city_context=""):
         f"NICHT: 'Kompaktes EG-Apartment mit 23,34 m² – klarer Grundriss mit offenem...'\n"
         f"Nur Zimmeranzahl + Hauptfeature + Besonderheit. KEINE Quadratmeter im Text "
         f"(stehen schon in der Tabelle), KEINE Werbephrasen wie 'renditestark', 'modern'.\n\n"
-        f"Feldnamen pro WE-Paar (Paar 1 = linke/rechte Seite mit Suffix _1/_2):\n"
-        f"LINKE SEITE (Suffix _1):\n"
-        f"- we_beispiel_1: WE-Bezeichnung z.B. 'WE 02'\n"
-        f"- we_nummern_1: Kommaliste aller WE-Nummern dieses Typs, z.B. 'WE 01, WE 02, WE 09'\n"
-        f"- we_raum_1_name_1 bis we_raum_5_name_1: Raumnamen (alle 5 Plätze MÜSSEN befüllt sein)\n"
-        f"- we_flaeche_1_1 bis we_flaeche_5_1: Raumflächen in der Reihenfolge der Raumnamen\n"
-        f"- we_typ_beschreibung_1: KURZ, max 50 Zeichen, 1 Zeile (siehe Beispiele oben)\n"
-        f"RECHTE SEITE (Suffix _2):\n"
-        f"- we_beispiel_2, we_nummern_2, we_raum_1_name_2..we_raum_5_name_2\n"
-        f"- we_flaeche_1_2..we_flaeche_5_2, we_typ_beschreibung_2\n\n"
-        f"Paar 1 (immer): Typen 1+2 → Suffix _1/_2\n"
-        f"Paar 2 (wenn ≥2 Typen): we_beispiel_3, we_nummern_3, we_raum_*_name_3, we_flaeche_*_3,\n"
-        f"  we_typ_beschreibung_3 (linke Seite) und _4 (rechte Seite). Leer wenn nicht vorhanden.\n"
-        f"Paar 3 (wenn ≥3 Typen): Suffix _5/_6 analog.\n\n"
+
+        f"### TYP 1 (immer befüllt, Slide 1):\n"
+        f"- we_beispiel_1: WE-Nummer des LINKEN Beispiels, z.B. 'WE 02'\n"
+        f"- we_beispiel_2: WE-Nummer des RECHTEN Beispiels (gleicher Typ!), z.B. 'WE 09'\n"
+        f"- we_bereich_1: Beschreibung links, z.B. 'EG, 23,34 m²' oder '1-Zi., Balkon'\n"
+        f"- we_bereich_2: Beschreibung rechts, z.B. 'OG, 23,34 m²'\n"
+        f"- we_flaeche_1 bis we_flaeche_5: Raumflächen (geteilt – beide Spalten zeigen dasselbe!)\n"
+        f"  Reihenfolge entspricht Template: Wohnen/Kochen, Schlafen, Bad, Abstellraum, Balkon (oder Gesamt für 5)\n"
+        f"- we_typ_beschreibung: KURZ, max 50 Zeichen (siehe Beispiele oben)\n\n"
+
+        f"### TYP 2 (wenn ≥2 Wohnungstypen) – wird auf neuem dupliziertem Slide angezeigt:\n"
+        f"- we_beispiel_3 / we_beispiel_4: Zwei Beispiel-WEs des Typ 2\n"
+        f"- we_bereich_3 / we_bereich_4\n"
+        f"- we_flaeche_1_typ2 bis we_flaeche_5_typ2: Raumflächen für Typ 2\n"
+        f"- we_typ_beschreibung_typ2\n\n"
+
+        f"### TYP 3 (wenn ≥3 Typen): Suffix _typ3 analog. TYP 4: _typ4. Etc bis TYP 8.\n"
+        f"Felder leer lassen ('') wenn dieser Typ nicht existiert.\n\n"
+
+        f"Beispiel für 4 WE-Typen:\n"
+        f"- Typ 1 (Studio EG): we_beispiel_1='WE 01', we_beispiel_2='WE 09'\n"
+        f"- Typ 2 (Studio OG): we_beispiel_3='WE 02', we_beispiel_4='WE 10'\n"
+        f"- Typ 3 (2-Zi EG):   we_beispiel_5='WE 03', we_beispiel_6='WE 11'\n"
+        f"- Typ 4 (2-Zi OG):   we_beispiel_7='WE 04', we_beispiel_8='WE 12'\n\n"
 
         + (
         f"## AKTUELLE RECHERCHE FÜR {stadt.upper()} (Web-Suche heute, Stand 2024/2025):\n"
@@ -2006,27 +2025,33 @@ def duplicate_slide(prs, slide_index):
 
 def duplicate_we_slides(prs, data):
     """
-    Dynamisch: Originale Slide hat Typen 1+2 (a/b).
-    Für jedes weitere befüllte Typ-Paar (3+4, 5+6, 7+8, ...) wird ein Duplikat erstellt.
-    Unterstützt beliebig viele WE-Typen (nicht nur bis f).
-    Dupliziert nur wenn TEXT-Keys (we_beispiel_N / we_nummern_N) befüllt sind —
-    Bild-URLs allein triggern keine Duplikation.
+    v19-Modell: 1 Wohnungstyp pro Slide (mit 2 Beispiel-WEs nebeneinander).
+    Original-Slide zeigt Typ 1 (we_beispiel_1, we_beispiel_2, we_flaeche_*, we_typ_beschreibung).
+    Für jeden weiteren Typ (typ2..typ8) wird ein Slide-Duplikat erstellt.
+
+    Dupliziert nur wenn TEXT-Keys für diesen Typ befüllt sind
+    (we_beispiel_3/_5/_7/... oder we_flaeche_*_typ2/typ3/...).
     """
     from pptx.oxml import parse_xml
     import string
 
-    # Ermittle Anzahl extra Slides dynamisch:
-    # Pair 1 (original): types 1+2, Pair 2: 3+4, Pair 3: 5+6, ...
-    # extra_slides = Anzahl der befüllten Paare ab Pair 2
+    # Ermittle Anzahl extra Typen dynamisch:
+    # Typ 1 (original): we_beispiel_1/_2 + we_flaeche_*
+    # Typ 2: we_beispiel_3/_4 + we_flaeche_*_typ2
+    # Typ N: we_beispiel_(2N-1)/_(2N) + we_flaeche_*_typN
     extra_slides = 0
-    pair = 2
-    while True:
-        left_n  = pair * 2 - 1   # 3, 5, 7, 9, ...
-        right_n = pair * 2        # 4, 6, 8, 10, ...
-        if data.get(f"we_beispiel_{left_n}") or data.get(f"we_nummern_{left_n}") \
-                or data.get(f"we_beispiel_{right_n}") or data.get(f"we_nummern_{right_n}"):
+    typ = 2
+    while typ <= 8:
+        left_n  = typ * 2 - 1
+        right_n = typ * 2
+        has_data = (
+            data.get(f"we_beispiel_{left_n}") or data.get(f"we_beispiel_{right_n}")
+            or data.get(f"we_typ_beschreibung_typ{typ}")
+            or any(data.get(f"we_flaeche_{n}_typ{typ}") for n in range(1, 6))
+        )
+        if has_data:
             extra_slides += 1
-            pair += 1
+            typ += 1
         else:
             break
 
@@ -2096,43 +2121,47 @@ def duplicate_we_slides(prs, data):
     # Original-XML VOR jeglicher Modifikation speichern
     orig_xml = etree.tostring(prs.slides[we_idx].shapes._spTree, encoding="unicode")
 
+    def _fix_we_letters_single(xml_str, letter):
+        """v19: BEIDE 'a'-Buchstaben (links + rechts) zeigen DENSELBEN Typ-Letter."""
+        return xml_str.replace('<a:t>a</a:t>', f'<a:t>{letter}</a:t>')
+
     # Duplikate in UMGEKEHRTER Reihenfolge erstellen:
     # Jedes neue Slide wird bei we_idx+1 eingefügt → vorherige rücken vor
-    # → Endergebnis: Pair2 bei we_idx+1, Pair3 bei we_idx+2, ...
+    # → Endergebnis: Typ2 bei we_idx+1, Typ3 bei we_idx+2, ...
     for offset in range(extra_slides, 0, -1):
-        pair_num    = offset + 1                    # 2, 3, 4, ...
-        left_n      = pair_num * 2 - 1              # 3, 5, 7, ...
-        right_n     = pair_num * 2                  # 4, 6, 8, ...
-        left_letter  = all_letters[(pair_num - 1) * 2]         # c, e, g, ...
-        right_letter = all_letters[(pair_num - 1) * 2 + 1]     # d, f, h, ...
+        typ_num     = offset + 1                       # 2, 3, 4, ...
+        left_n      = typ_num * 2 - 1                  # 3, 5, 7, ...
+        right_n     = typ_num * 2                      # 4, 6, 8, ...
+        type_letter = all_letters[typ_num - 1]         # b, c, d, ...
 
         new_slide = duplicate_slide(prs, we_idx)
         sp_tree   = new_slide.shapes._spTree
 
-        # Immer vom Original-XML ausgehen
         xml_str = orig_xml
 
-        # Platzhalter umbenennen (rechts vor links um Präfix-Kollisionen zu vermeiden)
+        # Per-Spalte (Beispiel-WEs): links=we_beispiel_(2N-1), rechts=we_beispiel_(2N)
         xml_str = xml_str.replace("WE_BEISPIEL_2", f"WE_BEISPIEL_{right_n}")
         xml_str = xml_str.replace("WE_BEISPIEL_1", f"WE_BEISPIEL_{left_n}")
+        xml_str = xml_str.replace("WE_BEREICH_2", f"WE_BEREICH_{right_n}")
+        xml_str = xml_str.replace("WE_BEREICH_1", f"WE_BEREICH_{left_n}")
         xml_str = xml_str.replace("BILD_WE_2",     f"BILD_WE_{right_n}")
         xml_str = xml_str.replace("BILD_WE_1",     f"BILD_WE_{left_n}")
-        # WE_NUMMERN (rechts vor links)
+
+        # Geteilte Felder pro TYP: WE_FLAECHE_1..5 → WE_FLAECHE_1_typN
+        # WE_TYP_BESCHREIBUNG → WE_TYP_BESCHREIBUNG_typN
+        xml_str = xml_str.replace("WE_TYP_BESCHREIBUNG", f"WE_TYP_BESCHREIBUNG_typ{typ_num}")
+        for fn in range(5, 0, -1):
+            xml_str = xml_str.replace(f"WE_FLAECHE_{fn}", f"WE_FLAECHE_{fn}_typ{typ_num}")
+
+        # v20-Backwards: WE_NUMMERN, WE_RAUM (auch ersetzen, falls noch Platzhalter da)
         xml_str = xml_str.replace("WE_NUMMERN_2", f"WE_NUMMERN_{right_n}")
         xml_str = xml_str.replace("WE_NUMMERN_1", f"WE_NUMMERN_{left_n}")
-        # WE_TYP_BESCHREIBUNG (rechts vor links)
-        xml_str = xml_str.replace("WE_TYP_BESCHREIBUNG_2", f"WE_TYP_BESCHREIBUNG_{right_n}")
-        xml_str = xml_str.replace("WE_TYP_BESCHREIBUNG_1", f"WE_TYP_BESCHREIBUNG_{left_n}")
-        # WE_RAUM_N_NAME (rechts vor links, für N=1-5)
         for rn in range(5, 0, -1):
             xml_str = xml_str.replace(f"WE_RAUM_{rn}_NAME_2", f"WE_RAUM_{rn}_NAME_{right_n}")
             xml_str = xml_str.replace(f"WE_RAUM_{rn}_NAME_1", f"WE_RAUM_{rn}_NAME_{left_n}")
-        # WE_FLAECHE_N_side (rechts vor links, für N=1-5)
-        for fn in range(5, 0, -1):
-            xml_str = xml_str.replace(f"WE_FLAECHE_{fn}_2", f"WE_FLAECHE_{fn}_{right_n}")
-            xml_str = xml_str.replace(f"WE_FLAECHE_{fn}_1", f"WE_FLAECHE_{fn}_{left_n}")
 
-        xml_str = _fix_we_letters(xml_str, left_letter, right_letter)
+        # Beide Buchstaben-Positionen → derselbe Typ-Letter (v19: 1 Typ pro Slide)
+        xml_str = _fix_we_letters_single(xml_str, type_letter)
 
         new_sp_tree = parse_xml(xml_str.encode("utf-8"))
         for child in list(sp_tree):
@@ -2140,16 +2169,7 @@ def duplicate_we_slides(prs, data):
         for child in list(new_sp_tree):
             sp_tree.append(child)
 
-    # Original-Slide: rechtes 'a' → 'b' (linkes bleibt 'a')
-    orig_sp_tree = prs.slides[we_idx].shapes._spTree
-    fixed_xml    = _fix_we_letters(
-        etree.tostring(orig_sp_tree, encoding="unicode"), 'a', 'b'
-    )
-    new_orig_sp_tree = parse_xml(fixed_xml.encode("utf-8"))
-    for child in list(orig_sp_tree):
-        orig_sp_tree.remove(child)
-    for child in list(new_orig_sp_tree):
-        orig_sp_tree.append(child)
+    # Original-Slide: bleibt bei 'a' (Typ 1) – beide Spalten haben schon 'a'
 
     # ── Bottom-Page-Numbers nach WE-Duplikation neu nummerieren ────────────
     # Jede Slide-Spread zeigt 2 Seitenzahlen unten (links + rechts).
