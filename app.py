@@ -1675,8 +1675,16 @@ def generate_expose_with_claude(projektdaten, city_context=""):
         "für Studierende, Berufstätige und Investoren. Modern ausgestattet, smart vernetzt und sofort bezugsfertig.'\n\n"
 
         "### Key-Facts (feature_N_label, amenity_N):\n"
-        "Kurze prägnante Substantive. Max. 3-4 Wörter. Beispiele:\n"
-        "'E-Bike-Sharing'  'Smart-Lock'  'Dachbegrünung'  'Fahrradabstellplätze'\n\n"
+        "amenity_1 bis amenity_9: Kurz, max 22 Zeichen, 1-3 Wörter. WICHTIG: Begriffe müssen "
+        "BILDBAR sein – also Dinge die als Foto erkennbar sind.\n"
+        "GUTE Beispiele: 'Dachterrasse', 'E-Bike-Station', 'Fahrradabstellplatz', "
+        "'Solaranlage', 'Fernwärme', 'Smart-Lock', 'Concierge', 'Paketstation', "
+        "'Tiefgarage', 'Aufzug', 'Gemeinschaftsraum', 'Innenhof', 'Spielplatz'\n"
+        "SCHLECHT (zu abstrakt für Foto-Suche): 'Effiziente Grundrisse', "
+        "'4 identische Häuser', 'Hochwertige Ausstattung', 'Moderne Bauweise', "
+        "'Innovative Technik' – diese werden NICHT als Amenity verwendet, "
+        "sondern in feature_N_label oder text_ausstattung.\n"
+        "Wähle für die 9 Amenities AUSSCHLIESSLICH visuell darstellbare Features.\n\n"
 
         "### Entwicklername (entwickler_name, entwickler_name_gross):\n"
         f"entwickler_name: Kurzer Markenname des Entwicklers (max 15 Zeichen, kein 'GmbH/mbH/AG').\n"
@@ -1740,7 +1748,7 @@ def generate_expose_with_claude(projektdaten, city_context=""):
         "text_stadt_stat_N_detail: max 130 Zeichen pro Stat\n"
         "text_stadt_branche_1/2: max 220 Zeichen pro Branche\n"
         "feature_N_label: max 28 Zeichen\n"
-        "amenity_N: max 28 Zeichen\n"
+        "amenity_N: max 22 Zeichen, 1-3 Wörter, BILDBAR (siehe Key-Facts-Liste oben)\n"
         "we_typ_beschreibung_N: max 50 Zeichen, 1 Zeile (DQN-Stil: '1-Zi mit Balkon, Barrierefrei')\n"
         "besonderheiten: max 80 Zeichen\n"
         "steuerliche_moeglichkeiten: max 110 Zeichen\n"
@@ -1756,8 +1764,15 @@ def generate_expose_with_claude(projektdaten, city_context=""):
         f"WICHTIG: 'min_*'-Felder nur die Zahl, z.B. '3'. 'label_min_*' nur den Namen, z.B. 'Leibniz Universität'.\n\n"
 
         f"## FREIZEIT NAH ({stadt} – Slide 14, 4 Einträge):\n"
-        f"freizeit_N_name: ECHTER Name (Park, See, Sehenswürdigkeit) in {stadt}\n"
-        f"min_freizeit_N: Gehminuten als Zahl\n\n"
+        f"freizeit_N_name: Die WICHTIGSTEN/BEKANNTESTEN Freizeit-Highlights in {stadt} – "
+        f"keine obskuren Lokal-Tipps, sondern Sehenswürdigkeiten/Attraktionen die JEDER kennt:\n"
+        f"  - Magdeburg → Elbauenpark, Magdeburger Dom, Hundertwasserhaus, Elbufer-Promenade, "
+        f"Allee-Center, Jahrtausendturm\n"
+        f"  - Andere Städte: Hauptpark, Hauptdom/Kirche, Hauptmuseum, Hauptpromenade, "
+        f"Hauptstadion, beliebter See/Strand\n"
+        f"min_freizeit_N: REALISTISCHE Minutenangabe – wenn ein Highlight zu weit weg ist (>30 Min "
+        f"zu Fuß), nimm es NICHT (lieber näheres Highlight wählen). Format: nur Zahl, z.B. '8'\n"
+        f"  Faustregel: Fuß-Minuten = (km × 12), Fahrrad = (km × 4)\n\n"
 
         f"## WOHNUNGSTYPEN (aus WFL-Berechnung und Grundrissen):\n"
         f"Analysiere alle WFL-Berechnungs-PDFs und Grundrisse. Das Template zeigt pro Slide ZWEI WE-Typen nebeneinander.\n"
@@ -1860,7 +1875,13 @@ def generate_expose_with_claude(projektdaten, city_context=""):
         f"  Schlüsselfakten. Nutze sie konkret in den Stadttexten.\n\n"
         if 'magdeburg' in stadt.lower() else ""
         )
-        + f"## ALLE FELDER – PFLICHT:\n"
+        + f"## ⚠️ KEIN 'auf Anfrage' / KEINE Floskeln:\n"
+        f"Felder wie kaufpreis_ab, kfw_darlehen, kfw_standard, stellplaetze, energieversorgung,\n"
+        f"steuerliche_moeglichkeiten, besonderheiten MÜSSEN aus den PDFs extrahiert werden.\n"
+        f"Wenn ein Wert wirklich nicht im Datenraum steht, lass das Feld LEER ('') – schreibe\n"
+        f"NIE 'auf Anfrage' oder 'tba' oder Platzhalter wie 'XXX'.\n\n"
+
+        f"## ALLE FELDER – PFLICHT:\n"
         f"Jedes Feld MUSS befüllt werden. Leere Strings sind nicht akzeptabel außer bei\n"
         f"we_beispiel_N/we_nummern_N/we_raum_*_N/we_flaeche_*_N/we_typ_beschreibung_N für nicht vorhandene WE-Typen.\n\n"
         f"{json.dumps(PLATZHALTER, ensure_ascii=False)}"
@@ -2129,6 +2150,82 @@ def duplicate_we_slides(prs, data):
         orig_sp_tree.remove(child)
     for child in list(new_orig_sp_tree):
         orig_sp_tree.append(child)
+
+    # ── Bottom-Page-Numbers nach WE-Duplikation neu nummerieren ────────────
+    # Jede Slide-Spread zeigt 2 Seitenzahlen unten (links + rechts).
+    # Pro extra dupliziertem WE-Slide verschieben sich alle nachfolgenden
+    # Seitenzahlen um 2.
+    if extra_slides > 0:
+        _renumber_bottom_pages(prs, we_idx, extra_slides)
+
+
+# Page-number-like text matcher: 1-3 digit number, possibly with whitespace
+import re as _re_pg
+_PAGE_NUM_RE = _re_pg.compile(r'^\s*(\d{1,3})\s*$')
+
+
+def _renumber_bottom_pages(prs, we_idx, extra_slides):
+    """Verschiebt Seitenzahlen unten auf Slides nach we_idx.
+    - Duplizierte WE-Slides (we_idx+1 .. we_idx+extra_slides): shift = 2 * Position
+    - Alle Slides DANACH: shift = 2 * extra_slides
+    Heuristik für 'page number': Text-Frame mit isolierter 1-3-stelliger Zahl,
+    in Position unten auf der Slide (top > 80% der Slide-Höhe).
+    """
+    sh = int(prs.slide_height or 6858000)
+    # Nur Text-Frames im unteren Drittel als Page-Number-Kandidaten
+    bottom_threshold = int(sh * 0.85)
+
+    def _shift_in_slide(slide, shift):
+        for shape in slide.shapes:
+            try:
+                top = shape.top or 0
+            except Exception:
+                top = 0
+            # Group-Shape: Children prüfen
+            if shape.shape_type == 6:
+                gx = shape.top or 0
+                for child in shape.shapes:
+                    ctop = (child.top or 0) + gx
+                    if ctop < bottom_threshold:
+                        continue
+                    if child.has_text_frame:
+                        _shift_text_frame(child.text_frame, shift)
+            else:
+                if top < bottom_threshold:
+                    continue
+                if shape.has_text_frame:
+                    _shift_text_frame(shape.text_frame, shift)
+
+    def _shift_text_frame(tf, shift):
+        for p in tf.paragraphs:
+            full = "".join(r.text for r in p.runs).strip()
+            m = _PAGE_NUM_RE.match(full)
+            if not m:
+                continue
+            n = int(m.group(1))
+            # Nur 1-2 stellige Zahlen oder bis 200 (echte Seitenzahlen)
+            if n < 1 or n > 200:
+                continue
+            new_n = n + shift
+            # Schreibe neuen Wert in den ersten Run, alle anderen leer
+            if p.runs:
+                p.runs[0].text = str(new_n)
+                for r in p.runs[1:]:
+                    r.text = ""
+
+    # Duplizierte WE-Slides: jeder Slide kriegt seinen eigenen Shift
+    for i in range(1, extra_slides + 1):
+        slide_idx = we_idx + i
+        if slide_idx < len(prs.slides):
+            _shift_in_slide(prs.slides[slide_idx], 2 * i)
+            print(f"  Page-Renumber: WE-Slide {slide_idx} → +{2*i}")
+
+    # Alle Slides nach dem WE-Block: shift um 2 * extra_slides
+    total_shift = 2 * extra_slides
+    for i in range(we_idx + extra_slides + 1, len(prs.slides)):
+        _shift_in_slide(prs.slides[i], total_shift)
+    print(f"  Page-Renumber: {len(prs.slides) - we_idx - extra_slides - 1} "
+          f"Slides nach WE-Block um +{total_shift} verschoben")
 
 
 def fill_pptx(template_bytes, data, customer_images=None):
