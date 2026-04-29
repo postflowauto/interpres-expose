@@ -1602,15 +1602,35 @@ def analyze_pdfs_with_claude(pdfs):
             "projektname_roh, adresse, stadt, stadtteil, plz, bautraeger, anzahl_haeuser, "
             "we_pro_haus, anzahl_we_gesamt, kfw_standard, energieversorgung, stellplaetze, "
             "groesse_von, groesse_bis, kaufpreis_ab, besonderheiten, planungsphase, "
-            "we_typen_count (Anzahl der verschiedenen WE-Typen/Grundriss-Typen als Zahl), "
-            "we_typen_liste (Array von Objekten mit {bezeichnung, typ, wohnflaeche_qm} für jeden WE-Typ wenn aus WFL-PDFs erkennbar). "
+            "we_typen_count, we_typen_liste, "
+            "anzahl_1zi (Anzahl 1-Zimmer-Wohnungen), anzahl_2zi (Anzahl 2-Zimmer), anzahl_barrierefrei. "
+            "\n\n"
+            "⚠️ DATENQUALITÄT IST KRITISCH – durchsuche ALLE PDFs gründlich:\n"
+            "- stellplaetze: Suche in Bauunterlagen/Beschreibungen nach Stellplatz-Anzahl. "
+            "Zähle Außenstellplätze + Tiefgarage-Plätze + Garagen separat. "
+            "Format: '13 Außenstellplätze' oder '24 TG + 6 außen' oder einfach Zahl '13'. "
+            "NIE 'auf Anfrage' wenn Zahl irgendwo im Datenraum steht.\n"
+            "- kfw_standard: Suche in Energieausweis, Baubeschreibung, Förderübersicht. "
+            "Format: 'KfW-Effizienzhaus 40 QNG-PLUS' oder 'KfW 55' oder 'KfW-40 NH'. "
+            "NIE 'auf Anfrage' wenn Standard erkennbar.\n"
+            "- energieversorgung: Suche in TGA/Heizungs-PDFs. Format: "
+            "'Fernwärme + Photovoltaik' oder 'Wärmepumpe + Solar' oder 'Gas-Brennwert'.\n"
+            "- besonderheiten: Konkrete Highlights wie 'Alle Einheiten mit Balkon/Terrasse, "
+            "vollmöbliert, Aufzug, barrierearm, Fernwärme'. KEINE Floskeln.\n"
+            "- kaufpreis_ab: Aus Preisliste, Format als Zahl '189000' (ohne €/Punkte/Komma).\n"
+            "- anzahl_we_gesamt: Aus WFL-Übersicht oder Vertragsstand.\n"
+            "- anzahl_1zi / anzahl_2zi: Anzahl der jeweiligen Wohnungstypen (zähle aus WFL-Übersicht).\n"
+            "- anzahl_barrierefrei: WEs mit Barrierefrei-Markierung im WFL-Plan.\n"
+            "\n"
             "WICHTIG für bautraeger: Nur den exakten Firmennamen, OHNE Fußnotenzahlen oder Sonderzeichen. "
-            "Beispiel: 'SBB Bauträgergesellschaft mbH' (nicht 'SBB Bauträgergesellschaft1 mbH'). "
-            "WICHTIG für projektname_roh: Nur der vermarktbare Projektname, z.B. 'compact living. magdeburg.' oder 'The Central'. "
-            "Falls kein expliziter Projektname in den Dokumenten steht, ERFINDE einen kurzen, "
-            "kreativen Markennamen (1-3 Wörter, Englisch oder Deutsch), der zur Lage und Produktart passt. "
+            "Beispiel: 'SBB Bauträgergesellschaft mbH' (nicht 'SBB Bauträgergesellschaft1 mbH').\n"
+            "WICHTIG für projektname_roh: Nur der vermarktbare Projektname (1-3 Wörter). "
+            "Falls kein expliziter Projektname in den Dokumenten: ERFINDE einen kurzen, "
+            "kreativen Markennamen passend zu Lage + Produktart. "
             "Beispiele: 'The Rothenseer', 'New Living 72', 'Central Magdeburg', 'Die 72'. "
-            "NIEMALS den Firmennamen oder Bauträgernamen als Projektname verwenden! "
+            "NIEMALS den Firmennamen als Projektname verwenden!\n"
+            "we_typen_liste: Array von Objekten mit {bezeichnung, typ, wohnflaeche_qm} für jeden WE-Typ "
+            "wenn aus WFL-PDFs erkennbar.\n"
             "Kein Text davor oder danach, keine Markdown-Backticks."
         )
     })
@@ -1663,8 +1683,75 @@ def generate_expose_with_claude(projektdaten, city_context=""):
         f"## PROJEKTDATEN\n{json.dumps(projektdaten, ensure_ascii=False)}\n"
         f"{we_typen_hint}\n"
 
-        "## SCHREIBSTIL – REFERENZ (genau so schreiben!)\n"
-        "Das Exposé folgt dem Stil eines Premium-Immobilien-Prospekts. Konkret:\n\n"
+        "## SCHREIBSTIL – DQN-STIL als VERBINDLICHE REFERENZ\n"
+        "Das Exposé soll im EXAKT gleichen Stil wie ein Premium-DQN-Exposé wirken.\n"
+        "BALANCE wichtig: Investment + Quartier + Nachhaltigkeit + Lifestyle gleichberechtigt.\n"
+        "NICHT zu kapitalanlage-fokussiert – auch das WOHNERLEBNIS und die LAGE-QUALITÄT betonen!\n"
+        "WICHTIG: Diese Struktur funktioniert für JEDE Stadt – nicht nur Magdeburg.\n"
+        "Schreibe ECHTE Fakten zur jeweiligen Stadt, generischen Inhalten ist eine Absage zu erteilen.\n\n"
+
+        "### DQN-Strukturreferenzen (übernehme Stil & Länge, ersetze nur die Stadt-Fakten):\n\n"
+
+        "REFERENZ text_intro (Slide 3 'Moderne Apartments in {stadt}', ~200 Zeichen):\n"
+        "  'Im »{projekt_titel}« stehen alle Zeichen auf zukunftsfähiges Bauen. Das nachhaltige "
+        "Gesamtkonzept schafft eine grüne Oase inmitten des urbanen Umfelds der Landeshauptstadt – "
+        "durchdacht, effizient und umweltbewusst.'\n\n"
+
+        "REFERENZ text_investment_pitch (DQN: 'kleine Einstiegspreise + KfW + AfA-Vorteil'):\n"
+        "  'Kleine Einstiegspreise, attraktive KfW-Förderung und dreifach-AfA bieten ideale "
+        "Voraussetzungen für Kapitalanleger, die Wert auf Effizienz und Stabilität legen.'\n\n"
+
+        "REFERENZ text_kapitel_invest_2 (Verbindung Investment + Lage + Effizienz, ~300 Zeichen):\n"
+        "  'Die aufstrebende Lage in {stadt}, die energieeffiziente Bauweise (KfW-Effizienzhaus-Stufe 40 "
+        "QNG PLUS) sowie die durchdachte Möblierung machen {projekt_titel} zu einem Investment, "
+        "das heute überzeugt – und morgen relevant bleibt.'\n\n"
+
+        "REFERENZ text_stadt_intro (Slide 'Magdeburg/Stadt – Die Lage'):\n"
+        "  'Die Landeshauptstadt wächst. Der Stadtteil {stadtteil} ist heute einer der spannendsten "
+        "Orte {stadt}s: gewachsen, urban, im Wandel. {projekt_titel} entsteht genau hier – zwischen "
+        "{landmark_1} und {landmark_2}, zwischen Universität und Einkaufszentren. Eine Lage, die "
+        "vieles verbindet: Nähe zur City, kurze Wege, grüne Rückzugsorte und ein hohes Maß an "
+        "Lebensqualität.'\n\n"
+
+        "REFERENZ Stadt-wirtschaft Subsektionen (DQN Slide 14 hat 3 Sektionen):\n"
+        "Sektion 1 'Technologie und Industrie' (~280 Zeichen mit Firmennamen):\n"
+        "  'Im {industriepark} entstehen neue Flächen für internationale Unternehmen aus den "
+        "Bereichen Halbleiter, Batterietechnik, Rechenzentren und Pharma. Namen wie {firma_1} – "
+        "{firma_1_zusatz} – oder {firma_2} unterstreichen die internationale Relevanz des Standorts. "
+        "Insgesamt entstehen hier mehrere tausend neue Arbeitsplätze.'\n\n"
+        "Sektion 2 'Infrastruktur \"Knoten {stadt}\"' (~280 Zeichen, Verkehr/Bahn):\n"
+        "  'Parallel dazu investiert die Stadt massiv in ihre Infrastruktur. Der Bahnhof "
+        "{stadt}-{stadtteil} wird im Rahmen des Großprojekts \"Knoten {stadt}\" umfassend modernisiert "
+        "– mit einem Volumen von rund {summe} Millionen Euro. Neue S-Bahn-Anbindungen, bessere "
+        "Taktungen und optimierte Logistikwege stärken die Verbindung zu regionalen und überregionalen "
+        "Wirtschaftsräumen.'\n\n"
+        "Sektion 3 'Logistiksektor / Hafen' (~280 Zeichen):\n"
+        "  'Der {hafen_name} – {größenbeschreibung} – wird strategisch ausgebaut und entwickelt sich "
+        "mit Neuansiedlungen wie {firma_3} und {firma_4} zu einem zentralen Logistikknoten im "
+        "europäischen Netzwerk.'\n\n"
+
+        "REFERENZ Stadt-Stat-Cards (4 Zahlen mit Detail-Texten):\n"
+        "  '245.279 Einwohner' → '{stadt} wächst kontinuierlich und gewinnt als Wohn- und "
+        "Wirtschaftsstandort zunehmend an Bedeutung.'\n"
+        "  '78,4 Mrd. BIP' → 'Das BIP des Bundeslandes lag 2023 bei etwa 78,4 Milliarden Euro, "
+        "und ist seit 2013 über 40 % gestiegen.'\n"
+        "  '+31% Mietsteigerung' → 'Für Neubauwohnungen sind die Mietpreise in {stadt} seit 2017 "
+        "um rund 31 % gestiegen.'\n"
+        "  '21.000 Studierende' → 'sind an den Hochschulen und Universitäten {stadt}s eingeschrieben.'\n\n"
+
+        "REFERENZ MedTech-Hotspot / Branchen-Detail-Slide (~340 Zeichen Hauptabsatz):\n"
+        "  '{stadt} entwickelt sich zu einem führenden Standort für {hauptbranche}. Über {anzahl} "
+        "Unternehmen der Branche, zahlreiche Start-ups sowie international renommierte "
+        "Forschungseinrichtungen wie {institut_1}, {institut_2} und {institut_3} bündeln hier ihre "
+        "Kompetenzen. Zukunftsweisende Projekte wie {projekt_1} zeigen: {stadt} ist nicht nur "
+        "Standort, sondern Treiber medizinischer Innovationen.'\n\n"
+
+        "REFERENZ text_kapitel_stay (Stay/Projekt-Eröffnung, DQN p.18):\n"
+        "  'Ein Neubauprojekt nach KfW-Effizienzhaus-Stufe 40 mit QNG-Zertifizierung, das "
+        "Nachhaltigkeit und urbane Lebensqualität vereint. Energieeffiziente Bauweise, Fernwärme, "
+        "Photovoltaik und Gründach sorgen für geringe Betriebskosten und ein besseres Mikroklima. "
+        "Kompakte, durchdacht geschnittene Mikroapartments und moderne Technik schaffen Wohnraum, "
+        "der ressourcenschonend, zukunftssicher und attraktiv für Mieter ist – mitten in {stadt}.'\n\n"
 
         "### Slogans (text_kapitel_invest/live/stay/know/hotel – NUR die Hauptüberschrift):\n"
         "Kurze Phrasen mit Punkt. Maximal 3-4 Wörter. Beispiele:\n"
@@ -3368,6 +3455,18 @@ def _run_expose_job(job_id, zip_paths):
             expose_data = {**PLATZHALTER, **raw_expose}
             expose_data["logo_initial"] = generate_logo_initial(expose_data.get("projekt_name", ""))
 
+            # Direktes Flow von projektdaten-Fakten in expose_data (Daten aus PDF-Analyse
+            # haben Vorrang vor evtl. leeren Generator-Outputs für diese Felder)
+            for k in ("stellplaetze", "kfw_standard", "energieversorgung", "besonderheiten",
+                      "kaufpreis_ab", "anzahl_we", "anzahl_1zi", "anzahl_2zi", "anzahl_barrierefrei"):
+                pd_val = projektdaten.get(k, "")
+                if pd_val and not expose_data.get(k):
+                    expose_data[k] = str(pd_val)
+                    print(f"[{job_id}]   Faktenfeld {k} aus PDFs: {str(pd_val)[:60]!r}")
+            # Auch anzahl_we als Synonym (älterer Name)
+            if not expose_data.get("anzahl_we") and projektdaten.get("anzahl_we_gesamt"):
+                expose_data["anzahl_we"] = str(projektdaten["anzahl_we_gesamt"])
+
             # Schritt 2b: Proximity-Daten + Lageplan
             lat = lon = None
             if geo_result:
@@ -3594,15 +3693,11 @@ def _run_expose_job(job_id, zip_paths):
         print(f"[{job_id}] Slot-Liste: {len(slot_list)} Upload-Kandidaten "
               f"({sum(1 for s in slot_list if s['slide'])} mit Slide-Index)")
 
-        # ── Wenn keine Slide-JPGs gerendert werden konnten: kein Preview sinnvoll
-        #     → direkt zu "done" mit dem PPTX (von Disk lesen)
+        # Preview wird IMMER gezeigt – auch wenn Slide-Bilder nicht gerendert
+        # werden konnten (CloudConvert / pdftoppm Fehler). Dann zeigt das UI
+        # nur die Slot-Liste (Karten-Grid) ohne Slide-Vorschau-Bilder.
         if not slide_jpgs:
-            print(f"[{job_id}] ⚠️  Keine Slide-Bilder → überspringe Preview, gebe PPTX direkt aus")
-            output_path = os.path.join(_JOB_DIR, f"{job_id}.pptx")
-            shutil.copy(first_pass_pptx, output_path)
-            _set(status="done", phase="Fertig", pdf_path=output_path, name=projekt_name)
-            return
-
+            print(f"[{job_id}] ⚠️  Keine Slide-Bilder verfügbar – Preview zeigt nur Slot-Liste")
         _set(
             status="preview",
             phase="Bereit für Bilder-Upload",
@@ -3613,7 +3708,8 @@ def _run_expose_job(job_id, zip_paths):
             already_filled=already_filled,
         )
         gc.collect()
-        print(f"[{job_id}] ✓ Preview bereit – warte auf Kunden-Upload")
+        print(f"[{job_id}] ✓ Preview bereit – {len(slide_jpgs)} JPGs, "
+              f"{len(slot_list)} Upload-Slots")
 
     except Exception as e:
         import traceback as tb

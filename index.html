@@ -1192,6 +1192,15 @@ function showPreview(job_id, data) {
 
   renderSlideList(job_id, data.slide_count || 0, currentBboxMap, data.already_filled || []);
   renderSlotList(slotList, data.already_filled || []);
+
+  // Wenn keine Slide-JPGs verfügbar: Hinweis im Header anzeigen
+  if ((data.slide_count || 0) === 0 && slotList.length > 0) {
+    const sub = document.querySelector('.preview-sub');
+    if (sub) sub.innerHTML = 'Folien-Vorschau ist temporär nicht verfügbar. ' +
+      'Du kannst trotzdem Bilder zu Slots hochladen – klicke auf eine ' +
+      '<span style="color:#C8A96E">Karte unten</span> und wähle dein Bild aus. ' +
+      'Wenn du fertig bist, klicke auf „Finalisieren".';
+  }
 }
 
 // Slot-Liste als Karten-Grid (immer angezeigt, robust gegen bbox-Fehler)
