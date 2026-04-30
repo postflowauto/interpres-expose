@@ -2656,10 +2656,16 @@ def fill_pptx(template_bytes, data, customer_images=None):
     print(f"fill_pptx: {len(bild_keys_total)} bild_* Keys, "
           f"{len(bild_keys_with_url)} URLs, lade {len(bild_keys_with_url_sorted)} (RAM-Limit)")
 
+    # OSM/Wikipedia/Wikimedia blocken Requests ohne User-Agent → 403.
+    # Der Browser-ähnliche UA + Accept-Header funktioniert auf allen Hosts.
+    _DL_HEADERS = {
+        "User-Agent": "Mozilla/5.0 (compatible; interpres-expose/1.0; +https://interpres.de)",
+        "Accept":     "image/avif,image/webp,image/png,image/jpeg,image/*;q=0.9,*/*;q=0.5",
+    }
     for key in bild_keys_with_url_sorted:
         value = data[key]
         try:
-            resp = requests.get(value, timeout=15)
+            resp = requests.get(value, timeout=15, headers=_DL_HEADERS, allow_redirects=True)
             if resp.status_code == 200:
                 # Nur einbinden wenn < 1 MB (sonst zu groß für RAM-Buffer)
                 if len(resp.content) < 1_000_000:
@@ -2668,7 +2674,7 @@ def fill_pptx(template_bytes, data, customer_images=None):
                 else:
                     print(f"  ⚠️  Bild zu groß übersprungen: {key} ({len(resp.content)//1024} KB)")
             else:
-                print(f"  ✗ Bild HTTP-Fehler {key}: {resp.status_code}")
+                print(f"  ✗ Bild HTTP-Fehler {key}: {resp.status_code} ({value[:80]})")
         except Exception as e:
             print(f"  ✗ Bild Download-Fehler {key}: {e}")
 
@@ -3312,16 +3318,46 @@ def _find_pdftoppm():
     return None
 
 
+def _render_pdf_to_jpgs_pymupdf(pdf_bytes, out_dir, dpi=110):
+    """Fallback-Renderer mit PyMuPDF (fitz). Funktioniert ohne System-Binaries.
+    Liefert dieselbe Liste an slide_<n>.jpg-Pfaden wie der pdftoppm-Pfad."""
+    import fitz  # PyMuPDF
+    os.makedirs(out_dir, exist_ok=True)
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    try:
+        zoom = dpi / 72.0
+        mat  = fitz.Matrix(zoom, zoom)
+        out  = []
+        for i, page in enumerate(doc, start=1):
+            pix = page.get_pixmap(matrix=mat, alpha=False)
+            path = os.path.join(out_dir, f"slide_{i}.jpg")
+            pix.pil_save(path, format="JPEG", quality=82)
+            out.append(path)
+            del pix
+            if i % 5 == 0:
+                import gc as _gc
+                _gc.collect()
+        return out
+    finally:
+        doc.close()
+
+
 def render_pdf_to_jpgs(pdf_bytes, out_dir, dpi=110):
-    """Konvertiert PDF zu einzelnen JPG-Slide-Bildern via pdftoppm.
-    Rendert SEITENWEISE statt in einem großen Batch – das hält den
-    Memory-Peak niedrig (auf Render Starter mit 512 MiB sonst OOM).
+    """Konvertiert PDF zu einzelnen JPG-Slide-Bildern.
+    Bevorzugt pdftoppm (poppler-utils, schnell), Fallback PyMuPDF (pure Python).
     Schreibt slide_1.jpg, slide_2.jpg, ... ins out_dir.
     """
     import subprocess, tempfile
     bin_path = _find_pdftoppm()
     if not bin_path:
-        raise RuntimeError("pdftoppm nicht gefunden (poppler-utils im Image fehlt)")
+        # Fallback: PyMuPDF (in requirements.txt) – funktioniert ohne System-Binaries
+        try:
+            print("  pdftoppm fehlt → Fallback PyMuPDF")
+            return _render_pdf_to_jpgs_pymupdf(pdf_bytes, out_dir, dpi=dpi)
+        except Exception as e:
+            raise RuntimeError(
+                f"pdftoppm nicht gefunden UND PyMuPDF-Fallback gescheitert: {e}"
+            )
 
     os.makedirs(out_dir, exist_ok=True)
     with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
@@ -3526,7 +3562,13 @@ def convert_to_pdf(pptx_bytes, filename):
         try:
             return _convert_to_pdf_cloudconvert(pptx_bytes, filename)
         except Exception as e:
-            print(f"  CloudConvert Fehler: {e} → versuche LibreOffice")
+            import traceback as _tb
+            print(f"  CloudConvert Fehler: {e}\n{_tb.format_exc()[:600]}")
+            if _find_libreoffice():
+                print(f"  → Fallback LibreOffice")
+            else:
+                print(f"  → Kein LibreOffice-Fallback verfügbar – Fehler propagiert")
+                raise
     return _convert_to_pdf_libreoffice(pptx_bytes, filename)
 
 
@@ -3597,8 +3639,26 @@ def index():
 
 @app.route("/health")
 def health():
-    return jsonify({"status": "ok", "service": "INTERPRES Full Pipeline v3",
-                    "test_mode": TEST_MODE})
+    """Status + verfügbare Tools (Diagnose für Vorschau-Probleme)."""
+    info = {
+        "status":         "ok",
+        "service":        "INTERPRES Full Pipeline v3",
+        "test_mode":      TEST_MODE,
+        "cloudconvert":   bool(CLOUDCONVERT_KEY),
+        "libreoffice":    _find_libreoffice() is not None,
+        "pdftoppm":       _find_pdftoppm() is not None,
+    }
+    # PyMuPDF-Verfügbarkeit (Fallback-Renderer)
+    try:
+        import fitz  # noqa
+        info["pymupdf"] = True
+    except Exception:
+        info["pymupdf"] = False
+    info["preview_ready"] = (
+        (info["cloudconvert"] or info["libreoffice"])
+        and (info["pdftoppm"] or info["pymupdf"])
+    )
+    return jsonify(info)
 
 # ── Async Job Store ────────────────────────────────────────────────────────────
 import threading as _threading
