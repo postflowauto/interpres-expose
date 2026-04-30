@@ -811,7 +811,15 @@
 <script>
 const RENDER_URL = '/generate-expose';
 const CHUNK_URL  = '/upload-chunk';
-const API_TOKEN  = 'interpres-secret-2026';
+const CUSTOMER_MODE = window.CUSTOMER_MODE || null;  // {jobId, token} bei /c/<id>?t=…
+const IS_CUSTOMER   = !!CUSTOMER_MODE;
+const API_TOKEN     = IS_CUSTOMER ? CUSTOMER_MODE.token : 'interpres-secret-2026';
+const TOKEN_HEADER  = IS_CUSTOMER ? 'X-Share-Token' : 'X-API-Token';
+const TOKEN_QS      = IS_CUSTOMER ? 't' : 'token';   // für <img src=…?…=>
+function authHeaders(extra) {
+  const h = {}; h[TOKEN_HEADER] = API_TOKEN;
+  return Object.assign(h, extra || {});
+}
 const CHUNK_SIZE = 80 * 1024 * 1024;
 
 const dropZone    = document.getElementById('dropZone');
@@ -989,7 +997,7 @@ async function uploadAllFiles() {
 
       const resp = await fetch(CHUNK_URL, {
         method: 'POST',
-        headers: { 'X-API-Token': API_TOKEN },
+        headers: authHeaders(),
         body: fd
       });
       if (!resp.ok) {
@@ -1069,7 +1077,7 @@ generateBtn.addEventListener('click', async () => {
 
     const startResp = await fetch(RENDER_URL, {
       method: 'POST',
-      headers: { 'X-API-Token': API_TOKEN },
+      headers: authHeaders(),
       body: formData
     });
 
@@ -1106,7 +1114,7 @@ generateBtn.addEventListener('click', async () => {
         }
         try {
           const r = await fetch(`/job/${job_id}`, {
-            headers: { 'X-API-Token': API_TOKEN }
+            headers: authHeaders()
           });
 
           if (r.status === 200) {
@@ -1142,7 +1150,7 @@ generateBtn.addEventListener('click', async () => {
               setStep(4);
               setStepDetail('Fertig!', 'Das Exposé wird heruntergeladen.', 'none');
               const fileResp = await fetch(`/job/${job_id}`, {
-                headers: { 'X-API-Token': API_TOKEN }
+                headers: authHeaders()
               });
               const blob = await fileResp.blob();
               showSuccess(blob);
@@ -1267,7 +1275,7 @@ function renderSlideList(job_id, slideCount, bboxMap, alreadyFilled) {
 
     const img = document.createElement('img');
     img.className = 'slide-img';
-    img.src = `/job/${job_id}/slide/${i + 1}?token=${encodeURIComponent(API_TOKEN)}`;
+    img.src = `/job/${job_id}/slide/${i + 1}?${TOKEN_QS}=${encodeURIComponent(API_TOKEN)}`;
     img.alt = `Slide ${i + 1}`;
     img.onload = () => positionBoxesForSlide(wrap, slidesByIdx[i], slideW, slideH);
     wrap.appendChild(img);
@@ -1350,7 +1358,7 @@ document.getElementById('slotFileInput').addEventListener('change', async e => {
   try {
     const resp = await fetch(`/job/${currentJobId}/upload`, {
       method: 'POST',
-      headers: { 'X-API-Token': API_TOKEN },
+      headers: authHeaders(),
       body: fd,
     });
     if (!resp.ok) {
@@ -1397,7 +1405,7 @@ async function finalizeJob() {
   try {
     const r = await fetch(`/job/${currentJobId}/finalize`, {
       method: 'POST',
-      headers: { 'X-API-Token': API_TOKEN },
+      headers: authHeaders(),
     });
     if (!r.ok) {
       const err = await r.text();
@@ -1427,7 +1435,7 @@ async function pollForDone(job_id) {
       attempts++;
       if (attempts > maxAttempts) return reject(new Error('Timeout: Finalize hat zu lange gedauert.'));
       try {
-        const r = await fetch(`/job/${job_id}`, { headers: { 'X-API-Token': API_TOKEN } });
+        const r = await fetch(`/job/${job_id}`, { headers: authHeaders() });
         const ct = r.headers.get('content-type') || '';
         if (r.status === 200 && (ct.includes('pdf') || ct.includes('vnd.openxmlformats') || ct.includes('octet-stream'))) {
           const blob = await r.blob();
@@ -1440,7 +1448,7 @@ async function pollForDone(job_id) {
           if (j.phase) setStepDetail('Finale Datei wird erstellt …', j.phase, 'indeterminate');
           setTimeout(tick, interval);
         } else if (j.status === 'done') {
-          const f = await fetch(`/job/${job_id}`, { headers: { 'X-API-Token': API_TOKEN } });
+          const f = await fetch(`/job/${job_id}`, { headers: authHeaders() });
           const blob = await f.blob();
           showSuccess(blob);
           resolve();
@@ -1457,6 +1465,126 @@ async function pollForDone(job_id) {
 
 document.getElementById('finalizeBtn').addEventListener('click', finalizeJob);
 document.getElementById('skipPreviewBtn').addEventListener('click', finalizeJob);
+
+// ── Customer-Mode Bootstrap ──────────────────────────────────────────────────
+// Aufgerufen wenn /c/<job_id>?t=<token> aufgerufen wird. Frontend zeigt direkt
+// die Preview/Upload-Ansicht ohne ZIP-Upload.
+async function bootstrapCustomerMode() {
+  if (!IS_CUSTOMER) return;
+  // Upload-Panel + Generate-Button verstecken
+  uploadPanel.style.display = 'none';
+
+  // Header-Anpassung: Customer sieht "Bilder hinzufügen & Exposé herunterladen"
+  const sub = document.querySelector('.logo-sub');
+  if (sub) sub.textContent = 'Bilder ergänzen & herunterladen';
+
+  // Direkt zur Preview springen
+  progressPanel.classList.add('active');
+  setStep(3);
+  setStepDetail('Vorschau wird geladen …', 'Einen Moment bitte.', 'indeterminate');
+
+  // Status pollen bis preview/done
+  const jobId = CUSTOMER_MODE.jobId;
+  currentJobId = jobId;
+  const interval = 3000;
+  let attempts = 0;
+  const maxAttempts = 200;
+
+  const poll = async () => {
+    attempts++;
+    if (attempts > maxAttempts) {
+      showError('Zeitüberschreitung beim Laden der Vorschau.');
+      return;
+    }
+    try {
+      const r = await fetch(`/job/${jobId}`, { headers: authHeaders() });
+      const ct = r.headers.get('content-type') || '';
+      if (r.status === 200 && (ct.includes('pdf') || ct.includes('vnd.openxmlformats') || ct.includes('octet-stream'))) {
+        const blob = await r.blob();
+        showSuccess(blob);
+        return;
+      }
+      if (!r.ok) {
+        const txt = await r.text();
+        showError(`Fehler ${r.status}: ${txt.substring(0, 200)}`);
+        return;
+      }
+      const j = await r.json();
+      if (j.status === 'preview') {
+        setStep(4);
+        setStepDetail('Vorschau bereit', 'Wähle Bilder pro Folie aus.', 'none');
+        showPreview(jobId, j);
+      } else if (j.status === 'processing') {
+        if (j.phase) setStepDetail('Vorschau wird vorbereitet …', j.phase, 'indeterminate');
+        setTimeout(poll, interval);
+      } else if (j.status === 'done') {
+        const f = await fetch(`/job/${jobId}`, { headers: authHeaders() });
+        const blob = await f.blob();
+        showSuccess(blob);
+      } else if (j.status === 'error') {
+        showError(j.error || 'Server-Fehler');
+      } else {
+        setTimeout(poll, interval);
+      }
+    } catch (err) {
+      showError(err.message);
+    }
+  };
+  poll();
+}
+
+// ── Share-Link Banner für Broker ─────────────────────────────────────────────
+function showShareLink(url) {
+  if (!url || IS_CUSTOMER) return;
+  if (document.getElementById('shareLinkBanner')) return;
+  const banner = document.createElement('div');
+  banner.id = 'shareLinkBanner';
+  banner.style.cssText = 'background:#1a2a44;border:1px solid #C8A96E;border-radius:8px;'
+    + 'padding:14px 16px;margin:14px 0;color:#e8d9b3;font-size:0.85rem;';
+  banner.innerHTML = `
+    <div style="font-weight:600;margin-bottom:6px;color:#C8A96E;">
+      🔗 Share-Link für den Kunden
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;">
+      <input id="shareLinkInput" type="text" readonly value="${url}"
+             style="flex:1;background:#0e1a2c;border:1px solid #2a4060;color:#e8d9b3;
+                    padding:8px 10px;border-radius:6px;font-size:0.78rem;font-family:monospace;">
+      <button id="shareLinkCopy" style="background:#C8A96E;border:none;color:#0e1a2c;
+              padding:8px 14px;border-radius:6px;font-weight:600;cursor:pointer;">Kopieren</button>
+    </div>
+    <div style="margin-top:6px;font-size:0.72rem;color:#7a8ba0;">
+      Sende diesen Link an den Kunden. Er kann eigene Bilder hochladen und das Exposé herunterladen.
+    </div>
+  `;
+  const target = previewPanel.querySelector('.preview-header');
+  if (target) target.insertAdjacentElement('afterend', banner);
+  else previewPanel.insertBefore(banner, previewPanel.firstChild);
+
+  document.getElementById('shareLinkCopy').addEventListener('click', async () => {
+    const inp = document.getElementById('shareLinkInput');
+    inp.select();
+    try {
+      await navigator.clipboard.writeText(url);
+      const btn = document.getElementById('shareLinkCopy');
+      const orig = btn.textContent;
+      btn.textContent = '✓ Kopiert';
+      setTimeout(() => { btn.textContent = orig; }, 2000);
+    } catch(_) {
+      document.execCommand('copy');
+    }
+  });
+}
+
+// Hook into showPreview to display share link if present
+const _origShowPreview = showPreview;
+showPreview = function(job_id, data) {
+  _origShowPreview(job_id, data);
+  if (data.share_url) showShareLink(data.share_url);
+};
+
+// Run customer-mode bootstrap on load
+document.addEventListener('DOMContentLoaded', bootstrapCustomerMode);
+if (document.readyState !== 'loading') bootstrapCustomerMode();
 
 // ── Retry ─────────────────────────────────────────────────────────────────────
 document.getElementById('retryBtn').addEventListener('click', () => {

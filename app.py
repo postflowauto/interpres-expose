@@ -1,4 +1,4 @@
-import os, io, json, base64, zipfile, requests, re, uuid, shutil
+import os, io, json, base64, zipfile, requests, re, uuid, shutil, secrets
 from copy import deepcopy
 from flask import Flask, request, jsonify, send_file
 from pptx import Presentation
@@ -2263,7 +2263,12 @@ def duplicate_we_slides(prs, data):
     # Pro extra dupliziertem WE-Slide verschieben sich alle nachfolgenden
     # Seitenzahlen um 2.
     if extra_slides > 0:
+        # Original-WE-Slide-Bottompages MERKEN bevor renumber läuft – wird
+        # für TOC-Shift gebraucht (alles > we_last_page muss verschoben werden).
+        we_last_page = _read_max_bottom_page(prs, prs.slides[we_idx])
         _renumber_bottom_pages(prs, we_idx, extra_slides)
+        if we_last_page is not None:
+            _renumber_toc_pages(prs, we_idx, extra_slides, we_last_page)
 
 
 # Page-number-like text matcher: 1-3 digit number, possibly with whitespace
@@ -2333,6 +2338,86 @@ def _renumber_bottom_pages(prs, we_idx, extra_slides):
         _shift_in_slide(prs.slides[i], total_shift)
     print(f"  Page-Renumber: {len(prs.slides) - we_idx - extra_slides - 1} "
           f"Slides nach WE-Block um +{total_shift} verschoben")
+
+
+def _read_max_bottom_page(prs, slide):
+    """Liest die größte Bottom-Page-Nummer (1-3 stellig, untere 15% des Slides).
+    Genutzt als Schwelle: alles > diesem Wert ist 'nach dem WE-Block'.
+    Gibt None zurück wenn keine Page-Nummer gefunden."""
+    sh_h = int(prs.slide_height or 6858000)
+    bottom_threshold = int(sh_h * 0.85)
+    found = []
+
+    def _scan_tf(tf, top_abs):
+        if top_abs < bottom_threshold:
+            return
+        for p in tf.paragraphs:
+            full = "".join(r.text for r in p.runs).strip()
+            m = _PAGE_NUM_RE.match(full)
+            if m:
+                n = int(m.group(1))
+                if 1 <= n <= 200:
+                    found.append(n)
+
+    for shape in slide.shapes:
+        try:
+            top = shape.top or 0
+        except Exception:
+            top = 0
+        if shape.shape_type == 6:
+            for child in shape.shapes:
+                ctop = (child.top or 0) + (shape.top or 0)
+                if child.has_text_frame:
+                    _scan_tf(child.text_frame, ctop)
+        else:
+            if shape.has_text_frame:
+                _scan_tf(shape.text_frame, top)
+
+    return max(found) if found else None
+
+
+def _renumber_toc_pages(prs, we_idx, extra_slides, we_last_page):
+    """TOC-Seitenzahlen verschieben.
+    Auf Folien VOR we_idx werden alle isolierten Zahlen-Paragraphen mit Wert
+    > we_last_page um 2*extra_slides erhöht. Andere Zahlen (Kapitel-Nummern
+    'u invest 01..04', Listen-Marker, Bottom-Page-Numbers früher Slides) sind
+    immer ≤ we_last_page → bleiben unangetastet.
+    """
+    if extra_slides <= 0 or we_last_page is None:
+        return
+    shift = 2 * extra_slides
+    total_shifted = 0
+
+    for slide_idx in range(we_idx):
+        slide = prs.slides[slide_idx]
+
+        def _shift_tf(tf):
+            nonlocal total_shifted
+            for p in tf.paragraphs:
+                full = "".join(r.text for r in p.runs).strip()
+                m = _PAGE_NUM_RE.match(full)
+                if not m:
+                    continue
+                n = int(m.group(1))
+                if n <= we_last_page or n > 200:
+                    continue
+                new_n = n + shift
+                if p.runs:
+                    p.runs[0].text = str(new_n)
+                    for r in p.runs[1:]:
+                        r.text = ""
+                total_shifted += 1
+
+        for shape in slide.shapes:
+            if shape.shape_type == 6:
+                for child in shape.shapes:
+                    if child.has_text_frame:
+                        _shift_tf(child.text_frame)
+            else:
+                if shape.has_text_frame:
+                    _shift_tf(shape.text_frame)
+
+    print(f"  TOC-Renumber: {total_shifted} Eintrag(e) > {we_last_page} um +{shift} verschoben")
 
 
 def fill_pptx(template_bytes, data, customer_images=None):
@@ -2842,6 +2927,36 @@ def fill_pptx(template_bytes, data, customer_images=None):
                             if old in run.text:
                                 run.text = run.text.replace(old, new)
 
+    # Final-Cleanup: Übrig gebliebene {{...}}-Platzhalter entfernen.
+    # Tritt auf, wenn (a) Claude einen Key gar nicht zurückgegeben hat, (b) Template-
+    # Key nicht in PLATZHALTER, (c) Whitespace im Key durch Run-Splitting. Statt
+    # "{{TEXT_X}}" im finalen Dokument lieber leere Stelle. {{BILD_*}} bleibt erhalten,
+    # damit die Placeholder-Shapes (auf die der Kunde klickt zum Upload) sichtbar bleiben.
+    _LEFTOVER_RE = re.compile(r'\{\{\s*(?!BILD_)[A-Z0-9_\s\-|.]+\}\}', re.IGNORECASE)
+    leftover_count = 0
+    for slide in prs.slides:
+        for shape in slide.shapes:
+            shapes_to_check = [shape]
+            if shape.shape_type == 6:
+                shapes_to_check += list(shape.shapes)
+            for s in shapes_to_check:
+                if not s.has_text_frame:
+                    continue
+                for para in s.text_frame.paragraphs:
+                    if not para.runs:
+                        continue
+                    full = "".join(r.text for r in para.runs)
+                    if "{{" not in full:
+                        continue
+                    cleaned = _LEFTOVER_RE.sub("", full)
+                    if cleaned != full:
+                        leftover_count += full.count("{{") - cleaned.count("{{")
+                        para.runs[0].text = cleaned
+                        for r in para.runs[1:]:
+                            r.text = ""
+    if leftover_count:
+        print(f"  Cleanup: {leftover_count} unbefüllte Text-Platzhalter entfernt")
+
     out = io.BytesIO()
     prs.save(out)
     return out.getvalue()
@@ -3270,6 +3385,42 @@ def index():
     with open(index_path, encoding="utf-8") as f:
         return f.read(), 200, {"Content-Type": "text/html; charset=utf-8"}
 
+
+@app.route("/c/<job_id>")
+def customer_view(job_id):
+    """Customer-Page: Same UI wie Broker, aber mit Share-Token statt API-Token.
+    Frontend liest window.CUSTOMER_MODE → springt direkt zur Vorschau, blendet
+    den ZIP-Upload aus.
+    """
+    job = _read_job(job_id)
+    if not job:
+        return ("Job nicht gefunden oder bereits gelöscht. Frage den Makler nach einem neuen Link.",
+                404, {"Content-Type": "text/plain; charset=utf-8"})
+    expected = job.get("share_token")
+    provided = request.args.get("t") or request.args.get("token")
+    if not expected or provided != expected:
+        return ("Ungültiger oder fehlender Token. Frage den Makler nach einem neuen Link.",
+                401, {"Content-Type": "text/plain; charset=utf-8"})
+
+    index_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "index.html")
+    with open(index_path, encoding="utf-8") as f:
+        html = f.read()
+
+    # Inject customer-mode bootstrap right before </head>
+    safe_jid = json.dumps(job_id)
+    safe_tok = json.dumps(expected)
+    inject = (
+        f"<script>window.CUSTOMER_MODE = "
+        f"{{ jobId: {safe_jid}, token: {safe_tok} }};</script>\n</head>"
+    )
+    if "</head>" in html:
+        html = html.replace("</head>", inject, 1)
+    else:
+        # Fallback: prepend
+        html = f"<script>window.CUSTOMER_MODE = {{ jobId: {safe_jid}, token: {safe_tok} }};</script>\n" + html
+    return html, 200, {"Content-Type": "text/html; charset=utf-8"}
+
+
 @app.route("/health")
 def health():
     return jsonify({"status": "ok", "service": "INTERPRES Full Pipeline v3",
@@ -3334,6 +3485,34 @@ def _read_job(job_id):
             return json.load(f)
     except Exception:
         return None
+
+
+def _authorize_job(job_id):
+    """Auth für /job/<job_id>/...-Endpoints.
+    Akzeptiert ENTWEDER X-API-Token (Broker) ODER passenden share_token (Kunde).
+    Share-Token kann via Header X-Share-Token oder Query-Param ?t= übergeben werden."""
+    if request.headers.get("X-API-Token") == API_TOKEN:
+        return True
+    job = _read_job(job_id)
+    if not job:
+        return False
+    expected = job.get("share_token")
+    if not expected:
+        return False
+    provided = (request.headers.get("X-Share-Token")
+                or request.args.get("t")
+                or request.args.get("token"))
+    return provided == expected
+
+
+def _share_url_for(job_id, share_token):
+    """Baut den Customer-Share-Link mit Token.
+    Nutzt request.host_url damit der Link die korrekte Domain hat (Render setzt das)."""
+    try:
+        base = request.host_url.rstrip("/")
+    except Exception:
+        base = ""
+    return f"{base}/c/{job_id}?t={share_token}"
 
 def _cleanup_old_jobs():
     """Entfernt Jobs und PDFs älter als 30 Minuten."""
@@ -3802,6 +3981,7 @@ def generate_expose():
             print(f"[{job_id}] Kunden-Namen: entwickler={user_entwicklername!r}, "
                   f"titel={user_projekttitel!r}")
 
+        share_token = secrets.token_urlsafe(16)
         _write_job(job_id,
                    status="processing",
                    phase="Wird gestartet …",
@@ -3809,6 +3989,7 @@ def generate_expose():
                    pdf_path=None,
                    name=None,
                    error=None,
+                   share_token=share_token,
                    user_entwicklername=user_entwicklername,
                    user_projekttitel=user_projekttitel)
 
@@ -3820,7 +4001,10 @@ def generate_expose():
         t.start()
 
         print(f"[{job_id}] Job gestartet mit {len(zip_paths)} ZIP(s)")
-        return jsonify({"job_id": job_id})
+        return jsonify({
+            "job_id":    job_id,
+            "share_url": _share_url_for(job_id, share_token),
+        })
 
     except Exception as e:
         import traceback
@@ -3831,19 +4015,25 @@ def generate_expose():
 def job_status(job_id):
     if request.method == "OPTIONS":
         return make_response("", 204)
-    if request.headers.get("X-API-Token") != API_TOKEN:
+    if not _authorize_job(job_id):
         return jsonify({"error": "Unauthorized"}), 401
     job = _read_job(job_id)
     if not job:
         return jsonify({"error": "Job nicht gefunden"}), 404
     status = job.get("status", "processing")
+    # Share-URL nur für Broker (X-API-Token) ausgeben, nicht für Customer
+    is_broker = request.headers.get("X-API-Token") == API_TOKEN
+    share_url = (_share_url_for(job_id, job["share_token"])
+                 if is_broker and job.get("share_token") else None)
     if status == "processing":
-        return jsonify({"status": "processing", "phase": job.get("phase", "")})
+        resp = {"status": "processing", "phase": job.get("phase", "")}
+        if share_url: resp["share_url"] = share_url
+        return jsonify(resp)
     if status == "error":
         return jsonify({"status": "error", "error": job.get("error", "Unbekannter Fehler")}), 500
     if status == "preview":
         # Preview bereit – noch kein Download
-        return jsonify({
+        resp = {
             "status":         "preview",
             "phase":          job.get("phase", "Bereit für Upload"),
             "name":           job.get("name", "Expose"),
@@ -3851,7 +4041,9 @@ def job_status(job_id):
             "bbox_map":       job.get("bbox_map", {}),
             "slot_list":      job.get("slot_list", []),
             "already_filled": job.get("already_filled", []),
-        })
+        }
+        if share_url: resp["share_url"] = share_url
+        return jsonify(resp)
     if status == "done":
         pdf_path = job.get("pdf_path")
         if not pdf_path or not os.path.exists(pdf_path):
@@ -3874,8 +4066,7 @@ def job_slide_image(job_id, n):
     if request.method == "OPTIONS":
         return make_response("", 204)
     # Token darf in Query-Param stehen (für <img src=…>)
-    token = request.headers.get("X-API-Token") or request.args.get("token")
-    if token != API_TOKEN:
+    if not _authorize_job(job_id):
         return jsonify({"error": "Unauthorized"}), 401
     path = os.path.join(_job_slides_dir(job_id), f"slide_{n}.jpg")
     if not os.path.exists(path):
@@ -3959,7 +4150,7 @@ def job_upload_image(job_id):
     Multipart: field 'image' (Datei) + 'slot' (z.B. 'bild_titel')."""
     if request.method == "OPTIONS":
         return make_response("", 204)
-    if request.headers.get("X-API-Token") != API_TOKEN:
+    if not _authorize_job(job_id):
         return jsonify({"error": "Unauthorized"}), 401
     job = _read_job(job_id)
     if not job:
@@ -3994,7 +4185,7 @@ def job_remove_upload(job_id, slot):
     """Entfernt das vom User hochgeladene Bild für einen Slot."""
     if request.method == "OPTIONS":
         return make_response("", 204)
-    if request.headers.get("X-API-Token") != API_TOKEN:
+    if not _authorize_job(job_id):
         return jsonify({"error": "Unauthorized"}), 401
     slot = slot.lower()
     if not slot.startswith("bild_"):
@@ -4017,7 +4208,7 @@ def job_finalize(job_id):
     """Startet Second-Pass im Hintergrund. Gibt sofort 202 zurück."""
     if request.method == "OPTIONS":
         return make_response("", 204)
-    if request.headers.get("X-API-Token") != API_TOKEN:
+    if not _authorize_job(job_id):
         return jsonify({"error": "Unauthorized"}), 401
     job = _read_job(job_id)
     if not job:
@@ -4036,7 +4227,7 @@ def job_list_uploads(job_id):
     """Listet aktuell hochgeladene User-Bilder pro Slot."""
     if request.method == "OPTIONS":
         return make_response("", 204)
-    if request.headers.get("X-API-Token") != API_TOKEN:
+    if not _authorize_job(job_id):
         return jsonify({"error": "Unauthorized"}), 401
     ud = _job_uploads_dir(job_id)
     items = {}
@@ -4055,8 +4246,7 @@ def job_uploaded_preview(job_id, slot):
     """Liefert das hochgeladene Bild zur Anzeige im Frontend."""
     if request.method == "OPTIONS":
         return make_response("", 204)
-    token = request.headers.get("X-API-Token") or request.args.get("token")
-    if token != API_TOKEN:
+    if not _authorize_job(job_id):
         return jsonify({"error": "Unauthorized"}), 401
     ud = _job_uploads_dir(job_id)
     slot = slot.lower()
