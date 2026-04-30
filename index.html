@@ -1273,6 +1273,19 @@ function renderSlideList(job_id, slideCount, bboxMap, alreadyFilled) {
     img.src = `/job/${job_id}/slide/${i + 1}?token=${encodeURIComponent(API_TOKEN)}`;
     img.alt = `Slide ${i + 1}`;
     img.onload = () => positionBoxesForSlide(wrap, slidesByIdx[i], slideW, slideH);
+    img.onerror = () => {
+      // Fallback: schraffierter Platzhalter wenn JPG nicht geladen werden konnte
+      img.style.display = 'none';
+      const placeholder = document.createElement('div');
+      placeholder.style.cssText = 'aspect-ratio:16/9;background:'
+        + 'repeating-linear-gradient(45deg,#0e1a2c,#0e1a2c 10px,#1a2a44 10px,#1a2a44 20px);'
+        + 'display:flex;align-items:center;justify-content:center;color:#7a8ba0;'
+        + 'font-size:0.78rem;text-align:center;padding:1rem;';
+      placeholder.innerHTML = `Folien-Vorschau nicht verfügbar.<br>Du kannst trotzdem Bilder zu den Slots zuweisen.`;
+      wrap.appendChild(placeholder);
+      // Trotzdem positionieren – Fallback-Container hat aspect-ratio
+      setTimeout(() => positionBoxesForSlide(wrap, slidesByIdx[i], slideW, slideH), 50);
+    };
     wrap.appendChild(img);
 
     const slideInfo = slidesByIdx[i];

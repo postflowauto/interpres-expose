@@ -1140,25 +1140,19 @@ def fill_image_placeholders(data):
         print(f"  {slot} ({landmark_type}) → {url[:70]}")
 
     # Slots die NUR mit echten Projektfotos vom Kunden befüllt werden.
-    # Lieber leerer Platzhalter als falsches Stock-Foto – Kunde kann später
-    # via Preview-UI eigene Fotos hochladen.
+    # Alles andere kriegt automatisch ein passendes Stock-/Wikimedia-Bild.
+    # Ziel: Kunde sieht ein vollständiges Exposé und ersetzt nur die paar
+    # echten Projekt-spezifischen Bilder (Cover, Außenansichten, Grundrisse,
+    # konkrete Wohnungen). Generische Themenbilder (Greenliving, Interior,
+    # Ausstattung, Rechtliches, etc.) liefert die Pipeline.
     _NO_FALLBACK_SLOTS = {
-        # ── Außenansichten / Renderings / Visualisierungen ──────────────
+        # ── Echte Projekt-Visualisierungen / Renderings vom Bauträger ──
         "bild_titel", "bild_projekt", "bild_projekt_aussen",
         "bild_ansicht_1", "bild_ansicht_2",
-        "bild_greenliving_1", "bild_greenliving_2",
-        # ── Innen / Ausstattung / Hotel-Feeling ──────────────────────────
-        "bild_interior",
-        "bild_ausstattung_1", "bild_ausstattung_2", "bild_ausstattung_3",
-        "bild_ausstattung_4", "bild_ausstattung_5", "bild_ausstattung_6",
-        "bild_hotel_1", "bild_hotel_2",
-        "bild_standort_innen", "bild_standort_aussen",
-        # ── Collagen / Schemata / Rechtliches ───────────────────────────
-        "bild_collage_1", "bild_collage_2", "bild_collage_3", "bild_collage_4", "bild_collage_5",
-        "bild_rechtlich_1", "bild_rechtlich_2",
-        # ── Grundrisse / WE-Typen ──────────────────────────────────────
+        # ── Außenansichten Standort (echtes Quartier-Foto wenn möglich) ──
+        "bild_standort_aussen",
+        # ── Konkrete Grundriss-Pläne & Wohnungs-Bilder (DIN-277 vom Architekt) ──
         "bild_grundriss_1", "bild_grundriss_2", "bild_grundriss_3", "bild_grundriss_4",
-        "bild_grundriss_intro_1", "bild_grundriss_intro_2", "bild_grundriss_intro_3",
         *{f"bild_we_{n}" for n in range(1, 21)},
         # ── Amenity-Bilder werden separat via Wikimedia + Vision validiert ──
         *{f"bild_amenity_{n}" for n in range(1, 10)},
@@ -1168,6 +1162,16 @@ def fill_image_placeholders(data):
     # Lageplan-URL kommt aus OSM, nicht aus Picsum
     queries.pop("BILD_LAGEPLAN", None)
 
+    # Themen-Slots: hier bringt Unsplash deutlich passendere Bilder als Picsum
+    # (Architektur, Interior, Nachhaltigkeit, Hotel-Look, Magdeburg-Branche).
+    _UNSPLASH_THEMED_PREFIXES = (
+        "bild_greenliving", "bild_interior",
+        "bild_ausstattung", "bild_hotel", "bild_collage",
+        "bild_rechtlich", "bild_grundriss_intro",
+        "bild_standort_innen",
+        "bild_stadt_presse", "bild_stadt_branche",
+    )
+
     filled = 0
     for placeholder_key, query in queries.items():
         data_key = placeholder_key.lower()
@@ -1176,7 +1180,7 @@ def fill_image_placeholders(data):
         # Skip wenn Slot bereits durch Kundenbild oder Wikimedia belegt
         if data.get(data_key) and str(data[data_key]).startswith("http"):
             continue
-        # Kein Picsum für projekt-spezifische Slots ohne Kundenbild
+        # Kein Fallback für projekt-spezifische Slots ohne Kundenbild
         if data_key in _NO_FALLBACK_SLOTS:
             continue
         # Skip bild_we_N für nicht vorhandene WE-Typen
@@ -1191,9 +1195,18 @@ def fill_image_placeholders(data):
                             or data.get(f"we_beispiel_{right_n}") or data.get(f"we_nummern_{right_n}"))
                 if not has_text:
                     continue
-        # Picsum für generische Slots (Ausstattung, WE-Typen, etc.)
-        seed = abs(hash(query)) % 1000
-        url = f"https://picsum.photos/seed/{seed}/1200/800"
+        # Themen-Slots: erst Unsplash mit echtem Suchbegriff, sonst Picsum-Fallback
+        url = None
+        if any(data_key.startswith(p) for p in _UNSPLASH_THEMED_PREFIXES):
+            try:
+                url = fetch_unsplash_image(query)
+                if url and "picsum.photos" in url:
+                    url = None
+            except Exception:
+                url = None
+        if not url:
+            seed = abs(hash(query)) % 1000
+            url = f"https://picsum.photos/seed/{seed}/1200/800"
         data[data_key] = url
         filled += 1
 
@@ -2122,6 +2135,11 @@ def duplicate_we_slides(prs, data):
     from pptx.oxml import parse_xml
     import string
 
+    # Snapshot der Original-Seitenzahlen + TOC-Folie BEVOR irgendetwas dupliziert
+    # oder umnummeriert wird. Wird nach allen Modifikationen für den finalen
+    # Page-Resync gebraucht.
+    template_n_to_slide, toc_slide = _build_template_page_map(prs)
+
     # Ermittle Anzahl extra Typen dynamisch:
     # Typ 1 (original): we_beispiel_1/_2 + we_flaeche_*
     # Typ 2: we_beispiel_3/_4 + we_flaeche_*_typ2
@@ -2258,17 +2276,11 @@ def duplicate_we_slides(prs, data):
 
     # Original-Slide: bleibt bei 'a' (Typ 1) – beide Spalten haben schon 'a'
 
-    # ── Bottom-Page-Numbers nach WE-Duplikation neu nummerieren ────────────
-    # Jede Slide-Spread zeigt 2 Seitenzahlen unten (links + rechts).
-    # Pro extra dupliziertem WE-Slide verschieben sich alle nachfolgenden
-    # Seitenzahlen um 2.
-    if extra_slides > 0:
-        # Original-WE-Slide-Bottompages MERKEN bevor renumber läuft – wird
-        # für TOC-Shift gebraucht (alles > we_last_page muss verschoben werden).
-        we_last_page = _read_max_bottom_page(prs, prs.slides[we_idx])
-        _renumber_bottom_pages(prs, we_idx, extra_slides)
-        if we_last_page is not None:
-            _renumber_toc_pages(prs, we_idx, extra_slides, we_last_page)
+    # ── Page-Resync: Bottom-Pages + TOC auf echte PDF-Seitenzahl mappen ────
+    # Ersetzt _renumber_bottom_pages + _renumber_toc_pages. Funktioniert auch
+    # wenn extra_slides=0 (Template-Defaults stimmen sonst nicht zur Konvertier-
+    # Pipeline 1 PPTX-Folie = 1 PDF-Seite).
+    _resync_pages_to_actual(prs, template_n_to_slide, toc_slide)
 
 
 # Page-number-like text matcher: 1-3 digit number, possibly with whitespace
@@ -2376,48 +2388,232 @@ def _read_max_bottom_page(prs, slide):
     return max(found) if found else None
 
 
-def _renumber_toc_pages(prs, we_idx, extra_slides, we_last_page):
-    """TOC-Seitenzahlen verschieben.
-    Auf Folien VOR we_idx werden alle isolierten Zahlen-Paragraphen mit Wert
-    > we_last_page um 2*extra_slides erhöht. Andere Zahlen (Kapitel-Nummern
-    'u invest 01..04', Listen-Marker, Bottom-Page-Numbers früher Slides) sind
-    immer ≤ we_last_page → bleiben unangetastet.
+def _scan_bottom_page_paragraphs(prs, slide):
+    """Findet Paragraphen im unteren 15% des Slides, die nur eine 1-3-stellige
+    Zahl enthalten (1..200). Gibt Liste [(paragraph, n)] zurück."""
+    sh_h = int(prs.slide_height or 6858000)
+    bottom_threshold = int(sh_h * 0.85)
+    out = []
+    def _go(tf, abs_top):
+        if abs_top < bottom_threshold:
+            return
+        for p in tf.paragraphs:
+            full = "".join(r.text for r in p.runs).strip()
+            m = _PAGE_NUM_RE.match(full)
+            if not m:
+                continue
+            n = int(m.group(1))
+            if 1 <= n <= 200:
+                out.append((p, n))
+    for shape in slide.shapes:
+        try: top = shape.top or 0
+        except Exception: top = 0
+        if shape.shape_type == 6:
+            for child in shape.shapes:
+                if child.has_text_frame:
+                    _go(child.text_frame, (child.top or 0) + (shape.top or 0))
+        else:
+            if shape.has_text_frame:
+                _go(shape.text_frame, top)
+    return out
+
+
+def _scan_isolated_numbers(slide):
+    """Alle Paragraphen mit isolierter Zahl 1..200, egal wo auf der Folie."""
+    out = []
+    def _go(tf):
+        for p in tf.paragraphs:
+            full = "".join(r.text for r in p.runs).strip()
+            m = _PAGE_NUM_RE.match(full)
+            if not m:
+                continue
+            n = int(m.group(1))
+            if 1 <= n <= 200:
+                out.append((p, n))
+    for shape in slide.shapes:
+        if shape.shape_type == 6:
+            for child in shape.shapes:
+                if child.has_text_frame:
+                    _go(child.text_frame)
+        else:
+            if shape.has_text_frame:
+                _go(shape.text_frame)
+    return out
+
+
+def _build_template_page_map(prs):
+    """Snapshot VOR jeglicher Modifikation: Template-Bottompage → Slide-Objekt.
+    Wird nach WE-Duplikation genutzt, um TOC-Einträge auf neue Slide-Positionen
+    zu mappen. Slide-Objekte überleben die Duplikation/Reorder, Indizes nicht.
+
+    Gibt ({n: slide}, toc_slide_or_None) zurück. n als Key benutzt erste Slide
+    falls mehrere Slides denselben Bottom-Wert haben (sollte nicht vorkommen).
     """
-    if extra_slides <= 0 or we_last_page is None:
-        return
-    shift = 2 * extra_slides
-    total_shifted = 0
+    out = {}
+    toc_slide = None
+    for idx, slide in enumerate(prs.slides):
+        bottoms = _scan_bottom_page_paragraphs(prs, slide)
+        for _, n in bottoms:
+            if n not in out:
+                out[n] = slide
+        # TOC: viele verschiedene isolierte Zahlen, keine Bottom-Pages
+        if toc_slide is None:
+            all_nums = _scan_isolated_numbers(slide)
+            unique = {n for (_, n) in all_nums}
+            if len(unique) >= 8 and len(bottoms) == 0:
+                toc_slide = slide
+    return out, toc_slide
 
-    for slide_idx in range(we_idx):
-        slide = prs.slides[slide_idx]
 
-        def _shift_tf(tf):
-            nonlocal total_shifted
-            for p in tf.paragraphs:
-                full = "".join(r.text for r in p.runs).strip()
-                m = _PAGE_NUM_RE.match(full)
-                if not m:
-                    continue
-                n = int(m.group(1))
-                if n <= we_last_page or n > 200:
-                    continue
-                new_n = n + shift
-                if p.runs:
-                    p.runs[0].text = str(new_n)
-                    for r in p.runs[1:]:
-                        r.text = ""
-                total_shifted += 1
+def _resync_pages_to_actual(prs, template_n_to_slide, toc_slide):
+    """Setzt Bottom-Pages auf slide_idx+1 (= echte PDF-Seite) und mappt TOC-
+    Einträge (Template-Zahlen) auf die neue Position des entsprechenden Slides.
+    """
+    # Slide-Objekte sind nicht hashbar → Lookup via id() oder linear search.
+    # Wir bauen ein {id(slide): idx}-Dict für O(1) Lookup nach Duplikation.
+    id_to_idx = {id(s): i for i, s in enumerate(prs.slides)}
 
-        for shape in slide.shapes:
-            if shape.shape_type == 6:
-                for child in shape.shapes:
-                    if child.has_text_frame:
-                        _shift_tf(child.text_frame)
+    # Bottom-Pages: jede Folie kriegt ihre echte PDF-Seitenzahl
+    bottom_changes = 0
+    for idx, slide in enumerate(prs.slides):
+        new_n = str(idx + 1)
+        for p, old_n in _scan_bottom_page_paragraphs(prs, slide):
+            if str(old_n) == new_n:
+                continue
+            if p.runs:
+                p.runs[0].text = new_n
+                for r in p.runs[1:]:
+                    r.text = ""
+            bottom_changes += 1
+
+    # TOC: für jede Template-Zahl → Slide finden → neue Seite = idx+1 setzen
+    toc_changes = 0
+    toc_idx = id_to_idx.get(id(toc_slide)) if toc_slide is not None else None
+    if toc_slide is not None and toc_idx is not None:
+        # Mapping Template-N → neue PDF-Seite (basierend auf aktueller Slide-Position)
+        template_n_to_new_page = {}
+        for n, s in template_n_to_slide.items():
+            new_idx = id_to_idx.get(id(s))
+            if new_idx is not None:
+                template_n_to_new_page[n] = new_idx + 1
+
+        # Sortierte Liste für Interpolation/Fallback
+        sorted_keys = sorted(template_n_to_new_page.keys())
+        max_known   = sorted_keys[-1] if sorted_keys else 0
+        last_page   = len(prs.slides)
+
+        def _resolve(old_n):
+            """Liefert die neue Seitenzahl für eine TOC-Template-Zahl.
+            Exakter Treffer → Mapping. Sonst Interpolation zwischen Nachbar-
+            Bottom-Pages. Werte oberhalb des Templates → letzte Seite."""
+            exact = template_n_to_new_page.get(old_n)
+            if exact is not None:
+                return exact
+            if old_n > max_known:
+                return last_page
+            # Nachbar-Bottoms suchen
+            lower = upper = None
+            for k in sorted_keys:
+                if k < old_n: lower = k
+                elif k > old_n:
+                    upper = k; break
+            if lower is None or upper is None:
+                return None
+            lp = template_n_to_new_page[lower]
+            up = template_n_to_new_page[upper]
+            # Lineare Interpolation, ganzzahlig
+            ratio = (old_n - lower) / (upper - lower) if upper != lower else 0
+            return lp + round((up - lp) * ratio)
+
+        toc_idx_skip = {n for _, n in _scan_bottom_page_paragraphs(prs, toc_slide)}
+        # Heuristik-Whitelist: Kapitel-Marker (1..4) auf TOC bleiben, also nicht remappen
+        # wenn 1..len(chapter_count) und sehr klein. Solche Zahlen sollten unverändert bleiben.
+        for p, old_n in _scan_isolated_numbers(toc_slide):
+            # Kapitel-Markierungen 1,2,3,4 unverändert lassen — sie sind Layout-Elemente,
+            # keine Seitenreferenzen.
+            if old_n <= 4:
+                continue
+            new_n = _resolve(old_n)
+            if new_n is None or new_n == old_n:
+                continue
+            if p.runs:
+                p.runs[0].text = str(new_n)
+                for r in p.runs[1:]:
+                    r.text = ""
+            toc_changes += 1
+
+    print(f"  Page-Resync: {bottom_changes} Bottom-Pages → echte PDF-Seite, "
+          f"{toc_changes} TOC-Einträge gemappt (TOC-Slide={toc_idx})")
+
+
+def _crop_image_to_aspect(img_bytes, target_w_emu, target_h_emu, max_side_px=1800):
+    """Schneidet ein Bild auf das Aspect-Ratio des Ziel-Shapes (Center-Crop) und
+    skaliert auf eine vernünftige Pixelgröße. Verhindert Verzerrungen und Blur
+    durch Stretch-Modus im PPTX-blipFill.
+
+    Args:
+        img_bytes: Original-Bilddaten (JPEG/PNG/WebP).
+        target_w_emu, target_h_emu: Shape-Dimensionen in EMU (1 inch = 914400).
+        max_side_px: Maximale Pixel-Kantenlänge (Standardwert 1800 ≈ 4.7 MB JPEG).
+
+    Returns:
+        bytes: JPEG-Daten mit korrektem Aspect-Ratio. Bei Fehler/zu kleinem Bild
+        wird das Original zurückgegeben.
+    """
+    if not target_w_emu or not target_h_emu:
+        return img_bytes
+    try:
+        from PIL import Image
+        src = Image.open(io.BytesIO(img_bytes))
+        # Auto-rotate basierend auf EXIF-Orientation
+        try:
+            from PIL import ImageOps
+            src = ImageOps.exif_transpose(src)
+        except Exception:
+            pass
+        src_w, src_h = src.size
+        if src_w <= 0 or src_h <= 0:
+            return img_bytes
+
+        target_aspect = target_w_emu / target_h_emu
+        src_aspect    = src_w / src_h
+
+        # Center-Crop zur Anpassung an Ziel-Aspect
+        if abs(src_aspect - target_aspect) > 0.02:  # ≥2% Unterschied → croppen
+            if src_aspect > target_aspect:
+                # Quelle ist breiter → links/rechts beschneiden
+                new_w = int(src_h * target_aspect)
+                left  = (src_w - new_w) // 2
+                src   = src.crop((left, 0, left + new_w, src_h))
             else:
-                if shape.has_text_frame:
-                    _shift_tf(shape.text_frame)
+                # Quelle ist höher → oben/unten beschneiden
+                new_h = int(src_w / target_aspect)
+                top   = (src_h - new_h) // 2
+                src   = src.crop((0, top, src_w, top + new_h))
 
-    print(f"  TOC-Renumber: {total_shifted} Eintrag(e) > {we_last_page} um +{shift} verschoben")
+        # Skalieren auf vernünftige Größe – nie hoch, nur runter
+        cw, ch = src.size
+        long_side = max(cw, ch)
+        if long_side > max_side_px:
+            scale = max_side_px / long_side
+            src = src.resize((int(cw * scale), int(ch * scale)), Image.LANCZOS)
+
+        # Konvertieren zu RGB falls nötig (PNG mit Alpha → JPEG)
+        if src.mode in ("RGBA", "LA", "P"):
+            bg = Image.new("RGB", src.size, (255, 255, 255))
+            if src.mode == "P":
+                src = src.convert("RGBA")
+            bg.paste(src, mask=src.split()[-1] if src.mode in ("RGBA", "LA") else None)
+            src = bg
+        elif src.mode != "RGB":
+            src = src.convert("RGB")
+
+        out = io.BytesIO()
+        src.save(out, format="JPEG", quality=88, optimize=True)
+        return out.getvalue()
+    except Exception as e:
+        print(f"  _crop_image_to_aspect Fehler: {e} – verwende Original")
+        return img_bytes
 
 
 def fill_pptx(template_bytes, data, customer_images=None):
@@ -2679,9 +2875,17 @@ def fill_pptx(template_bytes, data, customer_images=None):
                 try:
                     print(f"  → blipFill: key={key!r} in Gruppe {shape.name!r}")
 
+                    # Aspect-Ratio-Crop basierend auf Placeholder-Group-Dims
+                    _ph_grpSpPr = shape._element.find(f'{{{_NS_P}}}grpSpPr')
+                    _ph_xfrm    = _ph_grpSpPr.find(f'{{{_NS_A}}}xfrm') if _ph_grpSpPr is not None else None
+                    _ph_ext     = _ph_xfrm.find(f'{{{_NS_A}}}ext')     if _ph_xfrm    is not None else None
+                    _tw = int(_ph_ext.get('cx', 0)) if _ph_ext is not None else (shape.width  or 0)
+                    _th = int(_ph_ext.get('cy', 0)) if _ph_ext is not None else (shape.height or 0)
+                    img_for_embed = _crop_image_to_aspect(image_data[key], _tw, _th)
+
                     # ── Schritt 1: Bild einbetten → rId holen ─────────────────
                     temp_pic = slide.shapes.add_picture(
-                        io.BytesIO(image_data[key]), 0, 0, 914400, 914400
+                        io.BytesIO(img_for_embed), 0, 0, 914400, 914400
                     )
                     temp_el = temp_pic._element
                     blip_in_temp = temp_el.find(f'.//{{{_NS_A}}}blip')
@@ -2809,8 +3013,9 @@ def fill_pptx(template_bytes, data, customer_images=None):
                 if height < MIN_IMG_SIZE: height = 2_400_000
                 shape_z = list(sp_tree).index(shape._element)
                 shape._element.getparent().remove(shape._element)
+                _img = _crop_image_to_aspect(image_data[shape_name_lower], width, height)
                 _pic = slide.shapes.add_picture(
-                    io.BytesIO(image_data[shape_name_lower]), left, top, width, height
+                    io.BytesIO(_img), left, top, width, height
                 )
                 insert_at_z(slide, _pic._element, shape_z)
                 return
@@ -2855,8 +3060,11 @@ def fill_pptx(template_bytes, data, customer_images=None):
                         if covering_target:
                             # Embed image → get rId
                             grp, grp_child, sp_pr_gc, solid_gc = covering_target
+                            _gw = grp.width  or 0
+                            _gh = grp.height or 0
+                            _img = _crop_image_to_aspect(image_data[key], _gw, _gh)
                             temp_pic = slide.shapes.add_picture(
-                                io.BytesIO(image_data[key]), 0, 0, 914400, 914400
+                                io.BytesIO(_img), 0, 0, 914400, 914400
                             )
                             temp_el = temp_pic._element
                             blip_in_temp = temp_el.find(f'.//{{{_NS_A}}}blip')
@@ -2884,8 +3092,9 @@ def fill_pptx(template_bytes, data, customer_images=None):
                         if height < MIN_IMG_SIZE: height = 2_400_000
                         shape_z = list(sp_tree).index(shape._element)
                         shape._element.getparent().remove(shape._element)
+                        _img = _crop_image_to_aspect(image_data[key], width, height)
                         _pic = slide.shapes.add_picture(
-                            io.BytesIO(image_data[key]), left, top, width, height
+                            io.BytesIO(_img), left, top, width, height
                         )
                         insert_at_z(slide, _pic._element, shape_z)
                         return
@@ -3627,6 +3836,28 @@ def _run_expose_job(job_id, zip_paths):
         expose_data = fill_image_placeholders(expose_data)
         gc.collect()
 
+        # ── Leere Raumflächen-Felder mit "—" füllen ─────────────────────────
+        # Hintergrund: Bei 1-Zimmer-Wohnungen gibt es kein separates Schlafzimmer
+        # → Claude liefert we_flaeche_2 leer. Im Template würde dann nur ein
+        # leerer Zahlenslot stehen. Statt blank lieber ein Bindestrich.
+        # Suffixe: "" = Typ 1, "_typN" = Typ 2..8 (v19), "_N" = Backwards (v20)
+        _flaeche_suffixes = [""] + [f"_typ{t}" for t in range(2, 9)] \
+                                + [f"_{n}" for n in range(1, 7)]
+        for suf in _flaeche_suffixes:
+            # Typ ist "befüllt" wenn we_typ_beschreibung ODER irgendein
+            # we_flaeche_*{suf} einen echten Wert hat
+            typ_active = bool(
+                str(expose_data.get(f"we_typ_beschreibung{suf}", "")).strip()
+                or any(str(expose_data.get(f"we_flaeche_{fn}{suf}", "")).strip()
+                       for fn in range(1, 6))
+            )
+            if not typ_active:
+                continue
+            for fn in range(1, 6):
+                key = f"we_flaeche_{fn}{suf}"
+                if key in expose_data and not str(expose_data.get(key, "")).strip():
+                    expose_data[key] = "—"
+
         # ── Kundennamen (Entwickler + Projekttitel) overriden Claude-Output ──
         # Beide werden unabhängig voneinander angewendet:
         #   entwickler_name  → ENTWICKLER_NAME (z.B. "SBB")
@@ -3745,8 +3976,13 @@ def _run_expose_job(job_id, zip_paths):
 
         slide_jpgs = []
         # bbox_map wurde oben aus pptx_bytes extrahiert – NICHT überschreiben!
+        # Diagnose: warum versagt Preview ggf.?
+        _can_pdf  = _can_convert_to_pdf()
+        _ppm_path = _find_pdftoppm()
+        print(f"[{job_id}] Preview-Tools: PDF-Konverter={'CloudConvert' if CLOUDCONVERT_KEY else ('LibreOffice' if _find_libreoffice() else 'KEINER')}, "
+              f"pdftoppm={_ppm_path or 'FEHLT'}")
         try:
-            if _can_convert_to_pdf() and _find_pdftoppm():
+            if _can_pdf and _ppm_path:
                 pdf_bytes = convert_to_pdf(pptx_bytes, f"{projekt_name}.pptx")
                 # PPTX wurde an CloudConvert gesendet → kann jetzt aus dem RAM
                 # (ist als Datei unter first_pass_pptx auf Disk)
@@ -3766,11 +4002,16 @@ def _run_expose_job(job_id, zip_paths):
                 try: os.unlink(pdf_tmp)
                 except OSError: pass
                 slide_jpgs = [os.path.basename(p) for p in jpg_paths]
-                print(f"[{job_id}] {len(slide_jpgs)} Slide-JPGs erstellt (PDF war {pdf_size_kb} KB)")
+                print(f"[{job_id}] ✓ {len(slide_jpgs)} Slide-JPGs erstellt (PDF war {pdf_size_kb} KB) "
+                      f"– Pfad: {_job_slides_dir(job_id)}")
             else:
-                print(f"[{job_id}] PDF-Konverter oder pdftoppm fehlt → Preview übersprungen")
+                missing = []
+                if not _can_pdf:  missing.append("CLOUDCONVERT_KEY/LibreOffice")
+                if not _ppm_path: missing.append("poppler-utils/pdftoppm")
+                print(f"[{job_id}] ⚠️ Preview übersprungen – fehlt: {', '.join(missing)}")
         except Exception as pe:
-            print(f"[{job_id}] Preview-Render Fehler: {pe}")
+            import traceback as _tb
+            print(f"[{job_id}] ✗ Preview-Render Fehler: {pe}\n{_tb.format_exc()[:600]}")
 
         # Welche Slots wurden bereits durch automatische Pipeline befüllt?
         already_filled = []
