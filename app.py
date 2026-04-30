@@ -1,4 +1,4 @@
-import os, io, json, base64, zipfile, requests, re, uuid, shutil, secrets
+import os, io, json, base64, zipfile, requests, re, uuid, shutil
 from copy import deepcopy
 from flask import Flask, request, jsonify, send_file
 from pptx import Presentation
@@ -3386,41 +3386,6 @@ def index():
         return f.read(), 200, {"Content-Type": "text/html; charset=utf-8"}
 
 
-@app.route("/c/<job_id>")
-def customer_view(job_id):
-    """Customer-Page: Same UI wie Broker, aber mit Share-Token statt API-Token.
-    Frontend liest window.CUSTOMER_MODE → springt direkt zur Vorschau, blendet
-    den ZIP-Upload aus.
-    """
-    job = _read_job(job_id)
-    if not job:
-        return ("Job nicht gefunden oder bereits gelöscht. Frage den Makler nach einem neuen Link.",
-                404, {"Content-Type": "text/plain; charset=utf-8"})
-    expected = job.get("share_token")
-    provided = request.args.get("t") or request.args.get("token")
-    if not expected or provided != expected:
-        return ("Ungültiger oder fehlender Token. Frage den Makler nach einem neuen Link.",
-                401, {"Content-Type": "text/plain; charset=utf-8"})
-
-    index_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "index.html")
-    with open(index_path, encoding="utf-8") as f:
-        html = f.read()
-
-    # Inject customer-mode bootstrap right before </head>
-    safe_jid = json.dumps(job_id)
-    safe_tok = json.dumps(expected)
-    inject = (
-        f"<script>window.CUSTOMER_MODE = "
-        f"{{ jobId: {safe_jid}, token: {safe_tok} }};</script>\n</head>"
-    )
-    if "</head>" in html:
-        html = html.replace("</head>", inject, 1)
-    else:
-        # Fallback: prepend
-        html = f"<script>window.CUSTOMER_MODE = {{ jobId: {safe_jid}, token: {safe_tok} }};</script>\n" + html
-    return html, 200, {"Content-Type": "text/html; charset=utf-8"}
-
-
 @app.route("/health")
 def health():
     return jsonify({"status": "ok", "service": "INTERPRES Full Pipeline v3",
@@ -3488,31 +3453,10 @@ def _read_job(job_id):
 
 
 def _authorize_job(job_id):
-    """Auth für /job/<job_id>/...-Endpoints.
-    Akzeptiert ENTWEDER X-API-Token (Broker) ODER passenden share_token (Kunde).
-    Share-Token kann via Header X-Share-Token oder Query-Param ?t= übergeben werden."""
-    if request.headers.get("X-API-Token") == API_TOKEN:
-        return True
-    job = _read_job(job_id)
-    if not job:
-        return False
-    expected = job.get("share_token")
-    if not expected:
-        return False
-    provided = (request.headers.get("X-Share-Token")
-                or request.args.get("t")
-                or request.args.get("token"))
-    return provided == expected
-
-
-def _share_url_for(job_id, share_token):
-    """Baut den Customer-Share-Link mit Token.
-    Nutzt request.host_url damit der Link die korrekte Domain hat (Render setzt das)."""
-    try:
-        base = request.host_url.rstrip("/")
-    except Exception:
-        base = ""
-    return f"{base}/c/{job_id}?t={share_token}"
+    """Auth für /job/<job_id>/...-Endpoints. Akzeptiert X-API-Token-Header oder
+    ?token=-Query (Letzteres für <img src=…>)."""
+    token = request.headers.get("X-API-Token") or request.args.get("token")
+    return token == API_TOKEN
 
 def _cleanup_old_jobs():
     """Entfernt Jobs und PDFs älter als 30 Minuten."""
@@ -3800,7 +3744,7 @@ def _run_expose_job(job_id, zip_paths):
         print(f"[{job_id}] Schritt 5/6: PDF + Slide-Bilder für Vorschau …")
 
         slide_jpgs = []
-        bbox_map   = {"slide_w_emu": 12192000, "slide_h_emu": 6858000, "slides": []}
+        # bbox_map wurde oben aus pptx_bytes extrahiert – NICHT überschreiben!
         try:
             if _can_convert_to_pdf() and _find_pdftoppm():
                 pdf_bytes = convert_to_pdf(pptx_bytes, f"{projekt_name}.pptx")
@@ -3981,7 +3925,6 @@ def generate_expose():
             print(f"[{job_id}] Kunden-Namen: entwickler={user_entwicklername!r}, "
                   f"titel={user_projekttitel!r}")
 
-        share_token = secrets.token_urlsafe(16)
         _write_job(job_id,
                    status="processing",
                    phase="Wird gestartet …",
@@ -3989,7 +3932,6 @@ def generate_expose():
                    pdf_path=None,
                    name=None,
                    error=None,
-                   share_token=share_token,
                    user_entwicklername=user_entwicklername,
                    user_projekttitel=user_projekttitel)
 
@@ -4001,10 +3943,7 @@ def generate_expose():
         t.start()
 
         print(f"[{job_id}] Job gestartet mit {len(zip_paths)} ZIP(s)")
-        return jsonify({
-            "job_id":    job_id,
-            "share_url": _share_url_for(job_id, share_token),
-        })
+        return jsonify({"job_id": job_id})
 
     except Exception as e:
         import traceback
@@ -4021,19 +3960,13 @@ def job_status(job_id):
     if not job:
         return jsonify({"error": "Job nicht gefunden"}), 404
     status = job.get("status", "processing")
-    # Share-URL nur für Broker (X-API-Token) ausgeben, nicht für Customer
-    is_broker = request.headers.get("X-API-Token") == API_TOKEN
-    share_url = (_share_url_for(job_id, job["share_token"])
-                 if is_broker and job.get("share_token") else None)
     if status == "processing":
-        resp = {"status": "processing", "phase": job.get("phase", "")}
-        if share_url: resp["share_url"] = share_url
-        return jsonify(resp)
+        return jsonify({"status": "processing", "phase": job.get("phase", "")})
     if status == "error":
         return jsonify({"status": "error", "error": job.get("error", "Unbekannter Fehler")}), 500
     if status == "preview":
         # Preview bereit – noch kein Download
-        resp = {
+        return jsonify({
             "status":         "preview",
             "phase":          job.get("phase", "Bereit für Upload"),
             "name":           job.get("name", "Expose"),
@@ -4041,9 +3974,7 @@ def job_status(job_id):
             "bbox_map":       job.get("bbox_map", {}),
             "slot_list":      job.get("slot_list", []),
             "already_filled": job.get("already_filled", []),
-        }
-        if share_url: resp["share_url"] = share_url
-        return jsonify(resp)
+        })
     if status == "done":
         pdf_path = job.get("pdf_path")
         if not pdf_path or not os.path.exists(pdf_path):
