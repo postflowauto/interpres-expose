@@ -10,9 +10,11 @@
 <div class="topbar">
   <div class="brand">INTERPRÉS</div>
   <div class="brand-sub">Exposé Editor</div>
+  <div class="job-name" id="job-name"></div>
   <div class="spacer"></div>
-  <button class="btn" id="btn-preview">Vorschau</button>
-  <button class="btn primary" id="btn-pdf">PDF herunterladen</button>
+  <div class="status" id="render-status"></div>
+  <button class="btn" id="btn-refresh">Vorschau aktualisieren</button>
+  <button class="btn primary" id="btn-download">PDF herunterladen</button>
 </div>
 
 <div class="layout">
@@ -23,210 +25,320 @@
 
   <main class="canvas">
     <div class="canvas-inner">
-      <iframe id="preview-frame" src="" frameborder="0"></iframe>
+      <div class="slide-frame" id="slide-frame">
+        <img id="slide-img" alt="">
+        <div id="slide-loading" class="loading">Lade Folie …</div>
+      </div>
+      <div class="slide-nav">
+        <button class="btn" id="btn-prev">←</button>
+        <span id="slide-pos"></span>
+        <button class="btn" id="btn-next">→</button>
+      </div>
     </div>
   </main>
 
-  <aside class="props" id="props">
+  <aside class="props">
     <div class="side-h">Bearbeiten</div>
+    <div class="tabs">
+      <button class="tab active" data-tab="texts">Texte</button>
+      <button class="tab" data-tab="images">Bilder</button>
+    </div>
     <div id="props-body" class="props-body">
-      <div class="hint">Wähle links eine Folie aus.</div>
+      <div class="hint">Lade …</div>
     </div>
   </aside>
 </div>
 
 <script>
-const PROJECT_ID = window.PROJECT_ID || new URLSearchParams(location.search).get('p');
-const API = `/v2/api/project/${PROJECT_ID}`;
-let project = null;
-let activeIdx = 0;
+const JOB_ID    = window.JOB_ID;
+const API_TOKEN = window.API_TOKEN || 'interpres-secret-2026';
+const V2_API    = `/v2/api/job/${JOB_ID}`;
+const V1_API    = `/job/${JOB_ID}`;
 
-async function loadProject() {
-  const r = await fetch(API);
+let job = null;
+let activeIdx = 0;
+let activeTab = 'texts';
+let dirty = false;       // unsaved text changes
+let pendingText = {};    // batched text updates
+let saveTimer = null;
+
+function authHeaders(extra) {
+  return Object.assign({'X-API-Token': API_TOKEN}, extra || {});
+}
+
+async function loadJob() {
+  const r = await fetch(V2_API);
   if (!r.ok) {
-    document.body.innerHTML = '<div style="padding:40px; color:#fff;">Projekt nicht gefunden.</div>';
+    document.body.innerHTML = '<div style="padding:40px; color:#fff;">Job nicht gefunden.</div>';
     return;
   }
-  project = await r.json();
+  job = await r.json();
+  document.getElementById('job-name').textContent = job.name || '';
   renderSlideList();
   showSlide(0);
-  refreshPreview();
+  renderProps();
 }
 
 function renderSlideList() {
   const wrap = document.getElementById('slide-list');
   wrap.innerHTML = '';
-  project.specs.forEach((s, i) => {
+  for (let i = 0; i < job.slide_count; i++) {
     const el = document.createElement('div');
     el.className = 'slide-item' + (i === activeIdx ? ' active' : '');
     el.innerHTML = `
-      <div class="thumb">${i + 1}</div>
-      <div class="meta">
-        <div class="t">${prettyType(s.type)}</div>
-        <div class="sub">${getTitle(s)}</div>
+      <div class="thumb-wrap">
+        <img class="thumb-img" loading="lazy" src="${V1_API}/slide/${i+1}?token=${encodeURIComponent(API_TOKEN)}" alt="">
       </div>
+      <div class="meta">Folie ${i+1}</div>
     `;
     el.addEventListener('click', () => showSlide(i));
     wrap.appendChild(el);
-  });
-}
-
-function prettyType(t) {
-  return ({
-    cover: 'Cover',
-    toc: 'Inhalt',
-    kapitel: 'Kapitel',
-    investmentfacts: 'Investmentfacts',
-    sechs_gruende: '6 gute Gründe',
-    standort: 'Standort',
-    stadt_wachstum: 'Stadt – Wachstum',
-    quartier: 'Quartier',
-    projekt: 'Projekt',
-    greenliving: 'Greenliving',
-    ausstattung: 'Ausstattung',
-    we_typ: 'Wohnungstyp',
-    rechtliches: 'Rechtliches',
-    schluss: 'Schluss',
-  }[t] || t);
-}
-
-function getTitle(spec) {
-  const d = spec.data || {};
-  return d.title || d.projekt_titel || d.stadt || d.typ_beschreibung || '';
+  }
+  if (!job.slide_count) {
+    wrap.innerHTML = '<div class="hint" style="padding:20px;">Keine Folien-Vorschau verfügbar.<br>Klick "Vorschau aktualisieren".</div>';
+  }
 }
 
 function showSlide(idx) {
   activeIdx = idx;
   renderSlideList();
-  renderProps();
-  document.getElementById('preview-frame').contentWindow?.postMessage(
-    {action: 'scroll', idx}, '*'
-  );
+  const img = document.getElementById('slide-img');
+  const ld  = document.getElementById('slide-loading');
+  ld.style.display = 'flex';
+  img.style.opacity = '0';
+  img.onload  = () => { ld.style.display = 'none'; img.style.opacity = '1'; };
+  img.onerror = () => { ld.textContent = 'Folie nicht geladen'; };
+  img.src = `${V1_API}/slide/${idx+1}?token=${encodeURIComponent(API_TOKEN)}&t=${Date.now()}`;
+  document.getElementById('slide-pos').textContent = `${idx+1} / ${job.slide_count}`;
 }
 
+// ── Properties Panel ─────────────────────────────────────────────────────
 function renderProps() {
   const body = document.getElementById('props-body');
-  const spec = project.specs[activeIdx];
-  if (!spec) { body.innerHTML = ''; return; }
-  const d = spec.data || {};
   body.innerHTML = '';
-  const fields = inferFields(spec.type, d);
-  fields.forEach(f => body.appendChild(makeField(f)));
+  if (activeTab === 'texts') renderTextsTab(body);
+  else renderImagesTab(body);
 }
 
-function inferFields(type, data) {
-  // Welche Felder sind editierbar pro Folientyp
-  const out = [];
-  const SKIP = new Set(['stats', 'facts', 'gruende', 'minutes', 'categories',
-                        'bullets', 'paragraphs', 'features', 'images',
-                        'beispiele', 'chapters']);
-  for (const k of Object.keys(data)) {
-    if (SKIP.has(k)) continue;
-    const v = data[k];
-    if (v === null || v === undefined) continue;
-    if (typeof v === 'string') {
-      const isImg = /^bild_|^img$|_img$|_url$/.test(k) || (typeof v === 'string' && v.startsWith('http'));
-      const long = v.length > 80;
-      out.push({ key: k, value: v, type: isImg ? 'image' : (long ? 'textarea' : 'text') });
-    } else if (typeof v === 'number') {
-      out.push({ key: k, value: String(v), type: 'text' });
-    }
-  }
-  // Listen-Container (z.B. images, gruende) als Bild-Slot-Liste
-  if (Array.isArray(data.images)) {
-    data.images.forEach((url, i) => out.push({
-      key: `images.${i}`, value: url || '', type: 'image', label: `Bild ${i+1}`
-    }));
-  }
-  return out;
-}
-
-function makeField(f) {
-  const wrap = document.createElement('div');
-  wrap.className = 'field';
-  const lbl = document.createElement('label');
-  lbl.textContent = f.label || f.key;
-  wrap.appendChild(lbl);
-
-  if (f.type === 'image') {
-    if (f.value) {
-      const img = document.createElement('img');
-      img.src = f.value;
-      img.className = 'preview-img';
-      wrap.appendChild(img);
-    }
-    const inp = document.createElement('input');
-    inp.type = 'file'; inp.accept = 'image/*';
-    inp.addEventListener('change', e => uploadImage(f.key, e.target.files[0]));
-    wrap.appendChild(inp);
-    const url = document.createElement('input');
-    url.type = 'text'; url.placeholder = 'oder URL eingeben';
-    url.value = f.value || '';
-    url.addEventListener('change', () => updateField(f.key, url.value));
-    wrap.appendChild(url);
-  } else if (f.type === 'textarea') {
-    const ta = document.createElement('textarea');
-    ta.rows = 4; ta.value = f.value;
-    ta.addEventListener('change', () => updateField(f.key, ta.value));
-    wrap.appendChild(ta);
-  } else {
-    const inp = document.createElement('input');
-    inp.type = 'text'; inp.value = f.value;
-    inp.addEventListener('change', () => updateField(f.key, inp.value));
-    wrap.appendChild(inp);
-  }
-  return wrap;
-}
-
-async function updateField(key, value) {
-  const spec = project.specs[activeIdx];
-  if (key.startsWith('images.')) {
-    const i = parseInt(key.split('.')[1], 10);
-    if (!Array.isArray(spec.data.images)) spec.data.images = [];
-    spec.data.images[i] = value;
-  } else {
-    spec.data[key] = value;
-  }
-  await fetch(`${API}/slide/${activeIdx}`, {
-    method: 'PUT',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify(spec.data),
+function renderTextsTab(body) {
+  if (!job.field_groups) return;
+  job.field_groups.forEach(group => {
+    // Nur Gruppen rendern wo mindestens ein Feld in expose existiert
+    const visible = group.keys.filter(([k,_]) => k in job.expose);
+    if (!visible.length) return;
+    const sec = document.createElement('div');
+    sec.className = 'group';
+    const h = document.createElement('div');
+    h.className = 'group-h';
+    h.textContent = group.name;
+    sec.appendChild(h);
+    visible.forEach(([key, label]) => {
+      const v = job.expose[key] || '';
+      const f = document.createElement('div');
+      f.className = 'field';
+      f.innerHTML = `<label>${label}</label>`;
+      const isLong = (typeof v === 'string' && v.length > 80) || /^text_/.test(key);
+      const ctl = document.createElement(isLong ? 'textarea' : 'input');
+      if (!isLong) ctl.type = 'text';
+      else ctl.rows = Math.max(2, Math.min(6, Math.ceil(v.length / 60)));
+      ctl.value = v;
+      ctl.addEventListener('input', e => onTextChange(key, e.target.value));
+      f.appendChild(ctl);
+      sec.appendChild(f);
+    });
+    body.appendChild(sec);
   });
-  refreshPreview();
 }
 
-async function uploadImage(key, file) {
+function renderImagesTab(body) {
+  if (!job.bild_slots || !job.bild_slots.length) {
+    body.innerHTML = '<div class="hint">Keine Bild-Slots gefunden.</div>';
+    return;
+  }
+  job.bild_slots.forEach(slot => {
+    const f = document.createElement('div');
+    f.className = 'field img-field';
+    const isUploaded = slot.key in job.uploaded;
+    f.innerHTML = `
+      <label>${slot.label} ${isUploaded ? '<span class="badge">eigenes Bild</span>' : ''}</label>
+    `;
+    // Aktuelles Bild zeigen
+    const preview = document.createElement('div');
+    preview.className = 'img-preview';
+    if (isUploaded) {
+      preview.innerHTML = `<img src="${V1_API}/uploaded/${slot.key}/preview?token=${encodeURIComponent(API_TOKEN)}&t=${Date.now()}">`;
+    } else if (slot.has_url) {
+      preview.innerHTML = `<img src="${slot.value}" loading="lazy">`;
+    } else {
+      preview.innerHTML = '<div class="img-empty">Kein Bild</div>';
+    }
+    f.appendChild(preview);
+
+    // Upload-Input
+    const inp = document.createElement('input');
+    inp.type = 'file'; inp.accept = '.jpg,.jpeg,.png,.webp';
+    inp.addEventListener('change', e => uploadImage(slot.key, e.target.files[0]));
+    f.appendChild(inp);
+
+    if (isUploaded) {
+      const del = document.createElement('button');
+      del.className = 'btn small';
+      del.textContent = 'Entfernen';
+      del.addEventListener('click', () => removeImage(slot.key));
+      f.appendChild(del);
+    }
+    body.appendChild(f);
+  });
+}
+
+function onTextChange(key, value) {
+  pendingText[key] = value;
+  job.expose[key] = value;
+  dirty = true;
+  setStatus('Änderungen werden gespeichert …', 'saving');
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(flushTextChanges, 600);
+}
+
+async function flushTextChanges() {
+  if (!Object.keys(pendingText).length) return;
+  const body = pendingText;
+  pendingText = {};
+  try {
+    const r = await fetch(`${V2_API}/text`, {
+      method: 'PUT',
+      headers: authHeaders({'Content-Type': 'application/json'}),
+      body: JSON.stringify(body),
+    });
+    if (r.ok) setStatus('Gespeichert · klicke "Vorschau aktualisieren" für die Folien-Aktualisierung', 'saved');
+    else setStatus('Speichern fehlgeschlagen', 'error');
+  } catch(e) {
+    setStatus('Netzwerkfehler beim Speichern', 'error');
+  }
+}
+
+async function uploadImage(slotKey, file) {
   if (!file) return;
   const fd = new FormData();
-  fd.append('file', file);
-  fd.append('key', key);
-  fd.append('slide_idx', activeIdx);
-  const r = await fetch(`${API}/upload`, { method: 'POST', body: fd });
-  if (r.ok) {
-    const j = await r.json();
-    await updateField(key, j.url);
-    renderProps();
+  fd.append('image', file);
+  fd.append('slot', slotKey);
+  setStatus(`Bild wird hochgeladen: ${slotKey} …`, 'saving');
+  try {
+    const r = await fetch(`${V1_API}/upload`, {
+      method: 'POST', headers: authHeaders(), body: fd,
+    });
+    if (!r.ok) {
+      const t = await r.text();
+      setStatus(`Upload-Fehler: ${t.substring(0,100)}`, 'error');
+      return;
+    }
+    setStatus('Bild hochgeladen · klicke "Vorschau aktualisieren"', 'saved');
+    // Reload state to reflect upload
+    await loadJob(); renderProps();
+  } catch(e) {
+    setStatus('Upload-Fehler: ' + e.message, 'error');
   }
 }
 
-function refreshPreview() {
-  const f = document.getElementById('preview-frame');
-  // Cache-bust
-  f.src = `/v2/api/project/${PROJECT_ID}/preview.html?t=${Date.now()}`;
+async function removeImage(slotKey) {
+  if (!confirm(`Bild für ${slotKey} entfernen?`)) return;
+  try {
+    const r = await fetch(`${V1_API}/upload/${slotKey}`, {
+      method: 'DELETE', headers: authHeaders(),
+    });
+    if (r.ok) {
+      setStatus('Bild entfernt', 'saved');
+      await loadJob(); renderProps();
+    }
+  } catch(e) {
+    setStatus('Fehler: ' + e.message, 'error');
+  }
 }
 
-document.getElementById('btn-pdf').addEventListener('click', async () => {
-  const a = document.createElement('a');
-  a.href = `/v2/api/project/${PROJECT_ID}/render.pdf`;
-  a.download = `${project.name || 'Expose'}.pdf`;
-  document.body.appendChild(a); a.click(); a.remove();
+async function triggerRender() {
+  await flushTextChanges();
+  setStatus('Vorschau wird neu gerendert …', 'saving');
+  document.getElementById('btn-refresh').disabled = true;
+  try {
+    const r = await fetch(`${V2_API}/render`, { method: 'POST', headers: authHeaders() });
+    if (!r.ok) {
+      setStatus('Render-Trigger fehlgeschlagen', 'error');
+      document.getElementById('btn-refresh').disabled = false;
+      return;
+    }
+    pollRenderStatus();
+  } catch(e) {
+    setStatus('Render-Fehler: ' + e.message, 'error');
+    document.getElementById('btn-refresh').disabled = false;
+  }
+}
+
+async function pollRenderStatus() {
+  const r = await fetch(`${V2_API}/render-status`);
+  const j = await r.json();
+  setStatus(j.phase || j.status, j.status === 'preview' ? 'saved' : 'saving');
+  if (j.status === 'preview') {
+    // Reload + Folien-Cache-Bust
+    await loadJob();
+    showSlide(activeIdx);
+    renderSlideList();
+    document.getElementById('btn-refresh').disabled = false;
+    setStatus('Vorschau aktualisiert ✓', 'saved');
+  } else if (j.status === 'error') {
+    setStatus('Render-Fehler: ' + (j.error || ''), 'error');
+    document.getElementById('btn-refresh').disabled = false;
+  } else {
+    setTimeout(pollRenderStatus, 2000);
+  }
+}
+
+async function downloadPdf() {
+  await flushTextChanges();
+  // Triggert render falls dirty
+  if (dirty) {
+    if (!confirm('Vorher Vorschau aktualisieren? (empfohlen, sonst zeigt das PDF die alte Version)')) {
+      window.location = `${V2_API}/download`;
+      return;
+    }
+    await triggerRender();
+    // Polling läuft – wenn fertig, dann download
+    return;
+  }
+  window.location = `${V2_API}/download`;
+}
+
+function setStatus(msg, kind) {
+  const el = document.getElementById('render-status');
+  el.textContent = msg;
+  el.className = 'status ' + (kind || '');
+}
+
+// Tabs
+document.querySelectorAll('.tab').forEach(t => {
+  t.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+    t.classList.add('active');
+    activeTab = t.dataset.tab;
+    renderProps();
+  });
 });
 
-document.getElementById('btn-preview').addEventListener('click', () => {
-  window.open(`/v2/api/project/${PROJECT_ID}/preview.html`, '_blank');
+document.getElementById('btn-prev').addEventListener('click', () => {
+  if (activeIdx > 0) showSlide(activeIdx - 1);
+});
+document.getElementById('btn-next').addEventListener('click', () => {
+  if (activeIdx < job.slide_count - 1) showSlide(activeIdx + 1);
+});
+document.getElementById('btn-refresh').addEventListener('click', triggerRender);
+document.getElementById('btn-download').addEventListener('click', downloadPdf);
+
+window.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  if (e.key === 'ArrowLeft' && activeIdx > 0) showSlide(activeIdx - 1);
+  if (e.key === 'ArrowRight' && activeIdx < job.slide_count - 1) showSlide(activeIdx + 1);
 });
 
-loadProject();
+loadJob();
 </script>
 
 </body></html>
