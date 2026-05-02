@@ -4082,11 +4082,14 @@ def _run_expose_job(job_id, zip_paths):
             if slot.lower() not in already_filled:
                 already_filled.append(slot.lower())
 
-        # ── Slot-Liste: ZUERST aus bbox_map versuchen (mit Slide-Indizes),
-        #     SONST Fallback aus PLATZHALTER (alle bild_*-Slots, ohne Slide-Index).
+        # ── Slot-Liste: nur ECHT im Template vorhandene Slots aus bbox_map.
+        # Der frühere PLATZHALTER-Fallback hat alle 20 bild_we_* aus dem
+        # Defaults-Dict eingefügt (auch für nicht existierende WE-Typen) und
+        # zusätzlich phantom-Slots wie bild_grundriss_2 die im Template fehlen.
+        # Wir nehmen jetzt ausschließlich was die bbox_map liefert; Fallback
+        # nur wenn die bbox_map komplett leer ist (Extraktion versagt).
         slot_list = []
         seen_slots = set()
-        # 1) Bbox-basiert (mit korrektem Slide-Index)
         for s in bbox_map.get("slides", []):
             for ph in s.get("placeholders", []):
                 if ph["slot"] in seen_slots:
@@ -4099,20 +4102,32 @@ def _run_expose_job(job_id, zip_paths):
                     "label": ph.get("label", ph["slot"]),
                     "slide": s["index"] + 1,
                 })
-        # 2) Fallback aus PLATZHALTER: jeder bild_*-Slot, der nicht befüllt ist
-        for k in PLATZHALTER:
-            if not k.startswith("bild_"):
-                continue
-            if k in seen_slots:
-                continue
-            if k in already_filled:
-                continue
-            seen_slots.add(k)
-            slot_list.append({
-                "slot":  k,
-                "label": _slot_label(k),
-                "slide": 0,  # unbekannte Slide-Position
-            })
+
+        # Notfall-Fallback: bbox_map versagt → konservative Liste mit nur den
+        # WE-Slots die zu aktiven Typen gehören + Standard-Projekt-Slots.
+        if not slot_list and not bbox_map.get("slides"):
+            print(f"[{job_id}] ⚠️ bbox_map leer → konservativer Slot-Fallback")
+            # Aktive WE-Paare ermitteln
+            active_we_n = set()
+            for typ in range(1, 9):
+                left_n  = typ * 2 - 1
+                right_n = typ * 2
+                if (expose_data.get(f"we_beispiel_{left_n}") or expose_data.get(f"we_nummern_{left_n}")
+                        or expose_data.get(f"we_beispiel_{right_n}") or expose_data.get(f"we_nummern_{right_n}")
+                        or typ == 1):  # Typ 1 immer
+                    active_we_n.add(left_n)
+                    active_we_n.add(right_n)
+            for k in PLATZHALTER:
+                if not k.startswith("bild_") or k in already_filled:
+                    continue
+                m = re.match(r'^bild_we_(\d+)$', k)
+                if m and int(m.group(1)) not in active_we_n:
+                    continue
+                slot_list.append({
+                    "slot":  k,
+                    "label": _slot_label(k),
+                    "slide": 0,
+                })
         slot_list.sort(key=lambda x: (x["slide"] or 99, x["slot"]))
         print(f"[{job_id}] Slot-Liste: {len(slot_list)} Upload-Kandidaten "
               f"({sum(1 for s in slot_list if s['slide'])} mit Slide-Index)")
