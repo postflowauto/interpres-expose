@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<title>INTERPRÉS – Editor</title>
+<link rel="stylesheet" href="/v2/static/editor.css">
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand">INTERPRÉS</div>
+  <div class="brand-sub">Exposé Editor</div>
+  <div class="spacer"></div>
+  <button class="btn" id="btn-preview">Vorschau</button>
+  <button class="btn primary" id="btn-pdf">PDF herunterladen</button>
+</div>
+
+<div class="layout">
+  <aside class="sidebar">
+    <div class="side-h">Folien</div>
+    <div id="slide-list"></div>
+  </aside>
+
+  <main class="canvas">
+    <div class="canvas-inner">
+      <iframe id="preview-frame" src="" frameborder="0"></iframe>
+    </div>
+  </main>
+
+  <aside class="props" id="props">
+    <div class="side-h">Bearbeiten</div>
+    <div id="props-body" class="props-body">
+      <div class="hint">Wähle links eine Folie aus.</div>
+    </div>
+  </aside>
+</div>
+
+<script>
+const PROJECT_ID = window.PROJECT_ID || new URLSearchParams(location.search).get('p');
+const API = `/v2/api/project/${PROJECT_ID}`;
+let project = null;
+let activeIdx = 0;
+
+async function loadProject() {
+  const r = await fetch(API);
+  if (!r.ok) {
+    document.body.innerHTML = '<div style="padding:40px; color:#fff;">Projekt nicht gefunden.</div>';
+    return;
+  }
+  project = await r.json();
+  renderSlideList();
+  showSlide(0);
+  refreshPreview();
+}
+
+function renderSlideList() {
+  const wrap = document.getElementById('slide-list');
+  wrap.innerHTML = '';
+  project.specs.forEach((s, i) => {
+    const el = document.createElement('div');
+    el.className = 'slide-item' + (i === activeIdx ? ' active' : '');
+    el.innerHTML = `
+      <div class="thumb">${i + 1}</div>
+      <div class="meta">
+        <div class="t">${prettyType(s.type)}</div>
+        <div class="sub">${getTitle(s)}</div>
+      </div>
+    `;
+    el.addEventListener('click', () => showSlide(i));
+    wrap.appendChild(el);
+  });
+}
+
+function prettyType(t) {
+  return ({
+    cover: 'Cover',
+    toc: 'Inhalt',
+    kapitel: 'Kapitel',
+    investmentfacts: 'Investmentfacts',
+    sechs_gruende: '6 gute Gründe',
+    standort: 'Standort',
+    stadt_wachstum: 'Stadt – Wachstum',
+    quartier: 'Quartier',
+    projekt: 'Projekt',
+    greenliving: 'Greenliving',
+    ausstattung: 'Ausstattung',
+    we_typ: 'Wohnungstyp',
+    rechtliches: 'Rechtliches',
+    schluss: 'Schluss',
+  }[t] || t);
+}
+
+function getTitle(spec) {
+  const d = spec.data || {};
+  return d.title || d.projekt_titel || d.stadt || d.typ_beschreibung || '';
+}
+
+function showSlide(idx) {
+  activeIdx = idx;
+  renderSlideList();
+  renderProps();
+  document.getElementById('preview-frame').contentWindow?.postMessage(
+    {action: 'scroll', idx}, '*'
+  );
+}
+
+function renderProps() {
+  const body = document.getElementById('props-body');
+  const spec = project.specs[activeIdx];
+  if (!spec) { body.innerHTML = ''; return; }
+  const d = spec.data || {};
+  body.innerHTML = '';
+  const fields = inferFields(spec.type, d);
+  fields.forEach(f => body.appendChild(makeField(f)));
+}
+
+function inferFields(type, data) {
+  // Welche Felder sind editierbar pro Folientyp
+  const out = [];
+  const SKIP = new Set(['stats', 'facts', 'gruende', 'minutes', 'categories',
+                        'bullets', 'paragraphs', 'features', 'images',
+                        'beispiele', 'chapters']);
+  for (const k of Object.keys(data)) {
+    if (SKIP.has(k)) continue;
+    const v = data[k];
+    if (v === null || v === undefined) continue;
+    if (typeof v === 'string') {
+      const isImg = /^bild_|^img$|_img$|_url$/.test(k) || (typeof v === 'string' && v.startsWith('http'));
+      const long = v.length > 80;
+      out.push({ key: k, value: v, type: isImg ? 'image' : (long ? 'textarea' : 'text') });
+    } else if (typeof v === 'number') {
+      out.push({ key: k, value: String(v), type: 'text' });
+    }
+  }
+  // Listen-Container (z.B. images, gruende) als Bild-Slot-Liste
+  if (Array.isArray(data.images)) {
+    data.images.forEach((url, i) => out.push({
+      key: `images.${i}`, value: url || '', type: 'image', label: `Bild ${i+1}`
+    }));
+  }
+  return out;
+}
+
+function makeField(f) {
+  const wrap = document.createElement('div');
+  wrap.className = 'field';
+  const lbl = document.createElement('label');
+  lbl.textContent = f.label || f.key;
+  wrap.appendChild(lbl);
+
+  if (f.type === 'image') {
+    if (f.value) {
+      const img = document.createElement('img');
+      img.src = f.value;
+      img.className = 'preview-img';
+      wrap.appendChild(img);
+    }
+    const inp = document.createElement('input');
+    inp.type = 'file'; inp.accept = 'image/*';
+    inp.addEventListener('change', e => uploadImage(f.key, e.target.files[0]));
+    wrap.appendChild(inp);
+    const url = document.createElement('input');
+    url.type = 'text'; url.placeholder = 'oder URL eingeben';
+    url.value = f.value || '';
+    url.addEventListener('change', () => updateField(f.key, url.value));
+    wrap.appendChild(url);
+  } else if (f.type === 'textarea') {
+    const ta = document.createElement('textarea');
+    ta.rows = 4; ta.value = f.value;
+    ta.addEventListener('change', () => updateField(f.key, ta.value));
+    wrap.appendChild(ta);
+  } else {
+    const inp = document.createElement('input');
+    inp.type = 'text'; inp.value = f.value;
+    inp.addEventListener('change', () => updateField(f.key, inp.value));
+    wrap.appendChild(inp);
+  }
+  return wrap;
+}
+
+async function updateField(key, value) {
+  const spec = project.specs[activeIdx];
+  if (key.startsWith('images.')) {
+    const i = parseInt(key.split('.')[1], 10);
+    if (!Array.isArray(spec.data.images)) spec.data.images = [];
+    spec.data.images[i] = value;
+  } else {
+    spec.data[key] = value;
+  }
+  await fetch(`${API}/slide/${activeIdx}`, {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(spec.data),
+  });
+  refreshPreview();
+}
+
+async function uploadImage(key, file) {
+  if (!file) return;
+  const fd = new FormData();
+  fd.append('file', file);
+  fd.append('key', key);
+  fd.append('slide_idx', activeIdx);
+  const r = await fetch(`${API}/upload`, { method: 'POST', body: fd });
+  if (r.ok) {
+    const j = await r.json();
+    await updateField(key, j.url);
+    renderProps();
+  }
+}
+
+function refreshPreview() {
+  const f = document.getElementById('preview-frame');
+  // Cache-bust
+  f.src = `/v2/api/project/${PROJECT_ID}/preview.html?t=${Date.now()}`;
+}
+
+document.getElementById('btn-pdf').addEventListener('click', async () => {
+  const a = document.createElement('a');
+  a.href = `/v2/api/project/${PROJECT_ID}/render.pdf`;
+  a.download = `${project.name || 'Expose'}.pdf`;
+  document.body.appendChild(a); a.click(); a.remove();
+});
+
+document.getElementById('btn-preview').addEventListener('click', () => {
+  window.open(`/v2/api/project/${PROJECT_ID}/preview.html`, '_blank');
+});
+
+loadProject();
+</script>
+
+</body></html>
