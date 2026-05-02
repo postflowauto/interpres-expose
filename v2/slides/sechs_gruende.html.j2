@@ -1,0 +1,16 @@
+{# 6 gute Gründe – große Nummer + Kurztext, 2x3 Grid #}
+<section class="slide slide-sechs-gruende" id="anchor-sechs_gruende">
+  <div class="header">
+    <div class="eyebrow">Investmentlogik</div>
+    <h2>6 gute Gründe<br>für ein Investment</h2>
+  </div>
+  <div class="gruende-grid">
+    {% for g in gruende %}
+    <div class="grund">
+      <div class="grund-num">{{ "%02d"|format(loop.index) }}</div>
+      <div class="grund-title">{{ g.title }}</div>
+      {% if g.desc %}<div class="grund-desc">{{ g.desc }}</div>{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</section>

@@ -1,0 +1,28 @@
+{# Quartier-Proximity: 4-Spalten-Grid mit POI-Listen (Einkaufen / Arzt / Sport / Bildung) #}
+<section class="slide slide-quartier" id="anchor-quartier">
+  <div class="header">
+    <div class="eyebrow">Alles ganz nah</div>
+    <h2>Im Stadtteil {{ stadtteil or '' }}</h2>
+  </div>
+  <div class="poi-grid">
+    {% for cat in categories %}
+    <div class="poi-col">
+      <div class="poi-cat">
+        <span class="poi-icon">{{ cat.icon or '·' }}</span>
+        <span>{{ cat.name }}</span>
+      </div>
+      {% for it in cat.items %}
+      <div class="poi-item">
+        <span class="poi-name">{{ it.name }}</span>
+        <span class="poi-min">{{ it.min }} min</span>
+      </div>
+      {% endfor %}
+    </div>
+    {% endfor %}
+  </div>
+  {% if lageplan %}
+  <div class="lageplan">
+    <img src="{{ lageplan }}" alt="Lageplan">
+  </div>
+  {% endif %}
+</section>

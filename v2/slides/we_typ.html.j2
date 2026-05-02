@@ -1,0 +1,33 @@
+{# WE-Typ-Folie: 2 Spalten (links + rechts), je 1 Beispiel-WE mit Raumtabelle + Bild #}
+<section class="slide slide-we-typ" id="anchor-we_typ_{{ typ_letter or 'a' }}">
+  <div class="we-header">
+    <div class="eyebrow">Wohnungstyp {{ typ_letter or 'a' }}</div>
+    <h2>{{ typ_beschreibung }}</h2>
+    {% if wohnflaeche %}<div class="wfl">Wohnfläche gesamt: <strong>{{ wohnflaeche }}</strong></div>{% endif %}
+  </div>
+  <div class="we-grid">
+    {% for we in beispiele %}
+    <div class="we-col">
+      <div class="we-letter">{{ typ_letter or 'a' }}</div>
+      <div class="we-info">
+        <div class="we-num">{{ we.nummer or 'WE' }}</div>
+        <div class="we-area">{{ we.bereich }}</div>
+        <table class="we-table">
+          <tbody>
+          {% for r in we.raeume %}
+          <tr>
+            <td class="ridx">{{ loop.index }}</td>
+            <td class="rname">{{ r.name }}</td>
+            <td class="rsize">{{ r.size or '—' }}</td>
+          </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="we-img">
+        {% if we.img %}<img src="{{ we.img }}" alt="">{% else %}<div class="ph"></div>{% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</section>
