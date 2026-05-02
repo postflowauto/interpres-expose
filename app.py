@@ -7,6 +7,15 @@ from lxml import etree
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100 MB pro Chunk (Render Proxy Limit)
 
+# ── V2 (HTML/CSS-basierter Renderer) parallel registrieren ──────────────────
+# /v2/* Routen sind unabhängig vom V1-Pipeline und liefern den neuen Look.
+try:
+    from v2.server import register_v2 as _register_v2
+    _register_v2(app)
+    print("[v2] HTML-Renderer-Routen unter /v2/* registriert")
+except Exception as _v2e:
+    print(f"[v2] WARN: V2-Registrierung fehlgeschlagen: {_v2e}")
+
 # Chunk-Upload Verzeichnis
 CHUNK_DIR = "/tmp/interpres_chunks"
 os.makedirs(CHUNK_DIR, exist_ok=True)

@@ -1,0 +1,17 @@
+{# Investmentfacts: 3x2 Karten-Grid mit Schlüsselzahlen #}
+<section class="slide slide-investmentfacts" id="anchor-investmentfacts">
+  <div class="header">
+    <div class="eyebrow">Investmentfacts</div>
+    <h2>{{ projekt_titel or 'The Central' }} – Auf einen Blick</h2>
+  </div>
+  <div class="facts-grid">
+    {% for f in facts %}
+    <div class="fact">
+      <div class="label">{{ f.label }}</div>
+      <div class="value">{{ f.value }}{% if f.unit %} <span style="font-size:13pt; color:var(--gold); font-weight:500;">{{ f.unit }}</span>{% endif %}</div>
+      {% if f.desc %}<div class="desc">{{ f.desc }}</div>{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  <div class="eyebrow muted" style="text-align:right; font-size:7pt;">{{ stadt or '' }} · Prospektteil A</div>
+</section>

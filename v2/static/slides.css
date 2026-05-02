@@ -1,0 +1,284 @@
+/* ============================================================
+   Folientyp-spezifische Styles
+   ============================================================ */
+
+/* ── COVER ──────────────────────────────────────────────── */
+.slide-cover {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr;
+}
+.slide-cover .left {
+  background: var(--navy-900);
+  padding: 24mm 18mm 18mm 18mm;
+  display: flex; flex-direction: column; justify-content: space-between;
+  position: relative;
+}
+.slide-cover .right { position: relative; background: #000; }
+.slide-cover .right img { width: 100%; height: 100%; object-fit: cover; }
+.slide-cover .right::after {
+  content: '';
+  position: absolute; inset: 0;
+  background: linear-gradient(180deg, transparent 50%, rgba(10,22,38,0.55) 100%);
+}
+.slide-cover .right.no-image {
+  background: repeating-linear-gradient(45deg, var(--navy-700), var(--navy-700) 20px, var(--navy-600) 20px, var(--navy-600) 40px);
+}
+.slide-cover .top-meta {
+  font-family: var(--sans);
+  font-size: 8pt;
+  letter-spacing: 0.35em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.slide-cover h1 {
+  font-family: var(--serif);
+  font-size: 48pt;
+  line-height: 1.0;
+  font-weight: 700;
+  color: var(--cream);
+  margin-bottom: 6mm;
+}
+.slide-cover .stadt {
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 18pt;
+  color: var(--gold);
+}
+.slide-cover .anzahl {
+  font-family: var(--sans);
+  font-size: 10pt;
+  color: var(--cream-2);
+  text-transform: uppercase;
+  letter-spacing: 0.25em;
+  margin-top: 4mm;
+}
+.slide-cover .footer {
+  font-family: var(--sans);
+  font-size: 8pt;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.3em;
+}
+.slide-cover .footer .pt-a { color: var(--gold); }
+
+/* ── TOC ────────────────────────────────────────────────── */
+.slide-toc {
+  padding: 22mm 22mm 18mm 22mm;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 8mm;
+}
+.slide-toc h2 {
+  font-family: var(--serif);
+  font-size: 22pt;
+  color: var(--cream);
+  font-weight: 600;
+}
+.slide-toc h2 small {
+  display: block;
+  font-family: var(--sans);
+  font-size: 8.5pt;
+  letter-spacing: 0.35em;
+  color: var(--gold);
+  text-transform: uppercase;
+  margin-bottom: 3mm;
+  font-weight: 500;
+}
+.toc-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8mm;
+}
+.toc-col h3 {
+  font-family: var(--serif);
+  font-size: 38pt;
+  color: var(--gold);
+  font-weight: 700;
+  line-height: 1;
+  margin-bottom: 3mm;
+}
+.toc-col .ic {
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 14pt;
+  color: var(--gold);
+  margin-bottom: 1mm;
+}
+.toc-col .section {
+  font-family: var(--serif);
+  font-size: 13pt;
+  color: var(--cream);
+  border-bottom: 1px solid var(--navy-500);
+  padding-bottom: 2mm;
+  margin-bottom: 4mm;
+}
+.toc-col .item {
+  display: flex; justify-content: space-between;
+  font-size: 9.5pt;
+  margin-bottom: 1.5mm;
+  color: var(--cream-2);
+}
+.toc-col .item .pg { color: var(--gold); font-variant-numeric: tabular-nums; }
+
+/* ── KAPITEL-TRENNER ────────────────────────────────────── */
+.slide-kapitel {
+  display: grid;
+  grid-template-columns: 1fr 1.2fr;
+  background: var(--navy-900);
+}
+.slide-kapitel .left {
+  padding: 22mm 16mm;
+  display: flex; flex-direction: column; justify-content: center;
+}
+.slide-kapitel .num {
+  font-family: var(--serif);
+  font-size: 90pt;
+  color: var(--gold);
+  font-weight: 700;
+  line-height: 0.9;
+  margin-bottom: 10mm;
+}
+.slide-kapitel .title {
+  font-family: var(--serif);
+  font-size: 32pt;
+  color: var(--cream);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  margin-bottom: 4mm;
+}
+.slide-kapitel .subtitle {
+  font-family: var(--sans);
+  font-size: 11pt;
+  color: var(--gold);
+  text-transform: uppercase;
+  letter-spacing: 0.35em;
+  margin-bottom: 8mm;
+}
+.slide-kapitel .lead {
+  font-family: var(--sans);
+  font-size: 11pt;
+  line-height: 1.55;
+  color: var(--cream-2);
+  max-width: 90%;
+}
+.slide-kapitel .right {
+  background: #000; position: relative;
+}
+.slide-kapitel .right img { width: 100%; height: 100%; object-fit: cover; }
+.slide-kapitel .right.no-image {
+  background: linear-gradient(135deg, var(--navy-700), var(--navy-900));
+}
+
+/* ── INVESTMENTFACTS ────────────────────────────────────── */
+.slide-investmentfacts {
+  padding: 20mm 18mm 18mm 18mm;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: 8mm;
+}
+.slide-investmentfacts .header h2 {
+  font-family: var(--serif);
+  font-size: 26pt;
+  color: var(--cream);
+  font-weight: 600;
+  margin-top: 2mm;
+}
+.facts-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(2, 1fr);
+  gap: 6mm;
+}
+.fact {
+  background: var(--navy-700);
+  border-left: 3px solid var(--gold);
+  padding: 6mm 7mm;
+  display: flex; flex-direction: column; justify-content: center;
+}
+.fact .label {
+  font-family: var(--sans);
+  text-transform: uppercase;
+  letter-spacing: 0.25em;
+  font-size: 7.5pt;
+  color: var(--muted);
+  margin-bottom: 2mm;
+}
+.fact .value {
+  font-family: var(--serif);
+  font-size: 22pt;
+  color: var(--cream);
+  font-weight: 700;
+  line-height: 1.05;
+}
+.fact .unit {
+  font-family: var(--sans);
+  font-size: 9pt;
+  color: var(--gold);
+  margin-top: 1mm;
+  letter-spacing: 0.05em;
+}
+.fact .desc {
+  font-family: var(--sans);
+  font-size: 9pt;
+  color: var(--cream-2);
+  margin-top: 2mm;
+  line-height: 1.4;
+}
+
+/* ── STADT-WACHSTUM (Bild + Text) ────────────────────────── */
+.slide-stadt-wachstum {
+  display: grid;
+  grid-template-columns: 1.05fr 1fr;
+}
+.slide-stadt-wachstum .img-side { background:#000; position:relative; }
+.slide-stadt-wachstum .img-side img { width:100%; height:100%; object-fit:cover; }
+.slide-stadt-wachstum .text-side {
+  padding: 22mm 18mm;
+  display: flex; flex-direction: column; justify-content: center;
+  background: var(--navy-800);
+}
+.slide-stadt-wachstum .stadt-name {
+  font-family: var(--serif);
+  font-size: 60pt;
+  color: var(--cream);
+  font-weight: 700;
+  line-height: 0.95;
+  margin-bottom: 2mm;
+}
+.slide-stadt-wachstum .stadt-name em {
+  font-style: italic;
+  color: var(--gold);
+  font-weight: 400;
+}
+.slide-stadt-wachstum .lead {
+  font-family: var(--sans);
+  font-size: 10.5pt;
+  line-height: 1.6;
+  color: var(--cream-2);
+  margin-top: 8mm;
+  max-width: 95%;
+}
+.slide-stadt-wachstum .stat-row {
+  display: flex; gap: 6mm;
+  margin-top: 10mm;
+}
+.slide-stadt-wachstum .stat {
+  flex: 1;
+  border-top: 1px solid var(--gold);
+  padding-top: 4mm;
+}
+.slide-stadt-wachstum .stat .v {
+  font-family: var(--serif);
+  font-size: 22pt;
+  color: var(--gold);
+  font-weight: 700;
+  line-height: 1;
+}
+.slide-stadt-wachstum .stat .l {
+  font-family: var(--sans);
+  font-size: 8pt;
+  color: var(--cream-2);
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  margin-top: 2mm;
+}

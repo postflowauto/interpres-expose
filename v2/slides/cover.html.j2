@@ -1,0 +1,22 @@
+{# Cover-Folie: links Brand + Titel, rechts großes Bild #}
+<section class="slide slide-cover no-pageno">
+  <div class="left">
+    <div>
+      <div class="brand" style="position:static;">{{ brand or 'INTERPRÉS' }}</div>
+      <div class="brand-sub" style="position:static; margin-top:1mm;">Immobilien · {{ stadt or '' }}</div>
+    </div>
+    <div>
+      <div class="top-meta">{{ anzahl_we or '' }} {{ produkt_beschreibung or 'Apartments' }}</div>
+      <hr class="divider-gold">
+      <h1>{{ projekt_titel or 'The Central' }}</h1>
+      <div class="stadt">in {{ stadt or 'Magdeburg' }}</div>
+      {% if zitat_intro %}<div class="anzahl" style="margin-top:8mm; max-width:90%;">{{ zitat_intro }}</div>{% endif %}
+    </div>
+    <div class="footer">
+      <span class="pt-a">Prospektteil A</span> · {{ prospekt_datum or 'Stand 2025' }}
+    </div>
+  </div>
+  <div class="right{% if not bild_titel %} no-image{% endif %}">
+    {% if bild_titel %}<img src="{{ bild_titel }}" alt="">{% endif %}
+  </div>
+</section>

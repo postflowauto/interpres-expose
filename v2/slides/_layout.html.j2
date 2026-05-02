@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<title>{{ projekt_titel or 'Exposé' }}</title>
+<link rel="stylesheet" href="{{ base_url }}/v2/static/base.css">
+<link rel="stylesheet" href="{{ base_url }}/v2/static/slides.css">
+</head>
+<body>
+{% for s in slides %}{{ s|safe }}{% endfor %}
+</body>
+</html>

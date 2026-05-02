@@ -1,0 +1,169 @@
+/* ============================================================
+   INTERPRES EXPOSÉ V2 — Base & Print Layout
+   A4 landscape, 297mm × 210mm, dark navy + gold accents
+   ============================================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;0,900;1,400&family=Inter:wght@300;400;500;600;700&display=swap');
+
+:root {
+  --navy-900: #0a1626;
+  --navy-800: #0e1a2c;
+  --navy-700: #142540;
+  --navy-600: #1e3450;
+  --navy-500: #2a4060;
+
+  --gold:      #C8A96E;
+  --gold-soft: #d4ba84;
+  --gold-deep: #a08654;
+
+  --cream:    #f5e9d4;
+  --cream-2:  #e8d9b3;
+  --light:    #d6dde8;
+  --muted:    #7a8ba0;
+
+  --text-dark: #1a1a1a;
+  --text-mid:  #4a4a4a;
+
+  --serif: 'Playfair Display', 'Times New Roman', Georgia, serif;
+  --sans:  'Inter', -apple-system, 'Helvetica Neue', Arial, sans-serif;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body { background: #2a2a2a; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
+body {
+  font-family: var(--sans);
+  font-size: 11pt;
+  line-height: 1.45;
+  color: var(--cream);
+}
+
+@page { size: 297mm 210mm; margin: 0; }
+
+.slide {
+  width: 297mm;
+  height: 210mm;
+  position: relative;
+  overflow: hidden;
+  background: var(--navy-800);
+  color: var(--cream);
+  page-break-after: always;
+  break-after: page;
+}
+.slide:last-child { page-break-after: auto; }
+
+/* Screen-Vorschau außerhalb des Drucks: Folien als Karten zeigen */
+@media screen {
+  body { padding: 24px; display: flex; flex-direction: column; gap: 24px; align-items: center; }
+  .slide {
+    box-shadow: 0 20px 50px rgba(0,0,0,0.4);
+    border-radius: 4px;
+  }
+}
+
+/* Bottom-Page-Number — wird per CSS counter gefüllt */
+.slide::after {
+  content: counter(page);
+  counter-increment: page;
+  position: absolute;
+  bottom: 8mm; right: 14mm;
+  font-family: var(--sans);
+  font-size: 8.5pt;
+  color: var(--muted);
+  letter-spacing: 0.05em;
+}
+.slide.no-pageno::after { content: none; }
+
+/* Vertikales Kapitel-Tab am Rand (wie DQN) */
+.chapter-tab {
+  position: absolute;
+  top: 0; right: 0;
+  width: 14mm; height: 100%;
+  background: var(--navy-700);
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 4mm;
+}
+.chapter-tab .ic {
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 16pt;
+  color: var(--gold);
+  font-weight: 600;
+}
+.chapter-tab .lbl {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  font-family: var(--sans);
+  text-transform: uppercase;
+  letter-spacing: 0.4em;
+  font-size: 8pt;
+  color: var(--cream-2);
+}
+
+/* Typography Helpers */
+.h-display {
+  font-family: var(--serif);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.05;
+}
+.h-section {
+  font-family: var(--serif);
+  font-weight: 600;
+  font-style: italic;
+  color: var(--gold);
+}
+.eyebrow {
+  font-family: var(--sans);
+  text-transform: uppercase;
+  letter-spacing: 0.35em;
+  font-size: 8.5pt;
+  color: var(--gold);
+  font-weight: 500;
+}
+.eyebrow.muted { color: var(--muted); }
+
+.body-text { font-size: 10.5pt; line-height: 1.55; color: var(--cream-2); }
+.body-text-sm { font-size: 9.5pt; line-height: 1.5; color: var(--light); }
+
+.divider-gold {
+  width: 60mm; height: 1px;
+  background: var(--gold);
+  border: none;
+  margin: 4mm 0;
+}
+
+/* Brand Header (oben links) */
+.brand {
+  position: absolute;
+  top: 8mm; left: 14mm;
+  font-family: var(--serif);
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  font-size: 11pt;
+  color: var(--cream);
+}
+.brand-sub {
+  position: absolute;
+  top: 14mm; left: 14mm;
+  font-family: var(--sans);
+  font-size: 7pt;
+  letter-spacing: 0.3em;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+
+/* Bilder */
+.img-fill {
+  display: block;
+  width: 100%; height: 100%;
+  object-fit: cover;
+  object-position: center;
+}
+.img-cover {
+  display: block;
+  width: 100%; height: 100%;
+  object-fit: cover;
+}
