@@ -709,23 +709,10 @@
         <div class="file-list" id="fileList"></div>
       </div>
 
-      <!-- Image Upload -->
-      <div class="img-upload-section">
-        <div class="img-upload-label">
-          Projektfotos <span>(optional – JPG, PNG, WebP)</span>
-        </div>
-        <div class="img-drop-zone" id="imgDropZone">
-          <input type="file" id="imgInput" accept=".jpg,.jpeg,.png,.webp" multiple>
-          <div class="img-drop-icon">🖼️</div>
-          <div class="img-drop-text">
-            <strong>Bilder hier ablegen</strong><br>
-            Außenansichten, Grundrisse, Innenaufnahmen …
-          </div>
-        </div>
-        <div class="img-count-badge" id="imgCountBadge"></div>
-      </div>
-
       <button class="btn-generate" id="generateBtn" disabled>Exposé generieren</button>
+      <div style="font-size:0.72rem;color:#7a8ba0;text-align:center;margin-top:8px;">
+        Bilder kannst du nach der Generierung direkt im Editor pro Folie hochladen.
+      </div>
     </div>
 
     <!-- Progress -->
@@ -933,40 +920,9 @@ dropZone.addEventListener('drop', e => {
   updateFileList();
 });
 
-// ── Image Selection ───────────────────────────────────────────────────────────
-const imgInput    = document.getElementById('imgInput');
-const imgDropZone = document.getElementById('imgDropZone');
-const imgBadge    = document.getElementById('imgCountBadge');
-const _IMG_EXTS   = ['.jpg','.jpeg','.png','.webp'];
-
-function updateImageBadge() {
-  if (selectedImages.length === 0) {
-    imgBadge.className = 'img-count-badge';
-    imgBadge.textContent = '';
-  } else {
-    const total = selectedImages.reduce((s, f) => s + f.size, 0);
-    imgBadge.className = 'img-count-badge has-files';
-    imgBadge.textContent = `${selectedImages.length} Bild${selectedImages.length > 1 ? 'er' : ''} ausgewählt · ${fmt(total)}`;
-  }
-}
-
-imgInput.addEventListener('change', e => {
-  selectedImages = Array.from(e.target.files).filter(f =>
-    _IMG_EXTS.some(x => f.name.toLowerCase().endsWith(x)));
-  updateImageBadge();
-});
-imgDropZone.addEventListener('dragover', e => { e.preventDefault(); imgDropZone.classList.add('dragover'); });
-imgDropZone.addEventListener('dragleave', () => imgDropZone.classList.remove('dragover'));
-imgDropZone.addEventListener('drop', e => {
-  e.preventDefault();
-  imgDropZone.classList.remove('dragover');
-  const dropped = Array.from(e.dataTransfer.files).filter(f =>
-    _IMG_EXTS.some(x => f.name.toLowerCase().endsWith(x)));
-  if (dropped.length) {
-    selectedImages = dropped;
-    updateImageBadge();
-  }
-});
+// Image-Upload entfernt – Bilder werden im V2-Editor pro Folie hochgeladen.
+// selectedImages bleibt als leeres Array damit der Upload-Code unverändert bleibt.
+function updateImageBadge() { /* no-op */ }
 
 // ── Upload (chunked) ──────────────────────────────────────────────────────────
 async function uploadAllFiles() {
@@ -1137,10 +1093,10 @@ generateBtn.addEventListener('click', async () => {
               }
               setTimeout(poll, pollInterval);
             } else if (data.status === 'preview') {
-              // ── Preview bereit: UI zeigen, Polling stoppen ─────────────
+              // ── Preview bereit: direkt in V2-Editor weiterleiten ──────
               setStep(4);
-              setStepDetail('Vorschau bereit', 'Wähle Bilder pro Folie aus.', 'none');
-              showPreview(job_id, data);
+              setStepDetail('Editor wird geladen …', 'Folien & Bilder pro Slot bearbeiten.', 'none');
+              window.location.href = `/v2/from-job/${job_id}`;
               resolve();
             } else if (data.status === 'done') {
               setStep(4);
