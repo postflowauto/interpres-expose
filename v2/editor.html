@@ -110,6 +110,8 @@ function showSlide(idx) {
   img.onerror = () => { ld.textContent = 'Folie nicht geladen'; };
   img.src = `${V1_API}/slide/${idx+1}?token=${encodeURIComponent(API_TOKEN)}&t=${Date.now()}`;
   document.getElementById('slide-pos').textContent = `${idx+1} / ${job.slide_count}`;
+  // Properties-Panel neu rendern (zeigt nur Felder dieser Folie)
+  renderProps();
 }
 
 // ── Properties Panel ─────────────────────────────────────────────────────
@@ -120,42 +122,85 @@ function renderProps() {
   else renderImagesTab(body);
 }
 
+function activeSlideKeys() {
+  // Set der Platzhalter-Keys die auf der aktuell gewählten Folie vorkommen
+  const arr = (job.slide_placeholders && job.slide_placeholders[activeIdx]) || [];
+  return new Set(arr);
+}
+
+// Bessere Labels — wenn FIELD_GROUPS keinen Eintrag hat, generiere aus key
+function labelFor(key) {
+  for (const g of (job.field_groups || [])) {
+    for (const [k, lbl] of g.keys) {
+      if (k === key) return lbl;
+    }
+  }
+  // Fallback: key in lesbar verwandeln
+  return key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function groupNameFor(key) {
+  for (const g of (job.field_groups || [])) {
+    for (const [k, _] of g.keys) {
+      if (k === key) return g.name;
+    }
+  }
+  return 'Weitere Felder';
+}
+
 function renderTextsTab(body) {
-  if (!job.field_groups) return;
-  job.field_groups.forEach(group => {
-    // Nur Gruppen rendern wo mindestens ein Feld in expose existiert
-    const visible = group.keys.filter(([k,_]) => k in job.expose);
-    if (!visible.length) return;
+  const activeKeys = activeSlideKeys();
+  // Filter: nur Keys die auf der Folie vorkommen UND nicht bild_*
+  const textKeys = [...activeKeys].filter(k => !k.startsWith('bild_'));
+  if (!textKeys.length) {
+    body.innerHTML = '<div class="hint">Diese Folie hat keine bearbeitbaren Text-Felder.</div>';
+    return;
+  }
+  // Sortieren + nach Gruppen organisieren
+  const byGroup = {};
+  for (const key of textKeys) {
+    const g = groupNameFor(key);
+    if (!(g in byGroup)) byGroup[g] = [];
+    byGroup[g].push(key);
+  }
+  // Reihenfolge: bekannte Gruppen zuerst (Reihenfolge aus FIELD_GROUPS)
+  const order = (job.field_groups || []).map(g => g.name).concat(['Weitere Felder']);
+  for (const groupName of order) {
+    const keys = byGroup[groupName];
+    if (!keys || !keys.length) continue;
     const sec = document.createElement('div');
     sec.className = 'group';
     const h = document.createElement('div');
     h.className = 'group-h';
-    h.textContent = group.name;
+    h.textContent = groupName;
     sec.appendChild(h);
-    visible.forEach(([key, label]) => {
-      const v = job.expose[key] || '';
+    keys.forEach(key => {
+      const v = (key in job.expose) ? job.expose[key] : '';
       const f = document.createElement('div');
       f.className = 'field';
-      f.innerHTML = `<label>${label}</label>`;
-      const isLong = (typeof v === 'string' && v.length > 80) || /^text_/.test(key);
+      f.innerHTML = `<label>${labelFor(key)} <span class="key-hint">${key}</span></label>`;
+      const isLong = (typeof v === 'string' && v.length > 80) || /^text_/.test(key) || key.includes('beschreibung');
       const ctl = document.createElement(isLong ? 'textarea' : 'input');
       if (!isLong) ctl.type = 'text';
-      else ctl.rows = Math.max(2, Math.min(6, Math.ceil(v.length / 60)));
-      ctl.value = v;
+      else ctl.rows = Math.max(2, Math.min(8, Math.ceil((v?.length || 60) / 50)));
+      ctl.value = v || '';
       ctl.addEventListener('input', e => onTextChange(key, e.target.value));
       f.appendChild(ctl);
       sec.appendChild(f);
     });
     body.appendChild(sec);
-  });
+  }
 }
 
 function renderImagesTab(body) {
-  if (!job.bild_slots || !job.bild_slots.length) {
-    body.innerHTML = '<div class="hint">Keine Bild-Slots gefunden.</div>';
+  // Filter: nur bild_*-Slots die auf der Folie sind
+  const activeKeys = activeSlideKeys();
+  const slots = (job.bild_slots || []).filter(s => activeKeys.has(s.key));
+  if (!slots.length) {
+    body.innerHTML = '<div class="hint">Diese Folie hat keine Bild-Slots.</div>';
     return;
   }
-  job.bild_slots.forEach(slot => {
+  slots.forEach(slot => {
     const f = document.createElement('div');
     f.className = 'field img-field';
     const isUploaded = slot.key in job.uploaded;

@@ -27,6 +27,65 @@ STATIC_DIR  = V2_DIR / "static"
 EDITOR_HTML = V2_DIR / "editor.html"
 JOB_DIR     = "/tmp/interpres_jobs"
 
+# ── Per-Slide-Platzhalter-Scan (gecached) ───────────────────────────────────
+# Liest das Original-Template einmal und merkt sich pro Slide alle {{KEY}}-
+# Platzhalter (lowercase). Wird im Editor genutzt um pro Folie nur die
+# relevanten Edit-Felder anzuzeigen.
+_PER_SLIDE_PLACEHOLDERS = None
+
+
+def _scan_template_placeholders(pptx_bytes: bytes) -> list[list[str]]:
+    """Liefert pro Slide die Liste der Platzhalter-Keys (lowercase, dedupliziert).
+    Beispiel: [["projekt_titel","bild_titel"], ["text_kapitel_invest_1", ...], ...]
+    """
+    import io as _io
+    import re as _re
+    from pptx import Presentation
+    pat = _re.compile(r'\{\{\s*([A-Z0-9_-]+)\s*(?:\|[^}]*)?\}\}', _re.IGNORECASE)
+    invis = _re.compile(r'[­​‌‍﻿ ]')
+    prs = Presentation(_io.BytesIO(pptx_bytes))
+    out = []
+    for slide in prs.slides:
+        keys = set()
+        def _scan_tf(tf):
+            for p in tf.paragraphs:
+                full = "".join(r.text for r in p.runs)
+                full = invis.sub("", full)
+                for m in pat.finditer(full):
+                    keys.add(m.group(1).lower().replace('-', ''))
+            # Cross-paragraph: full text frame
+            tf_full = invis.sub("", tf.text)
+            for m in pat.finditer(tf_full):
+                keys.add(m.group(1).lower().replace('-', ''))
+        for shape in slide.shapes:
+            if shape.has_text_frame:
+                _scan_tf(shape.text_frame)
+            if shape.shape_type == 6:
+                for child in shape.shapes:
+                    if child.has_text_frame:
+                        _scan_tf(child.text_frame)
+        out.append(sorted(keys))
+    return out
+
+
+def _get_template_placeholders() -> list[list[str]]:
+    """Lazy-loads + cached: pro Slide alle Template-Platzhalter."""
+    global _PER_SLIDE_PLACEHOLDERS
+    if _PER_SLIDE_PLACEHOLDERS is not None:
+        return _PER_SLIDE_PLACEHOLDERS
+    try:
+        import importlib
+        appmod = importlib.import_module("app")
+        import requests
+        tmpl_bytes = requests.get(appmod.TEMPLATE_URL, timeout=30).content
+        _PER_SLIDE_PLACEHOLDERS = _scan_template_placeholders(tmpl_bytes)
+        print(f"[v2] Template-Scan: {len(_PER_SLIDE_PLACEHOLDERS)} Slides, "
+              f"{sum(len(s) for s in _PER_SLIDE_PLACEHOLDERS)} Platzhalter total")
+    except Exception as e:
+        print(f"[v2] Template-Scan Fehler: {e}")
+        _PER_SLIDE_PLACEHOLDERS = []
+    return _PER_SLIDE_PLACEHOLDERS
+
 
 def _v1_state_path(job_id: str) -> str:
     return os.path.join(JOB_DIR, f"work_{job_id}", "state.json")
@@ -271,6 +330,9 @@ def register_v2(app):
                 slot = os.path.splitext(fname)[0].lower()
                 uploaded[slot] = fname
 
+        # Pro-Slide-Platzhalter aus dem Template (für Editor-Filter)
+        slide_placeholders = _get_template_placeholders()
+
         return jsonify({
             "job_id":      job_id,
             "name":        meta.get("name") or expose.get("projekt_titel", "Expose"),
@@ -281,6 +343,7 @@ def register_v2(app):
             "field_groups": FIELD_GROUPS,
             "bild_slots":  bild_slots,
             "uploaded":    uploaded,
+            "slide_placeholders": slide_placeholders,
         })
 
     @app.route("/v2/api/job/<job_id>/text", methods=["PUT", "OPTIONS"])
@@ -412,7 +475,7 @@ def _v2_render_worker(job_id: str):
                         if fname.endswith(".jpg"):
                             try: os.remove(os.path.join(slides_dir, fname))
                             except OSError: pass
-                appmod.render_pdf_to_jpgs(pdf_bytes, slides_dir, dpi=72)
+                appmod.render_pdf_to_jpgs(pdf_bytes, slides_dir, dpi=110)
             except Exception as e:
                 print(f"[v2] Slide-JPG-Render Fehler: {e}")
         else:

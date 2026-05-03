@@ -4074,7 +4074,8 @@ def _run_expose_job(job_id, zip_paths):
                 gc.collect()
                 # render_pdf_to_jpgs liest das PDF wieder von Disk – stabil
                 with open(pdf_tmp, "rb") as fh:
-                    jpg_paths = render_pdf_to_jpgs(fh.read(), _job_slides_dir(job_id), dpi=72)
+                    # DPI=110 statt 72 → wesentlich schaerfere Editor-Vorschau
+                    jpg_paths = render_pdf_to_jpgs(fh.read(), _job_slides_dir(job_id), dpi=110)
                 try: os.unlink(pdf_tmp)
                 except OSError: pass
                 slide_jpgs = [os.path.basename(p) for p in jpg_paths]

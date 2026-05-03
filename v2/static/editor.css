@@ -75,7 +75,9 @@ html, body {
   display: grid;
   grid-template-columns: 220px 1fr 360px;
   height: calc(100vh - 50px);
+  min-height: 0;     /* damit overflow in Children greift */
 }
+.layout > * { min-height: 0; min-width: 0; }
 
 /* ── Sidebar (Folien-Liste mit Thumbs) ─────────────────────────── */
 .sidebar {
@@ -187,9 +189,13 @@ html, body {
 
 .field { margin-bottom: 14px; }
 .field label {
-  display: block;
+  display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
   font-size: 11px;
   color: var(--cream); margin-bottom: 5px; font-weight: 500;
+}
+.field label .key-hint {
+  font-size: 9px; color: var(--muted); font-family: ui-monospace, Menlo, monospace;
+  font-weight: 400; opacity: 0.6;
 }
 .field label .badge {
   background: var(--green); color: #fff;
