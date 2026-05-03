@@ -272,10 +272,27 @@ def register_v2(app):
     def v2_from_job(job_id):
         """Öffnet den V2-Editor für einen V1-Job."""
         if not os.path.exists(_v1_state_path(job_id)):
-            return Response(
-                "V1-Job nicht gefunden oder noch nicht im Preview-Status.\n"
-                "Lade erst über die Hauptseite ein ZIP hoch und warte bis die Vorschau bereit ist.",
-                status=404, mimetype="text/plain; charset=utf-8"
+            return Response("""<!doctype html>
+<html><head><meta charset="utf-8"><title>Job nicht gefunden</title>
+<style>
+body{background:#0a1220;color:#e8d9b3;font-family:-apple-system,sans-serif;
+     display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;}
+.box{max-width:520px;text-align:center;padding:40px;}
+h1{font-family:'Playfair Display',serif;color:#C8A96E;font-size:24px;margin-bottom:16px;}
+p{color:#c8d1de;line-height:1.6;margin-bottom:24px;}
+a.btn{display:inline-block;background:#C8A96E;color:#0a1220;text-decoration:none;
+      padding:12px 28px;border-radius:6px;font-weight:600;letter-spacing:0.05em;}
+a.btn:hover{background:#d4ba84;}
+small{color:#6b7d96;font-size:11px;display:block;margin-top:30px;}
+</style></head>
+<body><div class="box">
+<h1>Dieser Job ist nicht mehr verfügbar</h1>
+<p>Der Server hat zwischenzeitlich neu gestartet oder der Job ist abgelaufen.
+Erstelle einfach ein neues Exposé — du wirst automatisch in den Editor geleitet.</p>
+<a class="btn" href="/">Neues Exposé generieren</a>
+<small>Job-ID: """ + job_id + """</small>
+</div></body></html>""",
+                status=404, mimetype="text/html; charset=utf-8"
             )
         return redirect(f"/v2/editor/{job_id}")
 
