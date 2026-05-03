@@ -4048,10 +4048,17 @@ def _run_expose_job(job_id, zip_paths):
         # Diagnose: warum versagt Preview ggf.?
         _can_pdf  = _can_convert_to_pdf()
         _ppm_path = _find_pdftoppm()
-        print(f"[{job_id}] Preview-Tools: PDF-Konverter={'CloudConvert' if CLOUDCONVERT_KEY else ('LibreOffice' if _find_libreoffice() else 'KEINER')}, "
-              f"pdftoppm={_ppm_path or 'FEHLT'}")
+        # PyMuPDF-Verfügbarkeit (Fallback wenn pdftoppm fehlt)
         try:
-            if _can_pdf and _ppm_path:
+            import fitz as _fitz  # noqa
+            _has_pymupdf = True
+        except Exception:
+            _has_pymupdf = False
+        _can_render_jpgs = _ppm_path or _has_pymupdf
+        print(f"[{job_id}] Preview-Tools: PDF-Konverter={'CloudConvert' if CLOUDCONVERT_KEY else ('LibreOffice' if _find_libreoffice() else 'KEINER')}, "
+              f"pdftoppm={_ppm_path or 'FEHLT'}, pymupdf={_has_pymupdf}")
+        try:
+            if _can_pdf and _can_render_jpgs:
                 pdf_bytes = convert_to_pdf(pptx_bytes, f"{projekt_name}.pptx")
                 # PPTX wurde an CloudConvert gesendet → kann jetzt aus dem RAM
                 # (ist als Datei unter first_pass_pptx auf Disk)
@@ -4075,8 +4082,8 @@ def _run_expose_job(job_id, zip_paths):
                       f"– Pfad: {_job_slides_dir(job_id)}")
             else:
                 missing = []
-                if not _can_pdf:  missing.append("CLOUDCONVERT_KEY/LibreOffice")
-                if not _ppm_path: missing.append("poppler-utils/pdftoppm")
+                if not _can_pdf:        missing.append("CLOUDCONVERT_KEY/LibreOffice")
+                if not _can_render_jpgs: missing.append("pdftoppm UND pymupdf")
                 print(f"[{job_id}] ⚠️ Preview übersprungen – fehlt: {', '.join(missing)}")
         except Exception as pe:
             import traceback as _tb

@@ -782,6 +782,7 @@
       </div>
 
       <div class="preview-actions">
+        <button class="btn-secondary" id="openV2EditorBtn" style="background:#C8A96E;color:#0e1a2c;font-weight:600;">Im neuen Editor öffnen ★</button>
         <button class="btn-secondary" id="skipPreviewBtn">Ohne Upload fortfahren</button>
         <button class="btn-primary-full" id="finalizeBtn">Finalisieren & Download</button>
       </div>
@@ -1473,6 +1474,10 @@ async function pollForDone(job_id) {
 
 document.getElementById('finalizeBtn').addEventListener('click', finalizeJob);
 document.getElementById('skipPreviewBtn').addEventListener('click', finalizeJob);
+document.getElementById('openV2EditorBtn').addEventListener('click', () => {
+  if (!currentJobId) { alert('Noch keine Job-ID vorhanden.'); return; }
+  window.location = `/v2/from-job/${currentJobId}`;
+});
 
 // ── Retry ─────────────────────────────────────────────────────────────────────
 document.getElementById('retryBtn').addEventListener('click', () => {
