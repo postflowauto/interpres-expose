@@ -492,7 +492,7 @@ def _v2_render_worker(job_id: str):
                         if fname.endswith(".jpg"):
                             try: os.remove(os.path.join(slides_dir, fname))
                             except OSError: pass
-                appmod.render_pdf_to_jpgs(pdf_bytes, slides_dir, dpi=110)
+                appmod.render_pdf_to_jpgs(pdf_bytes, slides_dir, dpi=150)
             except Exception as e:
                 print(f"[v2] Slide-JPG-Render Fehler: {e}")
         else:

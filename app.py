@@ -2660,8 +2660,9 @@ def fill_pptx(template_bytes, data, customer_images=None):
             if k.startswith(prefix):
                 return i
         return 99
-    # Cap auf 25 (max 1 MB pro Bild → max ~15 MB Spitze, verkraftbar)
-    bild_keys_with_url_sorted = sorted(bild_keys_with_url, key=_sort_key)[:25]
+    # Cap auf 60 (max 1 MB pro Bild → max ~60 MB Spitze, mit 512 MiB Render-Container OK).
+    # Vorher waren es 25 — dabei flogen Collage/Hotel/Rechtlich raus → {{BILD_X}} blieb sichtbar.
+    bild_keys_with_url_sorted = sorted(bild_keys_with_url, key=_sort_key)[:60]
     print(f"fill_pptx: {len(bild_keys_total)} bild_* Keys, "
           f"{len(bild_keys_with_url)} URLs, lade {len(bild_keys_with_url_sorted)} (RAM-Limit)")
 
@@ -4074,8 +4075,8 @@ def _run_expose_job(job_id, zip_paths):
                 gc.collect()
                 # render_pdf_to_jpgs liest das PDF wieder von Disk – stabil
                 with open(pdf_tmp, "rb") as fh:
-                    # DPI=110 statt 72 → wesentlich schaerfere Editor-Vorschau
-                    jpg_paths = render_pdf_to_jpgs(fh.read(), _job_slides_dir(job_id), dpi=110)
+                    # DPI=150 → scharf auch auf Retina-Display
+                    jpg_paths = render_pdf_to_jpgs(fh.read(), _job_slides_dir(job_id), dpi=150)
                 try: os.unlink(pdf_tmp)
                 except OSError: pass
                 slide_jpgs = [os.path.basename(p) for p in jpg_paths]

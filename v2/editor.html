@@ -240,9 +240,9 @@ function onTextChange(key, value) {
   pendingText[key] = value;
   job.expose[key] = value;
   dirty = true;
-  setStatus('Änderungen werden gespeichert …', 'saving');
+  setStatus('●', 'saving');  // Mini-Indikator – Speichern läuft
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(flushTextChanges, 600);
+  saveTimer = setTimeout(flushTextChanges, 250);
 }
 
 async function flushTextChanges() {
@@ -255,7 +255,7 @@ async function flushTextChanges() {
       headers: authHeaders({'Content-Type': 'application/json'}),
       body: JSON.stringify(body),
     });
-    if (r.ok) setStatus('Gespeichert · klicke "Vorschau aktualisieren" für die Folien-Aktualisierung', 'saved');
+    if (r.ok) setStatus('Gespeichert ✓ · für sichtbare Änderung "Vorschau aktualisieren" klicken', 'saved');
     else setStatus('Speichern fehlgeschlagen', 'error');
   } catch(e) {
     setStatus('Netzwerkfehler beim Speichern', 'error');
