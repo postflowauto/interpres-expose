@@ -202,6 +202,11 @@ html, body {
   padding: 1px 6px; border-radius: 8px; font-size: 9px;
   text-transform: uppercase; letter-spacing: 0.1em; margin-left: 6px;
 }
+.field label .multi-hint {
+  background: rgba(200,169,110,0.15); color: var(--gold);
+  padding: 1px 6px; border-radius: 8px; font-size: 9px;
+  margin-left: 6px; cursor: help; font-weight: 500;
+}
 .field input[type="text"],
 .field textarea {
   width: 100%;

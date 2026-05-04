@@ -200,12 +200,26 @@ function renderImagesTab(body) {
     body.innerHTML = '<div class="hint">Diese Folie hat keine Bild-Slots.</div>';
     return;
   }
+  // Wo kommt jeder Slot im gesamten Deck vor? (für Multi-Slot-Hinweis)
+  const slotUsedOnSlides = {};
+  (job.slide_placeholders || []).forEach((keys, idx) => {
+    keys.forEach(k => {
+      if (!k.startsWith('bild_')) return;
+      if (!(k in slotUsedOnSlides)) slotUsedOnSlides[k] = [];
+      slotUsedOnSlides[k].push(idx + 1);
+    });
+  });
   slots.forEach(slot => {
+    slot.usedOn = slotUsedOnSlides[slot.key] || [];
     const f = document.createElement('div');
     f.className = 'field img-field';
     const isUploaded = slot.key in job.uploaded;
+    const usedOnMulti = (slot.usedOn || []).length > 1;
+    const usedHint = usedOnMulti
+      ? `<span class="multi-hint" title="Dieser Slot wird auf Folien ${slot.usedOn.join(', ')} verwendet — Änderung wirkt überall.">⚠ ${slot.usedOn.length} Folien</span>`
+      : '';
     f.innerHTML = `
-      <label>${slot.label} ${isUploaded ? '<span class="badge">eigenes Bild</span>' : ''}</label>
+      <label>${slot.label} ${isUploaded ? '<span class="badge">eigenes Bild</span>' : ''} ${usedHint}</label>
     `;
     // Aktuelles Bild zeigen
     const preview = document.createElement('div');

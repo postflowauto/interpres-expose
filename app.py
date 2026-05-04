@@ -3136,6 +3136,59 @@ def fill_pptx(template_bytes, data, customer_images=None):
             except Exception as e:
                 print(f"Shape-Fehler slide={slide.slide_id} shape={shape.name}: {e}")
 
+    # ── Brute-Force-Fallback: jeder verbliebene {{BILD_X}} wird per add_picture
+    # auf seine TextBox-Position gesetzt, sofern image_data[X] vorhanden ist.
+    # Greift auch bei tief verschachtelten Groups die process_shape uebersprungen
+    # hat. Wichtig: nur ausfuehren wenn der Key wirklich Bilddaten hat — sonst
+    # den Platzhalter sichtbar lassen.
+    BILD_INLINE_RE = re.compile(r'\{\{\s*(BILD_[A-Z0-9_-]+)\s*(?:\|[^}]*)?\}\}', re.IGNORECASE)
+
+    def _walk_with_offset(top_shape, off_x=0, off_y=0):
+        """Yield (shape, abs_left, abs_top) für top_shape und alle (rekursiven)
+        children in Groups."""
+        try:
+            sl = (top_shape.left or 0) + off_x
+            st = (top_shape.top  or 0) + off_y
+        except Exception:
+            sl, st = off_x, off_y
+        yield top_shape, sl, st
+        if top_shape.shape_type == 6:  # Group
+            for c in top_shape.shapes:
+                yield from _walk_with_offset(c, sl, st)
+
+    bf_embedded = 0
+    for slide in prs.slides:
+        for top_shape in list(slide.shapes):
+            for shape, abs_l, abs_t in list(_walk_with_offset(top_shape)):
+                if not shape.has_text_frame:
+                    continue
+                txt = _INVIS_RE.sub("", shape.text_frame.text)
+                m = BILD_INLINE_RE.search(txt)
+                if not m:
+                    continue
+                key = m.group(1).lower()
+                if key not in image_data or not image_data[key]:
+                    continue  # Kein Bild verfuegbar → Platzhalter sichtbar lassen
+                # Position + Groesse aus dem TextBox-Shape ableiten
+                try:
+                    w = shape.width  or 0
+                    h = shape.height or 0
+                    if w < MIN_IMG_SIZE: w = 3_000_000
+                    if h < MIN_IMG_SIZE: h = 2_400_000
+                    img = _crop_image_to_aspect(image_data[key], w, h)
+                    slide.shapes.add_picture(io.BytesIO(img), abs_l, abs_t, w, h)
+                    # TextBox entfernen – nur das Element selbst, nicht die Group
+                    parent = shape._element.getparent()
+                    if parent is not None:
+                        parent.remove(shape._element)
+                    bf_embedded += 1
+                    print(f"  [BF-Embed] {key} → slide_id={slide.slide_id} "
+                          f"@ ({abs_l},{abs_t}) {w}x{h}")
+                except Exception as e:
+                    print(f"  [BF-Embed] Fehler {key}: {e}")
+    if bf_embedded:
+        print(f"  Brute-Force-Embed: {bf_embedded} Bild(er) ueber Fallback eingesetzt")
+
     # Cleanup-Pass: Template-Texte die "in Euro" statt "in €" enthalten korrigieren
     _euro_fixes = [("in Euro", "in €"), (" Euro", " €"), ("in EUR", "in €"), (" EUR", " €")]
     for slide in prs.slides:
