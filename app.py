@@ -1160,11 +1160,12 @@ def fill_image_placeholders(data):
         "bild_ansicht_1", "bild_ansicht_2",
         # ── Außenansichten Standort (echtes Quartier-Foto wenn möglich) ──
         "bild_standort_aussen",
-        # ── Konkrete Grundriss-Pläne & Wohnungs-Bilder (DIN-277 vom Architekt) ──
+        # ── Konkrete Grundriss-Pläne (DIN-277 vom Architekt) ──
         "bild_grundriss_1", "bild_grundriss_2", "bild_grundriss_3", "bild_grundriss_4",
-        *{f"bild_we_{n}" for n in range(1, 21)},
         # ── Amenity-Bilder werden separat via Wikimedia + Vision validiert ──
         *{f"bild_amenity_{n}" for n in range(1, 10)},
+        # NOTE: bild_we_* NICHT mehr hier — die Slots kriegen jetzt Picsum/Unsplash
+        # Fallbacks, sonst bleibt {{BILD_WE_X}} sichtbar bis Kunde manuell hochladet.
     }
 
     queries = UNSPLASH_QUERIES.copy()
@@ -1702,6 +1703,14 @@ def generate_expose_with_claude(projektdaten, city_context=""):
         "NIEMALS '€' als Silbe in deutschen Wörtern wie 'Europas', 'Europa', 'europäisch' – "
         "schreibe diese Wörter immer vollständig aus!\n\n"
 
+        f"⚠️ ANTI-HALLUZINATION: Das Projekt liegt in **{stadt}**"
+        + (f" (Stadtteil: {projektdaten.get('stadtteil')})" if projektdaten.get('stadtteil') else "")
+        + ". "
+        "Schreibe ALLE Stadt-Texte (Wirtschaft, Wachstum, Standort, Branchen) AUSSCHLIESSLICH ueber "
+        f"{stadt} selbst. NIEMALS ueber andere Staedte oder Nachbarorte schreiben (z.B. nicht "
+        "'Wolmirstedt liegt vor den Toren von ...'). Auch die Statistiken (Einwohner, BIP, "
+        f"Mietsteigerung, Studierende) muessen sich auf {stadt} bzw. dessen Bundesland beziehen.\n\n"
+
         f"## PROJEKTDATEN\n{json.dumps(projektdaten, ensure_ascii=False)}\n"
         f"{we_typen_hint}\n"
 
@@ -1844,34 +1853,32 @@ def generate_expose_with_claude(projektdaten, city_context=""):
         "text_intro: ZIEL 280-340 Zeichen – 2-3 Sätze, projektspezifisch, emotional, konkret\n"
         "text_investment_pitch: ZIEL 280-330 Zeichen – Preis, KfW, AfA, Renditepotenzial konkret\n"
         "text_greenliving_intro: max 90 Zeichen\n"
-        "text_greenliving_1: ZIEL 280-340 Zeichen – konkrete Anlagen (Fernwärme, PV, KfW-40) + Effekt + Mieter-Vorteil\n"
-        "text_greenliving_2: ZIEL 280-340 Zeichen – Außenbereiche, Mobilität, Lebensqualität, Mikroklima\n"
+        "text_greenliving_1: ZIEL 200-240 Zeichen – konkrete Anlagen (Fernwärme, PV, KfW-40) + Effekt\n"
+        "text_greenliving_2: ZIEL 200-240 Zeichen – Außenbereiche, Mobilität, Lebensqualität\n"
         "text_ausstattung_intro: max 90 Zeichen\n"
-        "text_ausstattung_detail: ZIEL 240-320 Zeichen – Materialien, Boden, Bad, Smart-Home, Außenbereich\n"
+        "text_ausstattung_detail: ZIEL 180-220 Zeichen – Materialien, Boden, Bad, Smart-Home\n"
         "text_ausstattung_kurz: max 80 Zeichen\n"
-        "text_ausstattung_lang: ZIEL 240-320 Zeichen – wie text_ausstattung_detail aber mit anderem Fokus\n"
-        "text_grundriss_intro: ZIEL 220-300 Zeichen, DQN-Stil. Beispiel:\n"
-        "  'Qualitativ hochwertiger und nachhaltiger Wohnraum ist in {stadt} äußerst begehrt – "
-        "insbesondere, wenn er zentrale Lage, kompakte Grundrisse und Barrierefreiheit vereint. "
-        "Jetzt ist die Zeit gekommen, sich ein Stück der vielversprechenden Zukunft {stadt}s zu sichern.'\n"
-        "  Bezug zur Stadt + Qualität + Investmentmoment.\n"
+        "text_ausstattung_lang: ZIEL 180-220 Zeichen\n"
+        "text_grundriss_intro: ZIEL 180-240 Zeichen, DQN-Stil.\n"
         "text_architektur: max 110 Zeichen\n"
-        "text_nachhaltig_1/2/3/4: max 140 Zeichen pro Eintrag (DQN: ~120-150 chars)\n"
-        "text_standort_1/2: ZIEL 240-320 Zeichen pro Eintrag\n"
-        "text_projekt_nachhaltig_1/2: ZIEL 280-340 Zeichen\n"
-        "text_stadt_intro: ZIEL 280-340 Zeichen – Hauptstadt-Pitch ausführlich (DQN: 330 chars)\n"
-        "text_stadt_wachstum_1: ZIEL 280-340 Zeichen – Branchenüberblick mit konkreten Firmennamen + Investitionssummen\n"
-        "text_stadt_wachstum_2: ZIEL 200-260 Zeichen – konkrete Projekte/Investitionssummen\n"
-        "text_stadt_wirtschaft_links: ZIEL 280-380 Zeichen – Sektor 1 ausführlich (DQN: 'Im Industriepark... Namen wie CATL... unterstreichen die internationale Relevanz...' ~370 chars)\n"
-        "text_stadt_wirtschaft_rechts: ZIEL 280-380 Zeichen – Sektor 2 ausführlich, mind. 2 echte Firmen + Volumen\n"
-        "text_stadt_invest_detail: ZIEL 240-320 Zeichen – Großinvestition mit Volumen, Standort, Zeitplan, Wirkung\n"
-        "text_einwohner_detail: ZIEL 140-200 Zeichen – konkrete Einwohner-Entwicklung, Wachstumsrate\n"
-        "text_bip_detail: ZIEL 140-200 Zeichen – BIP-Entwicklung, % Veränderung über mehrere Jahre\n"
-        "text_mietsteigerung_detail: ZIEL 130-180 Zeichen – Mietpreis-Tendenz mit konkreten €/m²-Werten\n"
-        "text_studierende_detail: ZIEL 130-180 Zeichen – Hochschulen, Fachgebiete, internationale Vernetzung\n"
-        "text_stadt_stat_N_detail: ZIEL 180-280 Zeichen pro Stat – Hintergrund + Volumen + Auswirkung (DQN: '1,06 Mrd. € Investitionsvolumen markiert der Spatenstich im Oktober 2024 den Beginn eines der bedeutendsten Bauprojekte für die Gesundheitsversorgung in der Region.' ~200 chars)\n"
-        "text_stadt_branche_1: ZIEL 320-420 Zeichen – Hauptabsatz Branchen-Standort (DQN: 'Magdeburg entwickelt sich zu einem führenden Standort für Medizintechnik... Über 30 Unternehmen, Start-ups, Forschungseinrichtungen wie LIN, DZNE, Fraunhofer IBMT...' ~400 chars)\n"
-        "text_stadt_branche_2: ZIEL 220-280 Zeichen – Ergänzung mit Wirtschaftsdaten/Innovation\n"
+        "text_nachhaltig_1/2/3/4: max 100 Zeichen pro Eintrag\n"
+        "text_standort_1/2: ZIEL 180-240 Zeichen pro Eintrag\n"
+        "text_projekt_nachhaltig_1/2: ZIEL 180-240 Zeichen\n"
+        "text_stadt_intro: ZIEL 200-260 Zeichen – Hauptstadt-Pitch in 2 Sätzen\n"
+        "text_stadt_wachstum_1: ZIEL 220-280 Zeichen – Branchenüberblick mit konkreten Firmennamen + Investitionssummen\n"
+        "text_stadt_wachstum_2: max 200 Zeichen – konkrete Projekte/Investitionssummen\n"
+        "text_stadt_wirtschaft_links: ZIEL 200-260 Zeichen – Sektor 1 KOMPAKT mit 1-2 Firmen\n"
+        "text_stadt_wirtschaft_rechts: ZIEL 200-260 Zeichen – Sektor 2 KOMPAKT mit 1-2 Firmen\n"
+        "text_stadt_invest_detail: ZIEL 180-240 Zeichen – Großinvestition kurz mit Volumen + Standort\n"
+        "text_einwohner_detail: max 130 Zeichen – konkrete Einwohner-Entwicklung\n"
+        "text_bip_detail: max 130 Zeichen – BIP-Entwicklung mit % über mehrere Jahre\n"
+        "text_mietsteigerung_detail: max 110 Zeichen – Mietpreis-Tendenz mit €/m²\n"
+        "text_studierende_detail: max 110 Zeichen – Hochschulen + Fachgebiete\n"
+        "text_stadt_stat_N_detail: max 130 Zeichen pro Stat – Volumen + Wirkung KOMPAKT\n"
+        "text_stadt_branche_1: ZIEL 220-280 Zeichen – Branchen-Standort mit echten Firmen + Forschungs-Inst.\n"
+        "text_stadt_branche_2: ZIEL 180-240 Zeichen – Ergänzung mit Wirtschaftsdaten\n"
+        "WICHTIG: alle obigen Zeichen-Limits sind HARTE Obergrenzen. Lieber 1-2 starke Sätze\n"
+        "als ein dritter Halbsatz der das Layout sprengt.\n"
         "feature_N_label: max 28 Zeichen\n"
         "amenity_N: max 22 Zeichen, 1-3 Wörter, BILDBAR (siehe Key-Facts-Liste oben)\n"
         "we_typ_beschreibung_N: max 50 Zeichen, 1 Zeile (DQN-Stil: '1-Zi mit Balkon, Barrierefrei')\n"
@@ -2039,7 +2046,8 @@ def generate_expose_with_claude(projektdaten, city_context=""):
         raise ValueError(f"Claude hat keinen Text zurückgegeben. stop_reason={stop_reason}")
 
     # ── Text-Korrekturen: Claude-Fehler bei der Verwendung von Sonderzeichen ──
-    # Claude schreibt manchmal "€pas" statt "Europas" (verwechselt € mit "Euro-")
+    # Claude schreibt manchmal "€pas" statt "Europas" (verwechselt € mit "Euro-").
+    # Auch IIntel/IIm-Doppelbuchstaben sind regelmäßige Halluzinationen.
     _TEXT_FIXES = [
         ("€pas",       "Europas"),
         ("€pa ",       "Europa "),
@@ -2047,7 +2055,10 @@ def generate_expose_with_claude(projektdaten, city_context=""):
         ("€pä",        "europä"),
         ("€pe",        "Europe"),
         ("IIntel",     "Intel"),
-        ("  ",         " "),    # doppelte Leerzeichen
+        ("IIm ",       "Im "),
+        ("IIn ",       "In "),
+        ("IIst ",      "Ist "),
+        ("  ",         " "),
     ]
     for wrong, right in _TEXT_FIXES:
         json_text = json_text.replace(wrong, right)
@@ -2067,13 +2078,30 @@ def generate_expose_with_claude(projektdaten, city_context=""):
         print(f"  Repariertes JSON (letzte 100 Zeichen): ...{json_text[-100:]}")
 
     try:
-        return json.loads(json_text)
+        result = json.loads(json_text)
     except json.JSONDecodeError as e:
         print(f"  JSON-Parse-Fehler: {e}")
         print(f"  Letzten 500 Zeichen: ...{json_text[-500:]}")
         # Fallback: gib leeres Dict zurück, PLATZHALTER-Defaults werden benutzt
         print("  Fallback: verwende leere Felder (PLATZHALTER-Defaults)")
         return {}
+
+    # Sicherheitsnetz: dieselben Text-Fixes auch auf jedem geparsten String-Wert.
+    # Falls Claude die Halluzination erst beim Schreiben ins JSON-Feld macht,
+    # wird sie hier nochmal abgefangen.
+    fixed_count = 0
+    for k, v in list(result.items()):
+        if not isinstance(v, str):
+            continue
+        new_v = v
+        for wrong, right in _TEXT_FIXES:
+            new_v = new_v.replace(wrong, right)
+        if new_v != v:
+            result[k] = new_v
+            fixed_count += 1
+    if fixed_count:
+        print(f"  Text-Fix nach Parse: {fixed_count} Felder bereinigt (€pas, IIm, etc.)")
+    return result
 
 # Regex: matcht {{KEY}}, {{KEY-SPLIT}}, {{KEY|suffix}}, {{KEY | suffix}}
 # Bindestriche im Key werden beim Lookup entfernt (z.B. {{PRODUKT_BESCHREI-BUNG}})
