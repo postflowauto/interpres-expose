@@ -34,38 +34,44 @@ JOB_DIR     = "/tmp/interpres_jobs"
 _PER_SLIDE_PLACEHOLDERS = None
 
 
-def _scan_template_placeholders(pptx_bytes: bytes) -> list[list[str]]:
+def _scan_template_placeholders(pptx_bytes: bytes) -> list:
     """Liefert pro Slide die Liste der Platzhalter-Keys (lowercase, dedupliziert).
-    Beispiel: [["projekt_titel","bild_titel"], ["text_kapitel_invest_1", ...], ...]
+    Robust gegen Whitespace-Splits, Line-Breaks innerhalb von {{...}} und |Xpt-Hints.
     """
     import io as _io
     import re as _re
     from pptx import Presentation
-    pat = _re.compile(r'\{\{\s*([A-Z0-9_-]+)\s*(?:\|[^}]*)?\}\}', _re.IGNORECASE)
-    invis = _re.compile(r'[­​‌‍﻿ ]')
+    PH = _re.compile(r"\{\{(.*?)\}\}", _re.DOTALL)
+
+    def _extract(text):
+        out = set()
+        for m in PH.finditer(text):
+            inner = m.group(1)
+            if "|" in inner:
+                inner = inner.split("|")[0]
+            key = _re.sub(r"\s+", "", inner).lower().replace("-", "")
+            if key and _re.match(r"^[a-z][a-z0-9_]*$", key):
+                out.add(key)
+        return out
+
     prs = Presentation(_io.BytesIO(pptx_bytes))
-    out = []
+    result = []
     for slide in prs.slides:
         keys = set()
         def _scan_tf(tf):
-            for p in tf.paragraphs:
-                full = "".join(r.text for r in p.runs)
-                full = invis.sub("", full)
-                for m in pat.finditer(full):
-                    keys.add(m.group(1).lower().replace('-', ''))
-            # Cross-paragraph: full text frame
-            tf_full = invis.sub("", tf.text)
-            for m in pat.finditer(tf_full):
-                keys.add(m.group(1).lower().replace('-', ''))
+            keys.update(_extract(tf.text))
         for shape in slide.shapes:
-            if shape.has_text_frame:
-                _scan_tf(shape.text_frame)
-            if shape.shape_type == 6:
-                for child in shape.shapes:
-                    if child.has_text_frame:
-                        _scan_tf(child.text_frame)
-        out.append(sorted(keys))
-    return out
+            try:
+                if shape.has_text_frame:
+                    _scan_tf(shape.text_frame)
+                if shape.shape_type == 6:
+                    for child in shape.shapes:
+                        if child.has_text_frame:
+                            _scan_tf(child.text_frame)
+            except Exception:
+                continue
+        result.append(sorted(keys))
+    return result
 
 
 def _get_template_placeholders() -> list[list[str]]:

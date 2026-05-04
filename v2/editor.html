@@ -77,6 +77,12 @@ async function loadJob() {
   renderSlideList();
   showSlide(0);
   renderProps();
+  // Auto-Render falls noch keine Folien-JPGs da sind
+  if (!job.slide_count && !window._autoRenderTriggered) {
+    window._autoRenderTriggered = true;
+    setStatus('Erste Vorschau wird automatisch erstellt …', 'saving');
+    triggerRender();
+  }
 }
 
 function renderSlideList() {
@@ -123,7 +129,12 @@ function renderProps() {
 }
 
 function activeSlideKeys() {
-  // Set der Platzhalter-Keys die auf der aktuell gewählten Folie vorkommen
+  // Set der Platzhalter-Keys die auf der aktuell gewählten Folie vorkommen.
+  // Fallback bei slide_count=0 (noch kein Render): alle expose-Keys zeigen
+  // damit der Editor nicht leer wirkt.
+  if (!job.slide_count) {
+    return new Set(Object.keys(job.expose || {}));
+  }
   const arr = (job.slide_placeholders && job.slide_placeholders[activeIdx]) || [];
   return new Set(arr);
 }
