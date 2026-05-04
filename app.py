@@ -2475,18 +2475,72 @@ def _build_template_page_map(prs):
 
 
 def _resync_pages_to_actual(prs, template_n_to_slide, toc_slide):
-    """Setzt Bottom-Pages auf slide_idx+1 (= echte PDF-Seite) und mappt TOC-
-    Einträge (Template-Zahlen) auf die neue Position des entsprechenden Slides.
+    """Spread-Numbering: jede Folie repräsentiert 2 Seiten (links + rechts).
+    Nur Folien die im Template ursprünglich Bottom-Pages hatten werden nummeriert
+    (Cover + TOC bleiben ohne Nummer). TOC-Einträge werden via Mapping korrigiert.
+
+    Schema:
+      Erste numerierte Folie  (spread_idx=1):  links=1, rechts=2
+      Zweite numerierte Folie (spread_idx=2):  links=3, rechts=4
+      ...
     """
-    # Slide-Objekte sind nicht hashbar → Lookup via id() oder linear search.
-    # Wir bauen ein {id(slide): idx}-Dict für O(1) Lookup nach Duplikation.
+    # Slide-Objekte sind nicht hashbar → Lookup via id().
     id_to_idx = {id(s): i for i, s in enumerate(prs.slides)}
 
-    # Bottom-Pages: jede Folie kriegt ihre echte PDF-Seitenzahl
+    # Helper: Bottom-Page-Paragraphen mit X-Position (für links/rechts-Sortierung)
+    def _scan_bottom_with_x(slide):
+        sh_h = int(prs.slide_height or 6858000)
+        bottom_threshold = int(sh_h * 0.85)
+        out = []  # [(paragraph, n, abs_x)]
+        for shape in slide.shapes:
+            try:
+                top = shape.top or 0
+            except Exception:
+                top = 0
+            if shape.shape_type == 6:
+                for child in shape.shapes:
+                    ctop = (child.top or 0) + (shape.top or 0)
+                    if ctop < bottom_threshold:
+                        continue
+                    if child.has_text_frame:
+                        cx = (child.left or 0) + (shape.left or 0)
+                        for p in child.text_frame.paragraphs:
+                            full = "".join(r.text for r in p.runs).strip()
+                            m = _PAGE_NUM_RE.match(full)
+                            if m and 1 <= int(m.group(1)) <= 999:
+                                out.append((p, int(m.group(1)), cx))
+            else:
+                if top < bottom_threshold:
+                    continue
+                if shape.has_text_frame:
+                    sx = shape.left or 0
+                    for p in shape.text_frame.paragraphs:
+                        full = "".join(r.text for r in p.runs).strip()
+                        m = _PAGE_NUM_RE.match(full)
+                        if m and 1 <= int(m.group(1)) <= 999:
+                            out.append((p, int(m.group(1)), sx))
+        return out
+
+    # Spread-Index pro Slide vergeben — nur für Slides die original Bottom-Pages hatten
+    spread_idx = 0
+    slide_to_spread = {}  # id(slide) → spread_idx (1-basiert) oder None
+    for idx, slide in enumerate(prs.slides):
+        bottoms = _scan_bottom_with_x(slide)
+        if bottoms:
+            spread_idx += 1
+            slide_to_spread[id(slide)] = spread_idx
+        else:
+            slide_to_spread[id(slide)] = None
+
+    # Bottom-Pages: links = 2*spread-1, rechts = 2*spread (X-sortiert)
     bottom_changes = 0
     for idx, slide in enumerate(prs.slides):
-        new_n = str(idx + 1)
-        for p, old_n in _scan_bottom_page_paragraphs(prs, slide):
+        si = slide_to_spread.get(id(slide))
+        if si is None:
+            continue
+        bottoms = sorted(_scan_bottom_with_x(slide), key=lambda t: t[2])  # by X
+        for i, (p, old_n, _x) in enumerate(bottoms):
+            new_n = str(2 * si - 1 + i)  # 0 → links, 1 → rechts, 2 → ggf. weitere
             if str(old_n) == new_n:
                 continue
             if p.runs:
@@ -2495,16 +2549,16 @@ def _resync_pages_to_actual(prs, template_n_to_slide, toc_slide):
                     r.text = ""
             bottom_changes += 1
 
-    # TOC: für jede Template-Zahl → Slide finden → neue Seite = idx+1 setzen
+    # TOC: für jede Template-Zahl → Slide finden → neue Spread-Seite setzen
     toc_changes = 0
     toc_idx = id_to_idx.get(id(toc_slide)) if toc_slide is not None else None
     if toc_slide is not None and toc_idx is not None:
-        # Mapping Template-N → neue PDF-Seite (basierend auf aktueller Slide-Position)
+        # Mapping Template-N → neue PDF-Seite (linke Seite des Spreads)
         template_n_to_new_page = {}
         for n, s in template_n_to_slide.items():
-            new_idx = id_to_idx.get(id(s))
-            if new_idx is not None:
-                template_n_to_new_page[n] = new_idx + 1
+            si = slide_to_spread.get(id(s))
+            if si is not None:
+                template_n_to_new_page[n] = 2 * si - 1  # linke Seite des Spreads
 
         # Sortierte Liste für Interpolation/Fallback
         sorted_keys = sorted(template_n_to_new_page.keys())
@@ -2666,11 +2720,17 @@ def fill_pptx(template_bytes, data, customer_images=None):
     print(f"fill_pptx: {len(bild_keys_total)} bild_* Keys, "
           f"{len(bild_keys_with_url)} URLs, lade {len(bild_keys_with_url_sorted)} (RAM-Limit)")
 
-    # OSM/Wikipedia/Wikimedia blocken Requests ohne User-Agent → 403.
-    # Der Browser-ähnliche UA + Accept-Header funktioniert auf allen Hosts.
+    # OSM/Wikipedia/Wikimedia blocken Requests die nicht wie ein Browser aussehen.
+    # Echte Chrome-UA + komplette Browser-Header → besteht Anti-Bot-Checks.
     _DL_HEADERS = {
-        "User-Agent": "Mozilla/5.0 (compatible; interpres-expose/1.0; +https://interpres.de)",
-        "Accept":     "image/avif,image/webp,image/png,image/jpeg,image/*;q=0.9,*/*;q=0.5",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                      "AppleWebKit/537.36 (KHTML, like Gecko) "
+                      "Chrome/121.0.0.0 Safari/537.36",
+        "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+        "Accept-Language": "de-DE,de;q=0.9,en;q=0.8",
+        "Sec-Fetch-Dest": "image",
+        "Sec-Fetch-Mode": "no-cors",
+        "Sec-Fetch-Site": "cross-site",
     }
     for key in bild_keys_with_url_sorted:
         value = data[key]
@@ -3411,9 +3471,47 @@ def _render_pdf_to_jpgs_pymupdf(pdf_bytes, out_dir, dpi=110):
             if i % 5 == 0:
                 import gc as _gc
                 _gc.collect()
+        for p in out:
+            _trim_white_borders(p)
         return out
     finally:
         doc.close()
+
+
+def _trim_white_borders(jpg_path):
+    """Entfernt einheitliche weiße Margins (CloudConvert padded 16:9-Slides
+    in A4-Landscape → weiße Streifen oben/unten). Erkennt nur reine 255-er
+    Bereiche, lässt cremefarbene/dunkle Slide-Inhalte unangetastet."""
+    try:
+        from PIL import Image
+        img = Image.open(jpg_path).convert("RGB")
+        w, h = img.size
+        if w < 100 or h < 100:
+            return
+        # Sample 50 columns evenly distributed
+        sample_x = list(range(0, w, max(1, w // 50)))
+        pixels = img.load()
+
+        def _is_white_row(y):
+            return all(pixels[x, y] == (255, 255, 255) for x in sample_x)
+
+        # Top boundary
+        top = 0
+        while top < h and _is_white_row(top):
+            top += 1
+        # Bottom boundary
+        bottom = h
+        while bottom > top + 1 and _is_white_row(bottom - 1):
+            bottom -= 1
+
+        # Nur croppen wenn deutliche Margins (mind. 2% des Bildes)
+        margin_threshold = max(int(h * 0.02), 10)
+        if top < margin_threshold and (h - bottom) < margin_threshold:
+            return  # nichts zu tun
+        cropped = img.crop((0, top, w, bottom))
+        cropped.save(jpg_path, "JPEG", quality=85, optimize=True)
+    except Exception as e:
+        print(f"  _trim_white_borders Fehler {jpg_path}: {e}")
 
 
 def render_pdf_to_jpgs(pdf_bytes, out_dir, dpi=110):
@@ -3494,6 +3592,9 @@ def render_pdf_to_jpgs(pdf_bytes, out_dir, dpi=110):
             os.rename(p, new_path)
         normalized.append(new_path)
     normalized.sort(key=lambda p: int(re.search(r'slide_(\d+)\.jpg$', p).group(1)))
+    # Weiße Margins (CloudConvert-Padding) wegcroppen
+    for p in normalized:
+        _trim_white_borders(p)
     return normalized
 
 
