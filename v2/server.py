@@ -480,6 +480,8 @@ def _v2_render_worker(job_id: str):
             try:
                 projekt_name = expose.get("projekt_titel", "Expose").replace(" ", "_")
                 pdf_bytes = appmod.convert_to_pdf(pptx_bytes, f"{projekt_name}.pptx")
+                # Quellen-URLs als clickable Hyperlinks anreichern
+                pdf_bytes = appmod._add_hyperlinks_to_pdf(pdf_bytes)
             except Exception as e:
                 print(f"[v2] PDF-Konvertierung Fehler: {e}")
 
