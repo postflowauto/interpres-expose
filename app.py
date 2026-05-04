@@ -3157,37 +3157,48 @@ def fill_pptx(template_bytes, data, customer_images=None):
                 yield from _walk_with_offset(c, sl, st)
 
     bf_embedded = 0
-    for slide in prs.slides:
-        for top_shape in list(slide.shapes):
-            for shape, abs_l, abs_t in list(_walk_with_offset(top_shape)):
-                if not shape.has_text_frame:
-                    continue
-                txt = _INVIS_RE.sub("", shape.text_frame.text)
-                m = BILD_INLINE_RE.search(txt)
-                if not m:
-                    continue
-                key = m.group(1).lower()
-                if key not in image_data or not image_data[key]:
-                    continue  # Kein Bild verfuegbar → Platzhalter sichtbar lassen
-                # Position + Groesse aus dem TextBox-Shape ableiten
+    bf_errors   = 0
+    try:
+        for slide in prs.slides:
+            try:
+                top_list = list(slide.shapes)
+            except Exception:
+                continue
+            for top_shape in top_list:
                 try:
-                    w = shape.width  or 0
-                    h = shape.height or 0
-                    if w < MIN_IMG_SIZE: w = 3_000_000
-                    if h < MIN_IMG_SIZE: h = 2_400_000
-                    img = _crop_image_to_aspect(image_data[key], w, h)
-                    slide.shapes.add_picture(io.BytesIO(img), abs_l, abs_t, w, h)
-                    # TextBox entfernen – nur das Element selbst, nicht die Group
-                    parent = shape._element.getparent()
-                    if parent is not None:
-                        parent.remove(shape._element)
-                    bf_embedded += 1
-                    print(f"  [BF-Embed] {key} → slide_id={slide.slide_id} "
-                          f"@ ({abs_l},{abs_t}) {w}x{h}")
-                except Exception as e:
-                    print(f"  [BF-Embed] Fehler {key}: {e}")
-    if bf_embedded:
-        print(f"  Brute-Force-Embed: {bf_embedded} Bild(er) ueber Fallback eingesetzt")
+                    walked = list(_walk_with_offset(top_shape))
+                except Exception:
+                    continue
+                for shape, abs_l, abs_t in walked:
+                    try:
+                        if not shape.has_text_frame:
+                            continue
+                        txt = _INVIS_RE.sub("", shape.text_frame.text)
+                        m = BILD_INLINE_RE.search(txt)
+                        if not m:
+                            continue
+                        key = m.group(1).lower()
+                        if key not in image_data or not image_data[key]:
+                            continue
+                        w = shape.width  or 0
+                        h = shape.height or 0
+                        if w < MIN_IMG_SIZE: w = 3_000_000
+                        if h < MIN_IMG_SIZE: h = 2_400_000
+                        img = _crop_image_to_aspect(image_data[key], w, h)
+                        slide.shapes.add_picture(io.BytesIO(img), abs_l, abs_t, w, h)
+                        parent = shape._element.getparent()
+                        if parent is not None:
+                            parent.remove(shape._element)
+                        bf_embedded += 1
+                        print(f"  [BF-Embed] {key} → slide_id={slide.slide_id} "
+                              f"@ ({abs_l},{abs_t}) {w}x{h}")
+                    except Exception as e:
+                        bf_errors += 1
+                        print(f"  [BF-Embed] Fehler in shape: {e}")
+    except Exception as e:
+        print(f"  [BF-Embed] Top-Level-Fehler abgefangen: {e}")
+    if bf_embedded or bf_errors:
+        print(f"  Brute-Force-Embed: {bf_embedded} Bild(er) eingesetzt, {bf_errors} Fehler")
 
     # Cleanup-Pass: Template-Texte die "in Euro" statt "in €" enthalten korrigieren
     _euro_fixes = [("in Euro", "in €"), (" Euro", " €"), ("in EUR", "in €"), (" EUR", " €")]
