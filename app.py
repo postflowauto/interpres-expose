@@ -2637,7 +2637,7 @@ def _resync_pages_to_actual(prs, template_n_to_slide, toc_slide):
           f"{toc_changes} TOC-Einträge gemappt (TOC-Slide={toc_idx})")
 
 
-def _crop_image_to_aspect(img_bytes, target_w_emu, target_h_emu, max_side_px=1800):
+def _crop_image_to_aspect(img_bytes, target_w_emu, target_h_emu, max_side_px=1400):
     """Schneidet ein Bild auf das Aspect-Ratio des Ziel-Shapes (Center-Crop) und
     skaliert auf eine vernünftige Pixelgröße. Verhindert Verzerrungen und Blur
     durch Stretch-Modus im PPTX-blipFill.
@@ -2645,17 +2645,21 @@ def _crop_image_to_aspect(img_bytes, target_w_emu, target_h_emu, max_side_px=180
     Args:
         img_bytes: Original-Bilddaten (JPEG/PNG/WebP).
         target_w_emu, target_h_emu: Shape-Dimensionen in EMU (1 inch = 914400).
-        max_side_px: Maximale Pixel-Kantenlänge (Standardwert 1800 ≈ 4.7 MB JPEG).
-
-    Returns:
-        bytes: JPEG-Daten mit korrektem Aspect-Ratio. Bei Fehler/zu kleinem Bild
-        wird das Original zurückgegeben.
+        max_side_px: Maximale Pixel-Kantenlänge (Standardwert 1400 ≈ 3 MB JPEG).
+            Reduziert von 1800 → 1400 wegen 512 MB Render-Plan.
     """
     if not target_w_emu or not target_h_emu:
         return img_bytes
     try:
         from PIL import Image
         src = Image.open(io.BytesIO(img_bytes))
+        # JPEG draft() = DCT-Skalierung: dekodiert direkt 1/2, 1/4 oder 1/8.
+        # Spart 75-87% RAM beim Decode (4K-JPEG: ~48 MB → ~6 MB).
+        if (src.format or "").upper() == "JPEG":
+            try:
+                src.draft("RGB", (max_side_px * 2, max_side_px * 2))
+            except Exception:
+                pass
         # Auto-rotate basierend auf EXIF-Orientation
         try:
             from PIL import ImageOps
@@ -2700,11 +2704,58 @@ def _crop_image_to_aspect(img_bytes, target_w_emu, target_h_emu, max_side_px=180
             src = src.convert("RGB")
 
         out = io.BytesIO()
-        src.save(out, format="JPEG", quality=88, optimize=True)
-        return out.getvalue()
+        src.save(out, format="JPEG", quality=85, optimize=True)
+        result = out.getvalue()
+        src.close()
+        del src, out
+        return result
     except Exception as e:
         print(f"  _crop_image_to_aspect Fehler: {e} – verwende Original")
         return img_bytes
+
+
+def _shrink_for_storage(raw, max_px=1600):
+    """Pre-shrink: Bild SOFORT beim Laden in image_data verkleinern.
+    Spart RAM-Footprint des Dicts (60 Bilder × 1 MB → ~60 × 200 KB = 12 MB).
+    Nutzt JPEG draft() für minimalen Decode-Spike.
+    Bei Fehler: Original zurückgeben (defensive)."""
+    if not raw or len(raw) < 250_000:
+        return raw  # bereits klein genug
+    try:
+        from PIL import Image
+        img = Image.open(io.BytesIO(raw))
+        if (img.format or "").upper() == "JPEG":
+            try:
+                img.draft("RGB", (max_px, max_px))
+            except Exception:
+                pass
+        img.load()
+        w, h = img.size
+        long_side = max(w, h)
+        if long_side <= max_px and (img.format or "").upper() == "JPEG":
+            img.close()
+            return raw
+        if long_side > max_px:
+            scale = max_px / long_side
+            img = img.resize((max(1, int(w * scale)), max(1, int(h * scale))),
+                             Image.LANCZOS)
+        if img.mode in ("RGBA", "LA", "P"):
+            bg = Image.new("RGB", img.size, (255, 255, 255))
+            if img.mode == "P":
+                img = img.convert("RGBA")
+            bg.paste(img, mask=img.split()[-1] if img.mode in ("RGBA", "LA") else None)
+            img = bg
+        elif img.mode != "RGB":
+            img = img.convert("RGB")
+        out = io.BytesIO()
+        img.save(out, format="JPEG", quality=85, optimize=True)
+        result = out.getvalue()
+        img.close()
+        del img, out
+        return result if len(result) < len(raw) else raw
+    except Exception as e:
+        print(f"  _shrink_for_storage Fehler: {e}")
+        return raw
 
 
 def fill_pptx(template_bytes, data, customer_images=None):
@@ -2717,11 +2768,14 @@ def fill_pptx(template_bytes, data, customer_images=None):
     image_data = {}
 
     # 1. Kundenbilder direkt einsetzen (höchste Priorität)
+    # Vor-Verkleinerung: spart RAM permanent während fill_pptx läuft
     if customer_images:
         for key, raw in customer_images.items():
-            image_data[key] = raw
-            print(f"  ✓ Kundenbild: {key} ({len(raw)//1024} KB)")
+            shrunk = _shrink_for_storage(raw)
+            image_data[key] = shrunk
+            print(f"  ✓ Kundenbild: {key} ({len(raw)//1024} KB → {len(shrunk)//1024} KB)")
         print(f"  Kundenbilder: {len(customer_images)} eingeladen")
+        import gc; gc.collect()
 
     # 2. Unsplash/Picsum-URLs für alle noch fehlenden bild_* Keys herunterladen
     bild_keys_total = [k for k in data if k.startswith("bild_")]
@@ -2742,9 +2796,8 @@ def fill_pptx(template_bytes, data, customer_images=None):
             if k.startswith(prefix):
                 return i
         return 99
-    # Cap auf 60 (max 1 MB pro Bild → max ~60 MB Spitze, mit 512 MiB Render-Container OK).
-    # Vorher waren es 25 — dabei flogen Collage/Hotel/Rechtlich raus → {{BILD_X}} blieb sichtbar.
-    bild_keys_with_url_sorted = sorted(bild_keys_with_url, key=_sort_key)[:60]
+    # Cap auf 50 — mit pre-shrink (~200 KB pro Bild) ergibt das ~10 MB statt 60 MB Dauer-RAM.
+    bild_keys_with_url_sorted = sorted(bild_keys_with_url, key=_sort_key)[:50]
     print(f"fill_pptx: {len(bild_keys_total)} bild_* Keys, "
           f"{len(bild_keys_with_url)} URLs, lade {len(bild_keys_with_url_sorted)} (RAM-Limit)")
 
@@ -2760,21 +2813,31 @@ def fill_pptx(template_bytes, data, customer_images=None):
         "Sec-Fetch-Mode": "no-cors",
         "Sec-Fetch-Site": "cross-site",
     }
-    for key in bild_keys_with_url_sorted:
+    import gc as _gc
+    for idx, key in enumerate(bild_keys_with_url_sorted):
         value = data[key]
         try:
             resp = requests.get(value, timeout=15, headers=_DL_HEADERS, allow_redirects=True)
             if resp.status_code == 200:
-                # Nur einbinden wenn < 1 MB (sonst zu groß für RAM-Buffer)
-                if len(resp.content) < 1_000_000:
-                    image_data[key] = resp.content
-                    print(f"  ✓ Bild geladen: {key} ({len(resp.content)//1024} KB)")
+                raw = resp.content
+                # Cap raw download auf 3 MB; alles darüber wird verworfen statt geshrinkt
+                # (sonst Decode-Spike auf einem 8K-Foto = 100+ MB RAM).
+                if len(raw) >= 3_000_000:
+                    print(f"  ⚠️  Bild zu groß übersprungen: {key} ({len(raw)//1024} KB)")
                 else:
-                    print(f"  ⚠️  Bild zu groß übersprungen: {key} ({len(resp.content)//1024} KB)")
+                    shrunk = _shrink_for_storage(raw)
+                    image_data[key] = shrunk
+                    print(f"  ✓ Bild geladen: {key} ({len(raw)//1024} KB → {len(shrunk)//1024} KB)")
+                del raw
             else:
                 print(f"  ✗ Bild HTTP-Fehler {key}: {resp.status_code} ({value[:80]})")
+            del resp
         except Exception as e:
             print(f"  ✗ Bild Download-Fehler {key}: {e}")
+        # Alle 8 Bilder gc — spart Pillow-Restpuffer
+        if idx % 8 == 7:
+            _gc.collect()
+    _gc.collect()
 
     print(f"  image_data gesamt: {len(image_data)} Bilder "
           f"(~{sum(len(v) for v in image_data.values())//1024} KB)")
