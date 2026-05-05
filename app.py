@@ -2210,13 +2210,11 @@ def duplicate_we_slides(prs, data):
     # Page-Resync gebraucht.
     template_n_to_slide, toc_slide = _build_template_page_map(prs)
 
-    # Ermittle Anzahl extra Typen dynamisch:
-    # Typ 1 (original): we_beispiel_1/_2 + we_flaeche_*
-    # Typ 2: we_beispiel_3/_4 + we_flaeche_*_typ2
-    # Typ N: we_beispiel_(2N-1)/_(2N) + we_flaeche_*_typN
-    extra_slides = 0
-    typ = 2
-    while typ <= 8:
+    # Ermittle alle extra Typen mit Daten — vorher: while+break, brach beim
+    # ersten leeren Typ ab → Lücken (z.B. typ2 leer, typ3 voll) fielen weg.
+    # Jetzt: alle 8 prüfen, Liste der gefundenen typ_nums sammeln.
+    extra_typs = []
+    for typ in range(2, 9):
         left_n  = typ * 2 - 1
         right_n = typ * 2
         has_data = (
@@ -2225,10 +2223,8 @@ def duplicate_we_slides(prs, data):
             or any(data.get(f"we_flaeche_{n}_typ{typ}") for n in range(1, 6))
         )
         if has_data:
-            extra_slides += 1
-            typ += 1
-        else:
-            break
+            extra_typs.append(typ)
+    extra_slides = len(extra_typs)
 
     # Find original WE slide
     we_idx = None
@@ -2302,12 +2298,15 @@ def duplicate_we_slides(prs, data):
 
     # Duplikate in UMGEKEHRTER Reihenfolge erstellen:
     # Jedes neue Slide wird bei we_idx+1 eingefügt → vorherige rücken vor
-    # → Endergebnis: Typ2 bei we_idx+1, Typ3 bei we_idx+2, ...
-    for offset in range(extra_slides, 0, -1):
-        typ_num     = offset + 1                       # 2, 3, 4, ...
-        left_n      = typ_num * 2 - 1                  # 3, 5, 7, ...
-        right_n     = typ_num * 2                      # 4, 6, 8, ...
-        type_letter = all_letters[typ_num - 1]         # b, c, d, ...
+    # → Endergebnis: extra_typs[0] bei we_idx+1, extra_typs[1] bei we_idx+2, ...
+    # Buchstabe = laufende Position in der Sequenz (b, c, d, ...) — auch wenn
+    # extra_typs Lücken hat (z.B. [3, 5] → b, c). Das DQN-Layout zeigt
+    # konsekutive Buchstaben unabhängig von der Typ-Nummer in den Daten.
+    for slot_idx in range(extra_slides - 1, -1, -1):
+        typ_num     = extra_typs[slot_idx]              # echte Typ-Nummer aus den Daten
+        left_n      = typ_num * 2 - 1
+        right_n     = typ_num * 2
+        type_letter = all_letters[slot_idx + 1]         # Position +1 (a=Typ1, b=erstes extra, ...)
 
         new_slide = duplicate_slide(prs, we_idx)
         sp_tree   = new_slide.shapes._spTree
@@ -2512,22 +2511,27 @@ def _scan_isolated_numbers(slide):
 
 
 def _build_template_page_map(prs):
-    """Snapshot VOR jeglicher Modifikation: Template-Bottompage → Slide-Objekt.
+    """Snapshot VOR jeglicher Modifikation: Template-Spread-Page → Slide-Objekt.
     Wird nach WE-Duplikation genutzt, um TOC-Einträge auf neue Slide-Positionen
     zu mappen. Slide-Objekte überleben die Duplikation/Reorder, Indizes nicht.
 
-    Gibt ({n: slide}, toc_slide_or_None) zurück. n als Key benutzt erste Slide
-    falls mehrere Slides denselben Bottom-Wert haben (sollte nicht vorkommen).
+    Mapping basiert auf Spread-Konvention: Slide N (1-basiert) repräsentiert
+    PDF-Seiten (2N-1) und (2N). Vorher: nur Slides mit Bottom-Pages → TOC-
+    Einträge die auf Header-Slides zeigen (z.B. 'u invest'-Header) landeten
+    in unsicherer Interpolation. Jetzt: jede mögliche Spread-Seite eindeutig.
+
+    Gibt ({n: slide}, toc_slide_or_None) zurück.
     """
     out = {}
     toc_slide = None
     for idx, slide in enumerate(prs.slides):
-        bottoms = _scan_bottom_page_paragraphs(prs, slide)
-        for _, n in bottoms:
-            if n not in out:
-                out[n] = slide
-        # TOC: viele verschiedene isolierte Zahlen, keine Bottom-Pages
+        spread = idx + 1
+        # Beide Seiten des Spreads → diese Slide
+        out.setdefault(2 * spread - 1, slide)  # linke Seite
+        out.setdefault(2 * spread,     slide)  # rechte Seite
+        # TOC erkennen: viele isolierte Zahlen, keine Bottom-Pages
         if toc_slide is None:
+            bottoms = _scan_bottom_page_paragraphs(prs, slide)
             all_nums = _scan_isolated_numbers(slide)
             unique = {n for (_, n) in all_nums}
             if len(unique) >= 8 and len(bottoms) == 0:
@@ -2613,40 +2617,33 @@ def _resync_pages_to_actual(prs, template_n_to_slide, toc_slide):
     toc_changes = 0
     toc_idx = id_to_idx.get(id(toc_slide)) if toc_slide is not None else None
     if toc_slide is not None and toc_idx is not None:
-        # Mapping Template-N → neue PDF-Seite (linke Seite des Spreads)
+        # Mapping Template-N → neue PDF-Seite. Parität bewahren:
+        # alt ungerade → linke Seite (2*si-1), alt gerade → rechte Seite (2*si).
         template_n_to_new_page = {}
         for n, s in template_n_to_slide.items():
             si = slide_to_spread.get(id(s))
             if si is not None:
-                template_n_to_new_page[n] = 2 * si - 1  # linke Seite des Spreads
+                template_n_to_new_page[n] = 2 * si if n % 2 == 0 else 2 * si - 1
 
-        # Sortierte Liste für Interpolation/Fallback
+        # Sortierte Liste für Fallback
         sorted_keys = sorted(template_n_to_new_page.keys())
         max_known   = sorted_keys[-1] if sorted_keys else 0
-        last_page   = len(prs.slides)
+        last_spread = len(prs.slides)
+        last_page   = 2 * last_spread  # rechte Seite des letzten Spreads (war: len(slides))
 
         def _resolve(old_n):
             """Liefert die neue Seitenzahl für eine TOC-Template-Zahl.
-            Exakter Treffer → Mapping. Sonst Interpolation zwischen Nachbar-
-            Bottom-Pages. Werte oberhalb des Templates → letzte Seite."""
+            Mit Spread-Vollmapping + Paritaets-Bewahrung im Mapping ist der
+            Treffer in 99% der Faelle exakt. Stub-Werte oberhalb (z.B.
+            Template-Original '68' fuer Rechtlich) → letzte Spread-Seite,
+            Paritaet bewahren. Sonst None → Original behalten.
+            """
             exact = template_n_to_new_page.get(old_n)
             if exact is not None:
                 return exact
             if old_n > max_known:
-                return last_page
-            # Nachbar-Bottoms suchen
-            lower = upper = None
-            for k in sorted_keys:
-                if k < old_n: lower = k
-                elif k > old_n:
-                    upper = k; break
-            if lower is None or upper is None:
-                return None
-            lp = template_n_to_new_page[lower]
-            up = template_n_to_new_page[upper]
-            # Lineare Interpolation, ganzzahlig
-            ratio = (old_n - lower) / (upper - lower) if upper != lower else 0
-            return lp + round((up - lp) * ratio)
+                return last_page if old_n % 2 == 0 else last_page - 1
+            return None
 
         toc_idx_skip = {n for _, n in _scan_bottom_page_paragraphs(prs, toc_slide)}
         # Heuristik-Whitelist: Kapitel-Marker (1..4) auf TOC bleiben, also nicht remappen
