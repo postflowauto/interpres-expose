@@ -437,7 +437,15 @@ Erstelle einfach ein neues Exposé — du wirst automatisch in den Editor geleit
 
 def _v2_render_worker(job_id: str):
     """Background-Worker: lädt expose_data + Customer-Images, ruft V1-fill_pptx,
-    konvertiert zu PDF, rendert Slide-JPGs."""
+    konvertiert zu PDF, rendert Slide-JPGs.
+
+    RAM-Strategie für 512 MB Render Starter:
+      - Nach jedem grossen Schritt: del + gc.collect()
+      - tmpl_bytes/customer_images sofort nach fill_pptx wegwerfen
+      - pptx_bytes wegwerfen sobald pdf_bytes existiert
+      - Slide-JPGs in temp-Dir rendern, dann atomic swap → kein Datenverlust bei Render-Fail
+    """
+    import gc
     try:
         # V1-Funktionen importieren (Lazy, um Zirkular-Import zu vermeiden)
         import importlib
@@ -468,53 +476,105 @@ def _v2_render_worker(job_id: str):
                     customer_images[slot] = f.read()
                 expose[slot] = ""
 
+        projekt_name = expose.get("projekt_titel", "Expose")
+
         _write_meta(job_id, phase="Template wird gefüllt …")
         import requests
         tmpl_url = appmod.TEMPLATE_URL
         tmpl_bytes = requests.get(tmpl_url, timeout=30).content
         pptx_bytes = appmod.fill_pptx(tmpl_bytes, expose, customer_images=customer_images)
+        # Nach fill_pptx: tmpl + customer_images sind nicht mehr gebraucht.
+        del tmpl_bytes, customer_images, state, cust_files
+        gc.collect()
 
         _write_meta(job_id, phase="PDF wird konvertiert …")
         pdf_bytes = None
+        pdf_error = None
         if appmod._can_convert_to_pdf():
             try:
-                projekt_name = expose.get("projekt_titel", "Expose").replace(" ", "_")
-                pdf_bytes = appmod.convert_to_pdf(pptx_bytes, f"{projekt_name}.pptx")
+                projekt_safe = projekt_name.replace(" ", "_")
+                pdf_bytes = appmod.convert_to_pdf(pptx_bytes, f"{projekt_safe}.pptx")
                 # Quellen-URLs als clickable Hyperlinks anreichern
                 pdf_bytes = appmod._add_hyperlinks_to_pdf(pdf_bytes)
             except Exception as e:
-                print(f"[v2] PDF-Konvertierung Fehler: {e}")
+                import traceback as _tb
+                pdf_error = str(e)
+                print(f"[v2] PDF-Konvertierung Fehler: {e}\n{_tb.format_exc()[:600]}")
+        else:
+            pdf_error = "Keine PDF-Konvertierung verfügbar (CloudConvert/LibreOffice fehlen)"
 
         # Output-Pfad (PDF wenn möglich, sonst PPTX)
+        slide_render_error = None
         if pdf_bytes:
             out_path = os.path.join(JOB_DIR, f"{job_id}.pdf")
             with open(out_path, "wb") as f:
                 f.write(pdf_bytes)
+            # PPTX-Bytes können nun freigegeben werden — PDF ist persistent.
+            del pptx_bytes
+            gc.collect()
 
             _write_meta(job_id, phase="Slide-Vorschau wird erstellt …")
+            slides_dir = _v1_slides_dir(job_id)
+            # Atomic swap: erst in tmp-Dir rendern, bei Erfolg alten Dir-Inhalt swappen.
+            # Vorteil: bei Render-Fail (OOM/Exception) bleiben alte Slides erhalten.
+            tmp_slides_dir = slides_dir + ".tmp"
             try:
-                slides_dir = _v1_slides_dir(job_id)
-                # Alte JPGs löschen
+                # Alten tmp-Dir aufräumen falls Reste vom letzten Crash
+                if os.path.isdir(tmp_slides_dir):
+                    import shutil as _sh
+                    _sh.rmtree(tmp_slides_dir, ignore_errors=True)
+                os.makedirs(tmp_slides_dir, exist_ok=True)
+                # dpi=110 statt 150: pdftoppm spawnt subprocess, parent muss Memory haben
+                # Bei 512 MB Render-Plan ist 110 dpi der robuste Sweet-Spot.
+                appmod.render_pdf_to_jpgs(pdf_bytes, tmp_slides_dir, dpi=110)
+                # Erfolg → alte Slides löschen, neue an die Stelle verschieben
                 if os.path.isdir(slides_dir):
                     for fname in os.listdir(slides_dir):
                         if fname.endswith(".jpg"):
                             try: os.remove(os.path.join(slides_dir, fname))
                             except OSError: pass
-                appmod.render_pdf_to_jpgs(pdf_bytes, slides_dir, dpi=150)
+                else:
+                    os.makedirs(slides_dir, exist_ok=True)
+                for fname in os.listdir(tmp_slides_dir):
+                    os.replace(os.path.join(tmp_slides_dir, fname),
+                               os.path.join(slides_dir, fname))
+                import shutil as _sh
+                _sh.rmtree(tmp_slides_dir, ignore_errors=True)
+                # Slide-Render durch → pdf_bytes nicht mehr nötig
+                del pdf_bytes
+                gc.collect()
             except Exception as e:
-                print(f"[v2] Slide-JPG-Render Fehler: {e}")
+                import traceback as _tb
+                slide_render_error = str(e)
+                print(f"[v2] Slide-JPG-Render Fehler: {e}\n{_tb.format_exc()[:600]}")
+                # Tmp-Dir aufräumen
+                import shutil as _sh
+                _sh.rmtree(tmp_slides_dir, ignore_errors=True)
         else:
             out_path = os.path.join(JOB_DIR, f"{job_id}.pptx")
             with open(out_path, "wb") as f:
                 f.write(pptx_bytes)
+            del pptx_bytes
+            gc.collect()
 
-        projekt_name = expose.get("projekt_titel", "Expose")
-        _write_meta(job_id,
-                    status="preview",
-                    phase="Vorschau aktualisiert",
-                    pdf_path=out_path,
-                    name=projekt_name)
-        print(f"[v2] ✓ Render fertig für Job {job_id}")
+        # Status: error wenn render gescheitert ist (sonst sieht User "✓" trotz 0 Slides)
+        if slide_render_error or (pdf_error and not pdf_bytes):
+            err_msg = slide_render_error or pdf_error
+            _write_meta(job_id,
+                        status="error",
+                        phase=f"Vorschau-Render fehlgeschlagen",
+                        pdf_path=out_path,
+                        name=projekt_name,
+                        error=err_msg)
+            print(f"[v2] ✗ Render mit Fehler abgeschlossen: {err_msg[:200]}")
+        else:
+            _write_meta(job_id,
+                        status="preview",
+                        phase="Vorschau aktualisiert",
+                        pdf_path=out_path,
+                        name=projekt_name,
+                        error=None)
+            print(f"[v2] ✓ Render fertig für Job {job_id}")
     except Exception as e:
         import traceback as tb
         err = f"{e}\n{tb.format_exc()}"
