@@ -1121,31 +1121,62 @@ def fill_image_placeholders(data):
         ("bild_stadt_presse",  "dom",      f"{stadt} cathedral landmark"),
         ("bild_stadt_branche", "hbf",      f"{stadt} train station modern"),
     ]
+
+    def _norm_url(u):
+        """Normalisiert Wikimedia-Thumb-URLs: '/120px-' und '/800px-' zeigen
+        auf dasselbe Bild — beim Dedup gleich behandeln."""
+        if not u:
+            return u
+        return re.sub(r'/\d+px-', '/', u.split('?', 1)[0]).lower()
+
+    used_city_urls = set()  # Dedup: dieselbe Datei nie zweimal in zwei Slots
+
+    def _try(url):
+        """Akzeptiert URL nur wenn Inhalt nicht schon belegt ist."""
+        if not url:
+            return None
+        n = _norm_url(url)
+        if n in used_city_urls:
+            return None
+        return url
+
     for slot, landmark_type, unsplash_q in _CITY_SLOT_SEARCHES:
         if slot not in data:
             continue
         if data.get(slot) and str(data[slot]).startswith("http"):
+            used_city_urls.add(_norm_url(data[slot]))
             continue
         if not stadt:
             continue
         # 1. Wikipedia-Wahrzeichen-Artikel (Dom, Hbf, etc.) – ECHTE Stadt-Fotos
-        url = _fetch_city_landmark_image(stadt, landmark_type)
+        url = _try(_fetch_city_landmark_image(stadt, landmark_type))
         # 2. Wikipedia REST mit Stadt selbst (filtert Wappen/SVG raus)
         if not url:
-            url = _fetch_wikipedia_city_image(stadt)
+            url = _try(_fetch_wikipedia_city_image(stadt))
         # 3. Unsplash search mit englischem Begriff
         if not url:
-            url = fetch_unsplash_image(unsplash_q)
-            if url and "picsum.photos" in url:
-                url = None
-        # 4. Wikimedia Commons Suche
+            cand = fetch_unsplash_image(unsplash_q)
+            if cand and "picsum.photos" in cand:
+                cand = None
+            url = _try(cand)
+        # 4. Wikimedia Commons Suche — top_n=4 → bei Dedup-Treffer naechsten nehmen
         if not url:
-            url = _fetch_wikimedia_image(f"{stadt} {landmark_type}")
-        # 5. Allerletzter Notfall: Picsum
+            for cand in (_fetch_wikimedia_image(f"{stadt} {landmark_type}", top_n=4) or []):
+                url = _try(cand)
+                if url:
+                    break
+        # 5. Wikimedia Commons mit alternativem Begriff (mehr Variation pro Stadt)
         if not url:
-            seed = abs(hash(unsplash_q)) % 1000
+            for cand in (_fetch_wikimedia_image(f"{stadt} {unsplash_q}", top_n=4) or []):
+                url = _try(cand)
+                if url:
+                    break
+        # 6. Allerletzter Notfall: Picsum (mit Slot-spezifischem Seed → unterschiedlich)
+        if not url:
+            seed = abs(hash(f"{stadt}_{slot}_{landmark_type}")) % 10000
             url = f"https://picsum.photos/seed/{seed}/1200/800"
         data[slot] = url
+        used_city_urls.add(_norm_url(url))
         print(f"  {slot} ({landmark_type}) → {url[:70]}")
 
     # Slots die NUR mit echten Projektfotos vom Kunden befüllt werden.
@@ -1164,8 +1195,9 @@ def fill_image_placeholders(data):
         "bild_grundriss_1", "bild_grundriss_2", "bild_grundriss_3", "bild_grundriss_4",
         # ── Amenity-Bilder werden separat via Wikimedia + Vision validiert ──
         *{f"bild_amenity_{n}" for n in range(1, 10)},
-        # NOTE: bild_we_* NICHT mehr hier — die Slots kriegen jetzt Picsum/Unsplash
-        # Fallbacks, sonst bleibt {{BILD_WE_X}} sichtbar bis Kunde manuell hochladet.
+        # ── Wohnungstyp-Bilder: Kunde lädt seine Grundriss-/Innenraum-Fotos selbst.
+        # Vorher kamen Berge/Auto/Wölfe via Picsum-Fallback rein — sah unprofessionell.
+        *{f"bild_we_{n}" for n in range(1, 21)},
     }
 
     queries = UNSPLASH_QUERIES.copy()
