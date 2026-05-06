@@ -318,6 +318,13 @@ PLATZHALTER = {
     "stadt_stat_1_zahl": "", "stadt_stat_1_label": "", "stadt_stat_2_zahl": "",
     "stadt_stat_2_label": "", "stadt_stat_3_zahl": "", "stadt_stat_3_label": "",
     "stadt_branche_titel": "", "text_stadt_branche_1": "", "text_stadt_branche_2": "",
+    # ── 6 gute Gründe (Slide 9) — Titel + Text pro Punkt ─────────────────
+    "text_grund_1_titel": "", "text_grund_1_text": "",
+    "text_grund_2_titel": "", "text_grund_2_text": "",
+    "text_grund_3_titel": "", "text_grund_3_text": "",
+    "text_grund_4_titel": "", "text_grund_4_text": "",
+    "text_grund_5_titel": "", "text_grund_5_text": "",
+    "text_grund_6_titel": "", "text_grund_6_text": "",
     "quelle_1": "", "quelle_2": "", "quelle_3": "", "quelle_4": "",
     # ── Standort-Minuten (Slide 5) ────────────────────────────────────────────
     "min_uni": "", "label_min_uni": "",
@@ -1747,9 +1754,22 @@ def generate_expose_with_claude(projektdaten, city_context=""):
         f"{we_typen_hint}\n"
 
         "## SCHREIBSTIL – DQN-STIL als VERBINDLICHE REFERENZ\n"
-        "Das Exposé soll im EXAKT gleichen Stil wie ein Premium-DQN-Exposé wirken.\n"
-        "BALANCE wichtig: Investment + Quartier + Nachhaltigkeit + Lifestyle gleichberechtigt.\n"
-        "NICHT zu kapitalanlage-fokussiert – auch das WOHNERLEBNIS und die LAGE-QUALITÄT betonen!\n"
+        "Das Exposé soll im EXAKT gleichen Stil wie ein Premium-DQN-Exposé wirken.\n\n"
+        "🎯 ZIELGRUPPE — gleichgewichtig auf BEIDE Seiten ansprechen:\n"
+        "  1. KAUF-INTERESSENT (Eigennutzer): Person, die einziehen will. Ansprechen mit:\n"
+        "     Wohnqualität, Lifestyle, Stadtteil-Charakter, kurze Wege, Nachbarschaft, Komfort,\n"
+        "     Atmosphäre, Tagesabläufe, Gefühl. Beispiel-Worte: 'wohnen', 'leben', 'genießen',\n"
+        "     'Rückzug', 'Alltag', 'Zuhause', 'Atmosphäre', 'Stadtteil'.\n"
+        "  2. KAPITALANLEGER: Person, die kaufen + vermieten will. Ansprechen mit:\n"
+        "     Förderung, Rendite, AfA, Stabilität, Vermietbarkeit, Wertentwicklung. Beispiel-\n"
+        "     Worte: 'Investment', 'Förderung', 'Rendite', 'Vermietung', 'Wertstabilität'.\n\n"
+        "🚫 NICHT nur Kapitalanlage-Sprech! Das war ein Vorgängerproblem. Texte sollen sich\n"
+        "   AUCH an Menschen richten die selbst einziehen wollen — egal auf welcher Seite.\n"
+        "   Nur die expliziten Investment-Felder (text_investment_pitch, text_kapitel_invest_1/2,\n"
+        "   text_grund_*) duerfen vorrangig anlegerorientiert sein. Alle anderen Texte balanciert.\n\n"
+        "📏 LÄNGE: Die DQN-Texte sind LANG und narrativ (300-600 Zeichen pro Block, mehrere\n"
+        "   Sätze, mit konkreten Fakten, Firmennamen, Zahlen, Quellen). NICHT 1-2 dünne Sätze.\n"
+        "   Lieber detailliert + konkret als kurz + generisch.\n\n"
         "WICHTIG: Diese Struktur funktioniert für JEDE Stadt – nicht nur Magdeburg.\n"
         "Schreibe ECHTE Fakten zur jeweiligen Stadt, generischen Inhalten ist eine Absage zu erteilen.\n\n"
 
@@ -1880,35 +1900,79 @@ def generate_expose_with_claude(projektdaten, city_context=""):
         "produkt_beschreibung: max 25 Zeichen (z.B. 'Microapartments' oder '1-2 Zi. möbliert')\n"
         "text_kapitel_invest/live/stay/know/hotel (Slogan): max 40 Zeichen\n"
         "text_kapitel_invest_1/2, text_kapitel_live_1/2, text_kapitel_stay_1/2, text_kapitel_know_1/2:\n"
-        "  max 130 Zeichen – 1-2 Sätze, projekt-spezifisch\n"
+        "  ZIEL 200-280 Zeichen – 2-3 Sätze, projekt-spezifisch, narrativ (DQN-Niveau)\n"
         "text_hotel: max 40 Zeichen\n"
-        "text_intro: ZIEL 280-340 Zeichen – 2-3 Sätze, projektspezifisch, emotional, konkret\n"
-        "text_investment_pitch: ZIEL 280-330 Zeichen – Preis, KfW, AfA, Renditepotenzial konkret\n"
+        "text_intro: ZIEL 500-700 Zeichen – mehrere Sätze, emotional + konkret, BEWOHNER+INVESTOR\n"
+        "  DQN-Beispiel hat ~720 Zeichen Fließtext: 'Ein modernes, nachhaltiges Wohnquartier...\n"
+        "  Hier wird nicht nur gewohnt – hier wird gelebt: Ideal für Studierende, Berufstätige,\n"
+        "  Zweitwohnsitznutzer – und jeden, der flexibel wohnen möchte...'\n"
+        "text_investment_pitch: ZIEL 480-580 Zeichen – DQN-Beispiel: 'Weil gute Investments heute\n"
+        "  anders aussehen. urbanunits verbindet, was Kapitalanleger heute suchen: niedrige\n"
+        "  Einstiegspreise, maximale staatliche Förderung, steuerliche Vorteile und eine klare\n"
+        "  Vermietungsperspektive. Das Projekt wurde konsequent vom Nutzer her gedacht – aber\n"
+        "  mit dem Fokus auf nachhaltigen Ertrag und langfristige Wertentwicklung. Die\n"
+        "  Apartments sind kompakt, designorientiert und energetisch optimiert. Die Lage in\n"
+        "  {stadt} sorgt für konstant hohe Nachfrage – bei Mietern wie bei Investoren.'\n"
         "text_greenliving_intro: max 90 Zeichen\n"
-        "text_greenliving_1: ZIEL 200-240 Zeichen – konkrete Anlagen (Fernwärme, PV, KfW-40) + Effekt\n"
-        "text_greenliving_2: ZIEL 200-240 Zeichen – Außenbereiche, Mobilität, Lebensqualität\n"
+        "text_greenliving_1: ZIEL 280-380 Zeichen – konkrete Anlagen (Fernwärme, PV, KfW-40) + Effekt\n"
+        "text_greenliving_2: ZIEL 280-380 Zeichen – Außenbereiche, Mobilität, Lebensqualität\n"
         "text_ausstattung_intro: max 90 Zeichen\n"
-        "text_ausstattung_detail: ZIEL 180-220 Zeichen – Materialien, Boden, Bad, Smart-Home\n"
+        "text_ausstattung_detail: ZIEL 280-380 Zeichen – Materialien, Boden, Bad, Smart-Home, narrativ\n"
         "text_ausstattung_kurz: max 80 Zeichen\n"
-        "text_ausstattung_lang: ZIEL 180-220 Zeichen\n"
-        "text_grundriss_intro: ZIEL 180-240 Zeichen, DQN-Stil.\n"
-        "text_architektur: max 110 Zeichen\n"
-        "text_nachhaltig_1/2/3/4: max 100 Zeichen pro Eintrag\n"
-        "text_standort_1/2: ZIEL 180-240 Zeichen pro Eintrag\n"
-        "text_projekt_nachhaltig_1/2: ZIEL 180-240 Zeichen\n"
-        "text_stadt_intro: ZIEL 200-260 Zeichen – Hauptstadt-Pitch in 2 Sätzen\n"
-        "text_stadt_wachstum_1: ZIEL 220-280 Zeichen – Branchenüberblick mit konkreten Firmennamen + Investitionssummen\n"
-        "text_stadt_wachstum_2: max 200 Zeichen – konkrete Projekte/Investitionssummen\n"
-        "text_stadt_wirtschaft_links: ZIEL 200-260 Zeichen – Sektor 1 KOMPAKT mit 1-2 Firmen\n"
-        "text_stadt_wirtschaft_rechts: ZIEL 200-260 Zeichen – Sektor 2 KOMPAKT mit 1-2 Firmen\n"
-        "text_stadt_invest_detail: ZIEL 180-240 Zeichen – Großinvestition kurz mit Volumen + Standort\n"
+        "text_ausstattung_lang: ZIEL 280-380 Zeichen\n"
+        "text_grundriss_intro: ZIEL 280-380 Zeichen, DQN-Stil mit konkreten Größen + Zielgruppen.\n"
+        "text_architektur: max 130 Zeichen\n"
+        "text_nachhaltig_1/2/3/4: max 110 Zeichen pro Eintrag\n"
+        "text_standort_1/2: ZIEL 280-380 Zeichen pro Eintrag\n"
+        "text_projekt_nachhaltig_1/2: ZIEL 280-380 Zeichen\n"
+        "text_stadt_intro: ZIEL 320-440 Zeichen – Stadt-Pitch in 2-3 Sätzen, konkret, balanciert\n"
+        "text_stadt_wachstum_1: ZIEL 280-380 Zeichen – Branchenüberblick mit Firmennamen + Investitionssummen\n"
+        "text_stadt_wachstum_2: max 240 Zeichen – konkrete Projekte/Investitionssummen\n"
+        "text_stadt_wirtschaft_links: ZIEL 320-450 Zeichen – Sektor 1 mit 2-3 Firmen + Investitionsvolumen + Effekt.\n"
+        "  DQN-Beispiel: 'Im Industriepark Eulenberg entstehen neue Flächen für internationale\n"
+        "  Unternehmen aus den Bereichen Halbleiter, Batterietechnik, Rechenzentren und Pharma.\n"
+        "  Namen wie CATL – der weltweit größte Hersteller von Lithium-Ionen-Batterien – oder\n"
+        "  Mercury unterstreichen die internationale Relevanz des Standorts. Insgesamt entstehen\n"
+        "  hier mehrere tausend neue Arbeitsplätze.' (~370 Zeichen)\n"
+        "text_stadt_wirtschaft_rechts: ZIEL 320-450 Zeichen – Sektor 2 (Logistik/Hafen/Verkehr)\n"
+        "  mit Investitionsvolumen + Anbindungen + Auswirkung\n"
+        "text_stadt_invest_detail: ZIEL 240-340 Zeichen – Großinvestition mit Volumen + Standort + Detail\n"
         "text_einwohner_detail: max 130 Zeichen – konkrete Einwohner-Entwicklung\n"
         "text_bip_detail: max 130 Zeichen – BIP-Entwicklung mit % über mehrere Jahre\n"
         "text_mietsteigerung_detail: max 110 Zeichen – Mietpreis-Tendenz mit €/m²\n"
         "text_studierende_detail: max 110 Zeichen – Hochschulen + Fachgebiete\n"
         "text_stadt_stat_N_detail: max 130 Zeichen pro Stat – Volumen + Wirkung KOMPAKT\n"
-        "text_stadt_branche_1: ZIEL 220-280 Zeichen – Branchen-Standort mit echten Firmen + Forschungs-Inst.\n"
-        "text_stadt_branche_2: ZIEL 180-240 Zeichen – Ergänzung mit Wirtschaftsdaten\n"
+        "text_stadt_branche_1: ZIEL 280-380 Zeichen – Branchen-Standort mit echten Firmen + Forschungs-Inst.\n"
+        "text_stadt_branche_2: ZIEL 240-340 Zeichen – Ergänzung mit Wirtschaftsdaten\n"
+        "\n"
+        "### 6 GUTE GRÜNDE (Slide 'gute Gründe' — 6 Punkte mit Titel + Beschreibung):\n"
+        "Pro Grund EIN Titel (kurz, prägnant) + EINE Beschreibung (1-2 Sätze, ~140-200 Zeichen).\n"
+        "Stil DQN: Konkrete Zahlen, Förderdetails, klarer Vorteil. Mix Käufer + Anleger.\n"
+        "Felder:\n"
+        "  text_grund_1_titel + text_grund_1_text  → Lage/Erreichbarkeit. DQN-Beispiel:\n"
+        "    Titel: 'Zentrale Lage in {stadt}'  Text: '3 Minuten zur Universität, 8 Minuten in\n"
+        "    die City, 3 Minuten ins Grüne – perfekte Voraussetzungen für dauerhafte Vermietbarkeit.'\n"
+        "    Nutze die ECHTEN Min-Werte aus min_uni/min_bahnhof/min_altstadt.\n"
+        "  text_grund_2_titel + text_grund_2_text  → Kaufpreis/Einstieg. DQN-Beispiel:\n"
+        "    Titel: 'Kaufpreise ab {kaufpreis_ab} €'  Text: 'Voll förderfähiges Neubauprojekt\n"
+        "    mit geringer Einstiegsschwelle. Ab {kaufpreis_ab} € investieren Sie in nachhaltige,\n"
+        "    möblierte Apartments.'\n"
+        "  text_grund_3_titel + text_grund_3_text  → KfW-Förderung. DQN-Beispiel:\n"
+        "    Titel: 'KfW-Niedrigzins-Darlehen'  Text: 'von bis zu {kfw_darlehen} € je Einheit.\n"
+        "    Kapitalanleger profitieren von attraktiven Zinssätzen, und tilgungsfreien Anlaufjahren.'\n"
+        "  text_grund_4_titel + text_grund_4_text  → AfA/Steuern. DQN-Beispiel:\n"
+        "    Titel: '3-fach Abschreibung'  Text: '5 % degressive AfA + 5 % Sonder-AfA + separate\n"
+        "    Abschreibung der Möbel. Maximale Steuerwirkung für Kapitalanleger.'\n"
+        "  text_grund_5_titel + text_grund_5_text  → Möblierung/Smart-Home. DQN-Beispiel:\n"
+        "    Titel: 'Möblierungskonzept'  Text: 'Individuell gestaltete Apartments im Westwing-\n"
+        "    Design, kombiniert mit modernster Smart-Home-Technologie.'\n"
+        "  text_grund_6_titel + text_grund_6_text  → Mietgarantie/Vermietbarkeit. DQN-Beispiel:\n"
+        "    Titel: 'Mietgarantie für 3 Monate'  Text: 'Nach Fertigstellung garantiert –\n"
+        "    20 €/m² Kaltmiete, für drei Monate.'\n"
+        "Wenn ein Punkt fuer das konkrete Projekt nicht passt (z.B. keine Mietgarantie):\n"
+        "Titel + Text trotzdem ausfuellen mit projekt-spezifischer Alternative (z.B. 'Premium-\n"
+        "Lage', 'Fertigstellungstermin', 'Energiekonzept').\n"
+        "Titel: max 50 Zeichen. Text: 130-220 Zeichen.\n\n"
         "WICHTIG: alle obigen Zeichen-Limits sind HARTE Obergrenzen. Lieber 1-2 starke Sätze\n"
         "als ein dritter Halbsatz der das Layout sprengt.\n"
         "feature_N_label: max 28 Zeichen\n"
@@ -2829,6 +2893,92 @@ def _shrink_for_storage(raw, max_px=1600):
         return raw
 
 
+def _override_grund_texts(prs, data):
+    """Ueberschreibt die fest hinterlegten Titel + Texte der '6 gute Gruende'-
+    Slide mit projekt-spezifischen Werten aus expose_data.
+
+    Template-Layout (rechte Spalte): 6 Punkte je 2 Zeilen — Titel oben, Text unten.
+    Nur 3 von 12 Texten sind Placeholder-basiert ({{STADT}}, {{KAUFPREIS_AB}},
+    {{KFW_DARLEHEN}}); 9 sind hartkodiert. Diese Funktion ersetzt die hart-
+    kodierten via Substring-Match gegen den Original-Template-Text.
+
+    Wenn das jeweilige expose_data-Feld leer ist → Default belassen (Template-
+    Texte sind brauchbare Fallbacks).
+
+    Idempotent — Substring-Match findet nach erstem Override nichts mehr.
+    """
+    # (Original-Template-Substring zur Erkennung, expose_data-Key)
+    OVERRIDES = [
+        # TITEL-Boxen
+        ("Zentrale Lage in",            "text_grund_1_titel"),
+        ("{{KAUFPREIS_AB",              "text_grund_2_titel"),
+        ("{{KFW_DARLEHEN",              "text_grund_3_titel"),
+        ("3-fach Abschreibung",         "text_grund_4_titel"),
+        ("Möblierungskonzept",          "text_grund_5_titel"),
+        ("Mietgarantie für 3 Monate",   "text_grund_6_titel"),
+        # TEXT-Boxen (laengere Beschreibungen)
+        ("3 Minuten zur Universität",   "text_grund_1_text"),
+        ("Voll förderfähiges Neubauprojekt", "text_grund_2_text"),
+        ("von bis zu 150.000",          "text_grund_3_text"),
+        ("5 % degressive AfA",          "text_grund_4_text"),
+        ("Individuell gestaltete Apartments", "text_grund_5_text"),
+        ("Nach Fertigstellung garantiert", "text_grund_6_text"),
+    ]
+
+    overrides_applied = 0
+    for slide in prs.slides:
+        # Heuristisch '6 gute Gruende' Slide erkennen
+        all_text = ""
+        for sh in slide.shapes:
+            if sh.has_text_frame:
+                all_text += " " + sh.text_frame.text
+            if sh.shape_type == 6:
+                for c in sh.shapes:
+                    if c.has_text_frame:
+                        all_text += " " + c.text_frame.text
+        if "6 gute" not in all_text.lower():
+            continue
+        # Slide gefunden — alle Shapes scannen + ggf. ersetzen
+        def _walk(shape):
+            yield shape
+            if shape.shape_type == 6:
+                for c in shape.shapes:
+                    yield from _walk(c)
+        for top_shape in list(slide.shapes):
+            for shape in _walk(top_shape):
+                if not shape.has_text_frame:
+                    continue
+                tf_text = shape.text_frame.text
+                for substr, key in OVERRIDES:
+                    new_text = (data or {}).get(key, "")
+                    if not new_text or substr not in tf_text:
+                        continue
+                    # Im ersten Paragraphen den Run-Text ersetzen,
+                    # weitere Paragraphen leeren (1-Zeilen-Boxen).
+                    if shape.text_frame.paragraphs:
+                        first_p = shape.text_frame.paragraphs[0]
+                        if first_p.runs:
+                            first_p.runs[0].text = str(new_text)
+                            for r in first_p.runs[1:]:
+                                r.text = ""
+                        else:
+                            # Kein Run vorhanden → einen erzeugen
+                            from pptx.util import Pt
+                            run = first_p.add_run()
+                            run.text = str(new_text)
+                        # Weitere Paragraphen leeren — die festen Zwei-Zeilen-
+                        # Texte (z.B. '5 % degressive AfA + ...') stehen oft
+                        # in mehreren Paragraphen; alle nachfolgenden auf
+                        # leeren-Run setzen damit nur new_text zu sehen ist.
+                        for p in shape.text_frame.paragraphs[1:]:
+                            for r in p.runs:
+                                r.text = ""
+                    overrides_applied += 1
+                    break  # pro Shape nur EIN Override
+    if overrides_applied:
+        print(f"  6-gute-Gruende: {overrides_applied} Texte projekt-spezifisch ueberschrieben")
+
+
 def fill_pptx(template_bytes, data, customer_images=None):
     """Fill PPTX template using python-pptx: embeds images and replaces text placeholders.
     customer_images: optional dict {bild_key: bytes} – Kundenbilder haben Vorrang vor URLs."""
@@ -3350,6 +3500,12 @@ def fill_pptx(template_bytes, data, customer_images=None):
 
     # Duplicate WE slides BEFORE text/image replacement so placeholders are still intact
     duplicate_we_slides(prs, data)
+
+    # ── 6-gute-Gruende-Override: Template hat 6 fest hinterlegte Titel + Texte.
+    # Wenn Claude dynamische Werte (text_grund_X_titel/_text) liefert, ueber-
+    # schreiben wir die Defaults BEVOR der Standard-Replace-Loop laeuft.
+    # Substring-Match gegen die ORIGINAL-Default-Texte des Templates.
+    _override_grund_texts(prs, data)
 
     for slide in prs.slides:
         for shape in list(slide.shapes):
