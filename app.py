@@ -2646,6 +2646,45 @@ def _resync_pages_to_actual(prs, template_n_to_slide, toc_slide):
             return None
 
         toc_idx_skip = {n for _, n in _scan_bottom_page_paragraphs(prs, toc_slide)}
+
+        # Hilfs-Funktion: Parent-Shape eines Paragraphen finden + TextBox so
+        # konfigurieren dass CloudConvert keine 2-stelligen Zahlen umbricht
+        # (das war der Output-Bug 'Magdeburg → 2 / 7' usw. — Boxen waren
+        # 0.18" schmal mit auto_size=SHAPE_TO_FIT_TEXT, was CloudConvert nicht
+        # respektiert; wraps zweistellige zu zwei Zeilen).
+        from pptx.enum.text import MSO_AUTO_SIZE as _MSO_AUTO_SIZE
+        _MIN_TOC_BOX_W = int(0.6 * 914400)  # 0.6" — sicher fuer 3-stellige Zahlen
+
+        def _find_shape_for_paragraph(slide, paragraph):
+            for shape in slide.shapes:
+                if shape.has_text_frame:
+                    for sp in shape.text_frame.paragraphs:
+                        if sp._p is paragraph._p:
+                            return shape
+                if shape.shape_type == 6:
+                    for c in shape.shapes:
+                        if c.has_text_frame:
+                            for sp in c.text_frame.paragraphs:
+                                if sp._p is paragraph._p:
+                                    return c
+            return None
+
+        def _harden_toc_box(shape):
+            """Verhindert Word-Wrap im PDF-Render: Wrap aus, Auto-Size aus,
+            Mindest-Breite. Idempotent."""
+            if shape is None:
+                return
+            try:
+                shape.text_frame.word_wrap = False
+                shape.text_frame.auto_size = _MSO_AUTO_SIZE.NONE
+            except Exception:
+                pass
+            try:
+                if (shape.width or 0) < _MIN_TOC_BOX_W:
+                    shape.width = _MIN_TOC_BOX_W
+            except Exception:
+                pass
+
         # Heuristik-Whitelist: Kapitel-Marker (1..4) auf TOC bleiben, also nicht remappen
         # wenn 1..len(chapter_count) und sehr klein. Solche Zahlen sollten unverändert bleiben.
         for p, old_n in _scan_isolated_numbers(toc_slide):
@@ -2653,6 +2692,9 @@ def _resync_pages_to_actual(prs, template_n_to_slide, toc_slide):
             # keine Seitenreferenzen.
             if old_n <= 4:
                 continue
+            # Box auch bei unveraenderten Werten haerten — verhindert Render-Wrap
+            shape = _find_shape_for_paragraph(toc_slide, p)
+            _harden_toc_box(shape)
             new_n = _resolve(old_n)
             if new_n is None or new_n == old_n:
                 continue
