@@ -1897,7 +1897,12 @@ def generate_expose_with_claude(projektdaten, city_context=""):
         "## ⚠️ ZEICHENLIMITS – Templatefelder haben feste Größen.\n"
         "Bleibe IM Limit, aber NUTZE den Platz aus. Premium-Exposé heißt: AUSFÜHRLICH und SPEZIFISCH.\n"
         "Generische 1-Satz-Antworten = sofort verworfen. Liefere DQN-Niveau (mit Firmennamen, Zahlen, Quellen).\n\n"
-        "produkt_beschreibung: max 25 Zeichen (z.B. 'Microapartments' oder '1-2 Zi. möbliert')\n"
+        "produkt_beschreibung: ZIEL 35-55 Zeichen — Cover-Untertitel mit Stadt-Bezug.\n"
+        "  Steht direkt nach {{ANZAHL_WE}} auf der Cover-Slide. DQN-Beispiel:\n"
+        "  'vollmoeblierte Design-Apartments im Herzen Magdeburgs' (53 chars).\n"
+        "  Bei 32 WE wird daraus: '32 vollmoeblierte Design-Apartments im Herzen Magdeburgs · Prospektteil A'.\n"
+        "  Format: 'TYP-Beschreibung (vollmoebliert/Mikro/Design-) Apartments im Herzen/Zentrum/Norden {stadt}s'\n"
+        "  oder analog. NIE nur '1-2 Zi.' — das ist zu duenn fuer das Cover.\n"
         "text_kapitel_invest/live/stay/know/hotel (Slogan): max 40 Zeichen\n"
         "text_kapitel_invest_1/2, text_kapitel_live_1/2, text_kapitel_stay_1/2, text_kapitel_know_1/2:\n"
         "  ZIEL 200-280 Zeichen – 2-3 Sätze, projekt-spezifisch, narrativ (DQN-Niveau)\n"
@@ -3114,6 +3119,106 @@ def _override_grund_texts(prs, data):
         print(f"  6-gute-Gruende: {overrides_applied} Texte projekt-spezifisch ueberschrieben")
 
 
+def _override_legal_text(prs, data):
+    """Ersetzt magdeburg-spezifische Hardcoded-Texte auf der Rechtliche-Hinweise-
+    Slide (S26) mit projekt-/stadt-dynamischen Werten.
+
+    Aktuell: 'auf dem Areal der ehemaligen Diamant Brauerei' →
+    aus expose_data.quartier_name oder stadtteil oder stadt erzeugen.
+
+    Damit funktioniert das Template auch fuer Projekte ausserhalb von Magdeburg
+    ohne dass der User das PPTX manuell editieren muss.
+    """
+    quartier = (data or {}).get("quartier_name") or ""
+    stadtteil = (data or {}).get("stadtteil") or ""
+    stadt = (data or {}).get("stadt") or ""
+    plz = (data or {}).get("plz") or ""
+
+    # Dynamischer Ersatz-Text fuer 'auf dem Areal der ehemaligen Diamant Brauerei'.
+    # Falls quartier_name etwas wie 'Diamant Quartier' enthaelt → 'auf dem Areal {quartier}'.
+    # Sonst stadtteil-basiert: 'im Stadtteil {stadtteil}'.
+    # Sonst Fallback nur Stadt.
+    if quartier and quartier.strip():
+        replacement = f"auf dem Areal {quartier.strip()}"
+    elif stadtteil and stadtteil.strip():
+        replacement = f"im Stadtteil {stadtteil.strip()}"
+    elif stadt:
+        replacement = f"in {stadt.strip()}"
+    else:
+        replacement = ""
+
+    if not replacement:
+        return  # nichts zu ersetzen
+
+    # Nur bei Stadt != Magdeburg ersetzen — Magdeburg-Projekte sollen den
+    # Original-Text behalten weil dort tatsaechlich die Brauerei ist.
+    if "magdeburg" in stadt.lower():
+        return
+
+    # Pattern: 'Diamant Brau' / 'Diamant Brauerei' (auch mit Bindestrich) ueber
+    # Paragraph-Grenzen hinweg. Wir behandeln den TextFrame als Ganzes.
+    import re as _re
+    DIAMANT_RE = _re.compile(
+        r'auf\s+dem\s+Areal\s+der\s+ehemaligen\s+Diamant\s+Brau-?\s*erei',
+        _re.IGNORECASE | _re.DOTALL
+    )
+
+    overrides = 0
+    for slide in prs.slides:
+        # Heuristisch S26 erkennen
+        all_text = ""
+        for sh in slide.shapes:
+            if sh.has_text_frame:
+                all_text += " " + sh.text_frame.text
+        if "Verkaufsprospekt" not in all_text and "Diamant" not in all_text:
+            continue
+        # TextBoxen scannen, die den Diamant-Text enthalten
+        for shape in slide.shapes:
+            if not shape.has_text_frame:
+                continue
+            full = shape.text_frame.text
+            if "Diamant" not in full:
+                continue
+            new_full = DIAMANT_RE.sub(replacement, full)
+            if new_full == full:
+                continue
+            # Den ganzen TextFrame neu aufbauen, dabei Linebreaks erhalten
+            # (per Newline → eigene Paragraphen).
+            # Stil: erster Paragraph behaelt sein Run-Format (font/size/color).
+            tf = shape.text_frame
+            paragraphs = new_full.split("\n")
+            # Ersten Paragraph: ersten Run mit erster Zeile setzen
+            first_p = tf.paragraphs[0]
+            if first_p.runs:
+                first_p.runs[0].text = paragraphs[0]
+                for r in first_p.runs[1:]:
+                    r.text = ""
+            else:
+                first_p.add_run().text = paragraphs[0]
+            # Restliche Paragraphen: vorhandene leeren + neue Zeilen reinpacken
+            for i, line in enumerate(paragraphs[1:], start=1):
+                if i < len(tf.paragraphs):
+                    p = tf.paragraphs[i]
+                    if p.runs:
+                        p.runs[0].text = line
+                        for r in p.runs[1:]:
+                            r.text = ""
+                    else:
+                        p.add_run().text = line
+                else:
+                    # Mehr Zeilen als Paragraphen → neuen Paragraph anhaengen
+                    new_p = tf.add_paragraph()
+                    new_p.text = line
+            # Falls ueberzaehlige alte Paragraphen → leeren
+            for j in range(len(paragraphs), len(tf.paragraphs)):
+                p = tf.paragraphs[j]
+                for r in p.runs:
+                    r.text = ""
+            overrides += 1
+    if overrides:
+        print(f"  Legal-Text: {overrides} Magdeburg-spezifische Stelle(n) → {replacement!r}")
+
+
 def fill_pptx(template_bytes, data, customer_images=None):
     """Fill PPTX template using python-pptx: embeds images and replaces text placeholders.
     customer_images: optional dict {bild_key: bytes} – Kundenbilder haben Vorrang vor URLs."""
@@ -3641,6 +3746,11 @@ def fill_pptx(template_bytes, data, customer_images=None):
     # schreiben wir die Defaults BEVOR der Standard-Replace-Loop laeuft.
     # Substring-Match gegen die ORIGINAL-Default-Texte des Templates.
     _override_grund_texts(prs, data)
+
+    # ── Rechtliche-Hinweise: hartkodierte Magdeburg-Referenzen ('Diamant
+    # Brauerei') durch projekt-spezifische Texte ersetzen. Nur aktiv wenn
+    # Stadt != Magdeburg.
+    _override_legal_text(prs, data)
 
     for slide in prs.slides:
         for shape in list(slide.shapes):
