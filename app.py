@@ -1946,7 +1946,9 @@ def generate_expose_with_claude(projektdaten, city_context=""):
         "text_stadt_branche_2: ZIEL 240-340 Zeichen – Ergänzung mit Wirtschaftsdaten\n"
         "\n"
         "### 6 GUTE GRÜNDE (Slide 'gute Gründe' — 6 Punkte mit Titel + Beschreibung):\n"
-        "Pro Grund EIN Titel (kurz, prägnant) + EINE Beschreibung (1-2 Sätze, ~140-200 Zeichen).\n"
+        "Pro Grund EIN Titel (kurz, prägnant, EINZEILIG!) + EINE Beschreibung (1-2 Sätze).\n"
+        "🚨 LAYOUT-KRITISCH: Titel MUSS auf eine Zeile passen, Text MUSS in 2 Zeilen passen.\n"
+        "Sonst überlappt die Beschreibung mit dem nächsten Punkt darunter.\n"
         "Stil DQN: Konkrete Zahlen, Förderdetails, klarer Vorteil. Mix Käufer + Anleger.\n"
         "Felder:\n"
         "  text_grund_1_titel + text_grund_1_text  → Lage/Erreichbarkeit. DQN-Beispiel:\n"
@@ -1972,7 +1974,16 @@ def generate_expose_with_claude(projektdaten, city_context=""):
         "Wenn ein Punkt fuer das konkrete Projekt nicht passt (z.B. keine Mietgarantie):\n"
         "Titel + Text trotzdem ausfuellen mit projekt-spezifischer Alternative (z.B. 'Premium-\n"
         "Lage', 'Fertigstellungstermin', 'Energiekonzept').\n"
-        "Titel: max 50 Zeichen. Text: 130-220 Zeichen.\n\n"
+        "📏 HARTE LIMITS:\n"
+        "  Titel: max 32 Zeichen — MUSS einzeilig sein. DQN-Beispiele:\n"
+        "    'Zentrale Lage in Magdeburg' (26)\n"
+        "    'Kaufpreise ab 185.000 €'    (23)\n"
+        "    'KfW-Niedrigzins-Darlehen'   (24)\n"
+        "    '3-fach Abschreibung'        (19)\n"
+        "    'Möblierungskonzept'         (18)\n"
+        "    'Mietgarantie für 3 Monate'  (25)\n"
+        "  Text:  100-150 Zeichen — MUSS in 2 Zeilen passen.\n"
+        "  Wenn dein Text laenger wird: kuerzen, nicht aufweiten!\n\n"
         "WICHTIG: alle obigen Zeichen-Limits sind HARTE Obergrenzen. Lieber 1-2 starke Sätze\n"
         "als ein dritter Halbsatz der das Layout sprengt.\n"
         "feature_N_label: max 28 Zeichen\n"
@@ -2111,7 +2122,15 @@ def generate_expose_with_claude(projektdaten, city_context=""):
         f"Felder wie kaufpreis_ab, kfw_darlehen, kfw_standard, stellplaetze, energieversorgung,\n"
         f"steuerliche_moeglichkeiten, besonderheiten MÜSSEN aus den PDFs extrahiert werden.\n"
         f"Wenn ein Wert wirklich nicht im Datenraum steht, lass das Feld LEER ('') – schreibe\n"
-        f"NIE 'auf Anfrage' oder 'tba' oder Platzhalter wie 'XXX'.\n\n"
+        f"NIE 'auf Anfrage' oder 'tba' oder Platzhalter wie 'XXX'.\n"
+        f"❌ EXPLIZIT VERBOTEN als Wert (egal in welchem Feld):\n"
+        f"   'nicht erkennbar', 'nicht ermittelbar', 'nicht angegeben', 'nicht bekannt',\n"
+        f"   'nicht verfügbar', 'k.A.', 'k. A.', 'n/a', 'N/A', '-', '—', 'unbekannt',\n"
+        f"   'wird nachgereicht', 'siehe Anlage', 'fehlt im Datenraum'.\n"
+        f"Wenn nicht klar extrahierbar: LEEREN String '' liefern. NIE einen Pseudo-Wert.\n"
+        f"Bei kfw_standard, energieversorgung, stellplaetze: lieber konservativ aus dem\n"
+        f"Datenraum kombinieren (z.B. wenn QNG erwähnt → 'KfW-Effizienzhaus 40 QNG PLUS')\n"
+        f"als leer lassen — aber NIE 'nicht erkennbar' o.ae. schreiben.\n\n"
 
         f"## ALLE FELDER – PFLICHT:\n"
         f"Jedes Feld MUSS befüllt werden. Leere Strings sind nicht akzeptabel außer bei\n"
@@ -2197,6 +2216,30 @@ def generate_expose_with_claude(projektdaten, city_context=""):
             fixed_count += 1
     if fixed_count:
         print(f"  Text-Fix nach Parse: {fixed_count} Felder bereinigt (€pas, IIm, etc.)")
+
+    # Anti-Pseudo-Wert: Claude schreibt manchmal trotz Prompt-Anweisung
+    # 'nicht erkennbar', 'k.A.', 'n/a' o.ae. — das landet sichtbar im PDF
+    # ('Stellplaetze: nicht erkennbar'). Lieber LEER → Slot zeigt '{{...}}'
+    # was das v2-Editor-UI dann manuell befuellbar macht, oder wird via
+    # leere-Platzhalter-Cleanup entfernt.
+    _PSEUDO_VALUES = {
+        "nicht erkennbar", "nicht ermittelbar", "nicht angegeben",
+        "nicht bekannt", "nicht verfügbar", "nicht verfuegbar",
+        "k.a.", "k. a.", "n/a", "n.a.", "unbekannt",
+        "wird nachgereicht", "siehe anlage", "fehlt im datenraum",
+        "-", "—", "tba", "tbd", "xxx",
+    }
+    pseudo_cleared = 0
+    for k, v in list(result.items()):
+        if not isinstance(v, str):
+            continue
+        v_norm = v.strip().lower()
+        if v_norm in _PSEUDO_VALUES:
+            result[k] = ""
+            pseudo_cleared += 1
+    if pseudo_cleared:
+        print(f"  Pseudo-Wert-Cleanup: {pseudo_cleared} Felder geleert "
+              f"('nicht erkennbar' etc. → '')")
     return result
 
 # Regex: matcht {{KEY}}, {{KEY-SPLIT}}, {{KEY|suffix}}, {{KEY | suffix}}
@@ -2907,23 +2950,36 @@ def _override_grund_texts(prs, data):
 
     Idempotent — Substring-Match findet nach erstem Override nichts mehr.
     """
-    # (Original-Template-Substring zur Erkennung, expose_data-Key)
+    # (Original-Template-Substring, expose_data-Key, max_len fuer Layout-Schutz)
     OVERRIDES = [
-        # TITEL-Boxen
-        ("Zentrale Lage in",            "text_grund_1_titel"),
-        ("{{KAUFPREIS_AB",              "text_grund_2_titel"),
-        ("{{KFW_DARLEHEN",              "text_grund_3_titel"),
-        ("3-fach Abschreibung",         "text_grund_4_titel"),
-        ("Möblierungskonzept",          "text_grund_5_titel"),
-        ("Mietgarantie für 3 Monate",   "text_grund_6_titel"),
-        # TEXT-Boxen (laengere Beschreibungen)
-        ("3 Minuten zur Universität",   "text_grund_1_text"),
-        ("Voll förderfähiges Neubauprojekt", "text_grund_2_text"),
-        ("von bis zu 150.000",          "text_grund_3_text"),
-        ("5 % degressive AfA",          "text_grund_4_text"),
-        ("Individuell gestaltete Apartments", "text_grund_5_text"),
-        ("Nach Fertigstellung garantiert", "text_grund_6_text"),
+        # TITEL-Boxen — max 32 Zeichen einzeilig (Box-Breite begrenzt)
+        ("Zentrale Lage in",            "text_grund_1_titel", 32),
+        ("{{KAUFPREIS_AB",              "text_grund_2_titel", 32),
+        ("{{KFW_DARLEHEN",              "text_grund_3_titel", 32),
+        ("3-fach Abschreibung",         "text_grund_4_titel", 32),
+        ("Möblierungskonzept",          "text_grund_5_titel", 32),
+        ("Mietgarantie für 3 Monate",   "text_grund_6_titel", 32),
+        # TEXT-Boxen — max 160 Zeichen (2 Zeilen + Sicherheits-Puffer)
+        ("3 Minuten zur Universität",   "text_grund_1_text", 160),
+        ("Voll förderfähiges Neubauprojekt", "text_grund_2_text", 160),
+        ("von bis zu 150.000",          "text_grund_3_text", 160),
+        ("5 % degressive AfA",          "text_grund_4_text", 160),
+        ("Individuell gestaltete Apartments", "text_grund_5_text", 160),
+        ("Nach Fertigstellung garantiert", "text_grund_6_text", 160),
     ]
+
+    def _truncate_smart(text, max_len):
+        """Kuerzt auf max_len Zeichen, abschneiden auf naechstem Wort.
+        Wenn das letzte Wort >half max_len ist → harter Cut. Sonst Wort-Boundary."""
+        if len(text) <= max_len:
+            return text
+        cut = text[:max_len].rstrip()
+        # Auf Satzende oder Wortgrenze zurueck
+        for sep in (". ", "! ", "? ", "; ", ", ", " "):
+            idx = cut.rfind(sep)
+            if idx > max_len * 0.6:  # mind. 60% des Limits behalten
+                return cut[:idx + len(sep.rstrip())].rstrip()
+        return cut
 
     overrides_applied = 0
     for slide in prs.slides:
@@ -2949,10 +3005,12 @@ def _override_grund_texts(prs, data):
                 if not shape.has_text_frame:
                     continue
                 tf_text = shape.text_frame.text
-                for substr, key in OVERRIDES:
+                for substr, key, max_len in OVERRIDES:
                     new_text = (data or {}).get(key, "")
                     if not new_text or substr not in tf_text:
                         continue
+                    # Layout-Schutz: kuerzen wenn Claude das Limit gerissen hat
+                    new_text = _truncate_smart(str(new_text).strip(), max_len)
                     # Im ersten Paragraphen den Run-Text ersetzen,
                     # weitere Paragraphen leeren (1-Zeilen-Boxen).
                     if shape.text_frame.paragraphs:
