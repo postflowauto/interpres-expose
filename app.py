@@ -59,6 +59,25 @@ TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY", "")
 TEST_MODE = os.environ.get("TEST_MODE", "false").lower() == "true"
 TEMPLATE_URL = "https://raw.githubusercontent.com/postflowauto/interpres-expose/main/urbanunits_Marketing_Expose_v3.pdf-23.pptx"
 
+# Zusatz-Templates (Kurz-Exposé + Rechtliches). Werden nur im Multi-Template-
+# Workflow geladen. Wenn URL leer/404 → der jeweilige Tab im Editor zeigt
+# 'Template noch nicht hinterlegt' und blockiert nicht das Marketing-Expose.
+KURZ_TEMPLATE_URL = os.environ.get(
+    "KURZ_TEMPLATE_URL",
+    "https://raw.githubusercontent.com/postflowauto/interpres-expose/main/urbanunits_Kurzexpose_v1.pptx",
+)
+RECHTLICH_TEMPLATE_URL = os.environ.get(
+    "RECHTLICH_TEMPLATE_URL",
+    "https://raw.githubusercontent.com/postflowauto/interpres-expose/main/urbanunits_Rechtlich_v1.pptx",
+)
+
+# Mapping expose_typ → URL. Wird in fill_pptx + V2-Worker genutzt.
+TEMPLATE_URLS = {
+    "marketing": TEMPLATE_URL,
+    "kurz":      KURZ_TEMPLATE_URL,
+    "rechtlich": RECHTLICH_TEMPLATE_URL,
+}
+
 # Dummy-Daten für TEST_MODE (kein Claude-API-Call)
 DUMMY_PROJEKTDATEN = {
     "projektname_roh": "Testprojekt Hannover", "adresse": "Lindener Marktplatz 5",
@@ -325,6 +344,22 @@ PLATZHALTER = {
     "text_grund_4_titel": "", "text_grund_4_text": "",
     "text_grund_5_titel": "", "text_grund_5_text": "",
     "text_grund_6_titel": "", "text_grund_6_text": "",
+    # ── Kurz-Exposé Felder (separates Template, eigenes PDF) ─────────────
+    "projekt_untertitel": "",       # Tagline z.B. 'Urbaner Wohnkomfort in nachhaltigem Umfeld'
+    "projekt_beschreibung": "",     # Cover-Untertitel-Block (links unten Kurz-S1)
+    "projekt_beschreibung_kurz": "",  # grosser Pitch-Text auf Kurz-S2
+    "text_relevanz":   "",  # 1 Zeile USP — Marktrelevanz
+    "text_design":     "",  # 1 Zeile USP — Design/Wohnen
+    "text_foerderung": "",  # 1 Zeile USP — Foerderung/Steuer
+    "text_tech":       "",  # 1 Zeile USP — Technik/Smart-Home
+    "besonderheiten_liste": "",  # mehrzeilige Aufzaehlung (analog DQN-Bullet-Liste)
+    # "Auf einen Blick" — rechte Spalte Kurz-S2
+    "gesamtwohnflaeche": "",  # z.B. '3.741,58 m²' — Summe aller WE
+    "zimmer_anzahl_min": "",  # '1' (kleinster Wohnungstyp)
+    "zimmer_anzahl_max": "",  # '2' (groesster Wohnungstyp)
+    # Bild-Slots Kurz-Cover (6) + Kurz-S2 (4) — werden vom Kunden hochgeladen
+    **{f"bild_titel_{n}": "" for n in range(1, 7)},
+    **{f"bild_kurz_{n}": ""  for n in range(1, 5)},
     "quelle_1": "", "quelle_2": "", "quelle_3": "", "quelle_4": "",
     # ── Standort-Minuten (Slide 5) ────────────────────────────────────────────
     "min_uni": "", "label_min_uni": "",
@@ -1205,6 +1240,10 @@ def fill_image_placeholders(data):
         # ── Wohnungstyp-Bilder: Kunde lädt seine Grundriss-/Innenraum-Fotos selbst.
         # Vorher kamen Berge/Auto/Wölfe via Picsum-Fallback rein — sah unprofessionell.
         *{f"bild_we_{n}" for n in range(1, 21)},
+        # ── Kurz-Exposé Cover-Collage (6 Slots) + Seite-2-Bilder (4 Slots).
+        # Kunde lädt seine echten Projekt-/Lifestyle-Fotos hoch.
+        *{f"bild_titel_{n}" for n in range(1, 7)},
+        *{f"bild_kurz_{n}"  for n in range(1, 5)},
     }
 
     queries = UNSPLASH_QUERIES.copy()
@@ -2066,6 +2105,56 @@ def generate_expose_with_claude(projektdaten, city_context=""):
         "    'Mietgarantie für 3 Monate'  (25)\n"
         "  Text:  100-150 Zeichen — MUSS in 2 Zeilen passen.\n"
         "  Wenn dein Text laenger wird: kuerzen, nicht aufweiten!\n\n"
+
+        "### KURZ-EXPOSÉ FELDER (separates 2-Seiten-PDF, ZUSAETZLICH zum Marketing-Expose).\n"
+        "Diese Felder bedienen ein Kompakt-Format — aehnliche Tonalitaet wie Marketing,\n"
+        "ABER deutlich knapper + zugespitzter. Pflicht zu liefern.\n"
+        "⚠️ STILREGEL: Die unten gezeigten DQN-Saetze sind REINE STIL-INSPIRATION —\n"
+        "NICHT abschreiben, NICHT umformulieren, NICHT als Vorlage benutzen. Eigener\n"
+        "Wortlaut, eigene Satzstruktur, eigene Bilder. Wenn der DQN-Satz 'Urbaner Wohnkomfort\n"
+        "in nachhaltigem Umfeld' lautet, schreib NICHT 'Urbaner Lebenskomfort in nachhaltigem\n"
+        "Quartier' — das ist 1:1 mit Synonymen. Schreib stattdessen etwas frisches wie\n"
+        "'Modern wohnen, smart vermieten' oder 'Nah am Puls, fernab vom Trubel'.\n\n"
+        "  projekt_untertitel: max 60 Zeichen — Tagline. Format frei: Halbsatz, Slogan oder\n"
+        "    zwei Begriffe, die das Projekt-Gefuehl tragen. Keine Zahlen, keine Floskel-\n"
+        "    Adjektive ('hochwertig', 'modern', 'attraktiv'). Beispiele fuer Tonalitaet\n"
+        "    (NICHT kopieren!): 'Designed to stay.', 'Wohnen wie geplant.', 'Smart. Klein. Komplett.'\n"
+        "  projekt_beschreibung: ZIEL 100-180 Zeichen — Cover-Beschreibung (linke Spalte\n"
+        "    Kurz-S1). 1-2 Saetze, Mix aus Anzahl-WE + Kernfeature + Stadt. Tonalitaet:\n"
+        "    direkt, faktenbasiert. Beispiel-Stil: 'XX Design-Apartments im Herzen [stadt]s.\n"
+        "    KfW-40 QNG-Plus, vollmoebliert, smart-ready.'\n"
+        "  projekt_beschreibung_kurz: ZIEL 380-500 Zeichen — der Kurz-Exposé-Hauptpitch\n"
+        "    auf S2. 3-4 Saetze. Erster Satz: WO + WAS (Stadt, Lage, Projektname, Anzahl WE).\n"
+        "    Zweiter Satz: Architektur/Nachhaltigkeit (KfW-Standard, QNG, Materialien).\n"
+        "    Dritter Satz: Quartier/Umfeld-Mehrwert. Optional: Investitions-/Nutzungs-Aspekt.\n"
+        "    NICHT mit 'Im Herzen des neuen ... entsteht ...' starten — das ist die DQN-Phrase.\n"
+        "    Variiere den Satzanfang: 'In [stadt] entsteht ...', '[projekt_titel] bringt ...',\n"
+        "    'Mit [anzahl_we] Wohnungen setzt [projekt_titel] in [stadt] ...'.\n"
+        "  text_relevanz: max 110 Zeichen — 1-Zeiler USP MARKTRELEVANZ. Konkreter Markt-Bezug,\n"
+        "    keine Buzzwords. Statt 'im Trend von Mikroapartments': nimm Markt-Treiber wie\n"
+        "    Studierende, Pendler, Single-Haushalte, Mietnachfrage in {stadt}.\n"
+        "  text_design: max 110 Zeichen — 1-Zeiler USP DESIGN/WOHNEN. Nimm konkrete Materialien\n"
+        "    aus dem Datenraum (Eiche, Fliesen, Walk-in-Dusche, Kueche-Marke). Nicht 'Westwing-\n"
+        "    Stil' kopieren — schreib 'Designermoebel, Eichenparkett, vollausgestattet' o.ae.\n"
+        "  text_foerderung: max 110 Zeichen — 1-Zeiler USP FOERDERUNG/STEUER. Liste die echten\n"
+        "    Foerderbausteine des Projekts (KfW-Stufe, QNG, Sonder-AfA, etc).\n"
+        "  text_tech: max 110 Zeichen — 1-Zeiler USP TECH/SMART-HOME. Konkrete Tech aus dem\n"
+        "    Datenraum: Smart-Lock, Glasfaser, PV, Waermepumpe, E-Ladesaeulen.\n"
+        "  besonderheiten_liste: ZIEL 220-340 Zeichen — 5-8 Bullet-Points, getrennt durch ' · '\n"
+        "    (Punkt mit Leerzeichen). JE Bullet 3-9 Worte. Konkrete Features aus dem Datenraum:\n"
+        "    Aussenanlagen (Balkon, Terrasse, Dachterrasse), Erschliessung (barrierearm,\n"
+        "    Aufzug), Quartier-Features (Spielplatz, Gruenanlage), Technik (Glasfaser, PV,\n"
+        "    Fernwaerme), Innenausstattung (Fliesen, Fussbodenheizung, Walk-in-Dusche).\n"
+        "    Keine Beschreibungs-Saetze — nur kurze Stichpunkte.\n"
+        "  gesamtwohnflaeche: berechne anzahl_we * Mittel(groesse_von, groesse_bis) und\n"
+        "    formatiere mit Tausender-Punkt + Komma + ' m²', z.B. '3.741,58 m²'. Wenn die\n"
+        "    Summe explizit im Datenraum steht (WFL-Berechnung), die echte Zahl nehmen.\n"
+        "  zimmer_anzahl_min / zimmer_anzahl_max: Zahlen aus zimmer_typen ableiten\n"
+        "    (z.B. '1-Zimmer und 2-Zimmer' → min='1', max='2'). Reine Ziffern, keine\n"
+        "    Einheit, keine Worte.\n"
+        "  bild_titel_1..6: leer lassen — Kunde laedt Cover-Collage-Bilder selbst hoch.\n"
+        "  bild_kurz_1..4: leer lassen — Kunde laedt Seite-2-Bilder selbst hoch.\n\n"
+
         "WICHTIG: alle obigen Zeichen-Limits sind HARTE Obergrenzen. Lieber 1-2 starke Sätze\n"
         "als ein dritter Halbsatz der das Layout sprengt.\n"
         "feature_N_label: max 28 Zeichen\n"
@@ -4472,8 +4561,16 @@ def _job_state_path(job_id):
 def _job_pptx_path(job_id):
     return os.path.join(_job_dir(job_id), "first_pass.pptx")
 
-def _job_slides_dir(job_id):
-    d = os.path.join(_job_dir(job_id), "slides")
+def _job_slides_dir(job_id, typ="marketing"):
+    """Slide-JPGs pro Expose-Typ in separatem Unterordner.
+    marketing → ../slides   (Default, Backwards-Compat)
+    kurz/rechtlich → ../slides_<typ>
+    """
+    base = _job_dir(job_id)
+    if typ and typ != "marketing":
+        d = os.path.join(base, f"slides_{typ}")
+    else:
+        d = os.path.join(base, "slides")
     os.makedirs(d, exist_ok=True)
     return d
 
@@ -5104,13 +5201,16 @@ def job_status(job_id):
 
 @app.route("/job/<job_id>/slide/<int:n>", methods=["GET", "OPTIONS"])
 def job_slide_image(job_id, n):
-    """Liefert die Slide-JPG-Datei für die Preview-Ansicht."""
+    """Liefert die Slide-JPG-Datei für die Preview-Ansicht.
+    ?typ=marketing|kurz|rechtlich (Default marketing) waehlt den Unterordner."""
     if request.method == "OPTIONS":
         return make_response("", 204)
-    # Token darf in Query-Param stehen (für <img src=…>)
     if not _authorize_job(job_id):
         return jsonify({"error": "Unauthorized"}), 401
-    path = os.path.join(_job_slides_dir(job_id), f"slide_{n}.jpg")
+    typ = (request.args.get("typ") or "marketing").lower()
+    if typ not in ("marketing", "kurz", "rechtlich"):
+        typ = "marketing"
+    path = os.path.join(_job_slides_dir(job_id, typ), f"slide_{n}.jpg")
     if not os.path.exists(path):
         return jsonify({"error": "Slide nicht gefunden"}), 404
     return send_file(path, mimetype="image/jpeg")

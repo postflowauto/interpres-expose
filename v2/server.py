@@ -27,11 +27,11 @@ STATIC_DIR  = V2_DIR / "static"
 EDITOR_HTML = V2_DIR / "editor.html"
 JOB_DIR     = "/tmp/interpres_jobs"
 
-# ── Per-Slide-Platzhalter-Scan (gecached) ───────────────────────────────────
-# Liest das Original-Template einmal und merkt sich pro Slide alle {{KEY}}-
+# ── Per-Slide-Platzhalter-Scan (gecached, pro Typ) ──────────────────────────
+# Liest das Template einmal pro Typ und merkt sich pro Slide alle {{KEY}}-
 # Platzhalter (lowercase). Wird im Editor genutzt um pro Folie nur die
-# relevanten Edit-Felder anzuzeigen.
-_PER_SLIDE_PLACEHOLDERS = None
+# relevanten Edit-Felder anzuzeigen. Cache pro typ ('marketing','kurz','rechtlich').
+_PER_SLIDE_PLACEHOLDERS_BY_TYP: dict[str, list[list[str]]] = {}
 
 
 def _scan_template_placeholders(pptx_bytes: bytes) -> list:
@@ -74,23 +74,36 @@ def _scan_template_placeholders(pptx_bytes: bytes) -> list:
     return result
 
 
-def _get_template_placeholders() -> list[list[str]]:
-    """Lazy-loads + cached: pro Slide alle Template-Platzhalter."""
-    global _PER_SLIDE_PLACEHOLDERS
-    if _PER_SLIDE_PLACEHOLDERS is not None:
-        return _PER_SLIDE_PLACEHOLDERS
+def _get_template_placeholders(typ: str = "marketing") -> list[list[str]]:
+    """Lazy-loads + cached: pro Slide alle Template-Platzhalter fuer den
+    angegebenen Typ. Wenn das Template fuer den Typ nicht erreichbar ist
+    (z.B. KURZ-Template noch nicht gepusht), wird [] zurueckgegeben — der
+    Editor zeigt dann eine Hinweis-Meldung statt zu crashen."""
+    if typ in _PER_SLIDE_PLACEHOLDERS_BY_TYP:
+        return _PER_SLIDE_PLACEHOLDERS_BY_TYP[typ]
     try:
         import importlib
         appmod = importlib.import_module("app")
         import requests
-        tmpl_bytes = requests.get(appmod.TEMPLATE_URL, timeout=30).content
-        _PER_SLIDE_PLACEHOLDERS = _scan_template_placeholders(tmpl_bytes)
-        print(f"[v2] Template-Scan: {len(_PER_SLIDE_PLACEHOLDERS)} Slides, "
-              f"{sum(len(s) for s in _PER_SLIDE_PLACEHOLDERS)} Platzhalter total")
+        url = appmod.TEMPLATE_URLS.get(typ) or appmod.TEMPLATE_URL
+        if not url:
+            _PER_SLIDE_PLACEHOLDERS_BY_TYP[typ] = []
+            return []
+        resp = requests.get(url, timeout=30)
+        if resp.status_code != 200:
+            print(f"[v2] Template-Scan ({typ}): HTTP {resp.status_code} — "
+                  f"Template noch nicht hinterlegt. URL: {url[:80]}")
+            _PER_SLIDE_PLACEHOLDERS_BY_TYP[typ] = []
+            return []
+        tmpl_bytes = resp.content
+        scanned = _scan_template_placeholders(tmpl_bytes)
+        _PER_SLIDE_PLACEHOLDERS_BY_TYP[typ] = scanned
+        print(f"[v2] Template-Scan ({typ}): {len(scanned)} Slides, "
+              f"{sum(len(s) for s in scanned)} Platzhalter total")
     except Exception as e:
-        print(f"[v2] Template-Scan Fehler: {e}")
-        _PER_SLIDE_PLACEHOLDERS = []
-    return _PER_SLIDE_PLACEHOLDERS
+        print(f"[v2] Template-Scan ({typ}) Fehler: {e}")
+        _PER_SLIDE_PLACEHOLDERS_BY_TYP[typ] = []
+    return _PER_SLIDE_PLACEHOLDERS_BY_TYP[typ]
 
 
 def _v1_state_path(job_id: str) -> str:
@@ -101,8 +114,25 @@ def _v1_meta_path(job_id: str) -> str:
     return os.path.join(JOB_DIR, f"{job_id}.json")
 
 
-def _v1_slides_dir(job_id: str) -> str:
-    return os.path.join(JOB_DIR, f"work_{job_id}", "slides")
+def _v1_slides_dir(job_id: str, typ: str = "marketing") -> str:
+    """Slide-JPGs pro Expose-Typ in eigenem Unterordner.
+    marketing → ../slides   (Default, Backwards-Compat)
+    kurz/rechtlich → ../slides_<typ>
+    """
+    base = os.path.join(JOB_DIR, f"work_{job_id}")
+    if typ == "marketing":
+        return os.path.join(base, "slides")
+    return os.path.join(base, f"slides_{typ}")
+
+
+def _output_path(job_id: str, typ: str, ext: str = "pdf") -> str:
+    """PDF/PPTX-Cache pro Typ. marketing behaelt den Original-Pfad fuer Backwards-Compat."""
+    if typ == "marketing":
+        return os.path.join(JOB_DIR, f"{job_id}.{ext}")
+    return os.path.join(JOB_DIR, f"{job_id}.{typ}.{ext}")
+
+
+VALID_EXPOSE_TYPS = ("marketing", "kurz", "rechtlich")
 
 
 def _v1_uploads_dir(job_id: str) -> str:
@@ -185,6 +215,17 @@ SLOT_LABELS = {
     "bild_rechtlich_2":        "Rechtliches – Bild 2",
     "bild_stadt_presse":       "Stadtbild – Presse",
     "bild_stadt_branche":      "Stadtbild – Branche",
+    # Kurz-Exposé-Bildslots
+    "bild_titel_1":            "Kurz-Cover Bild 1",
+    "bild_titel_2":            "Kurz-Cover Bild 2",
+    "bild_titel_3":            "Kurz-Cover Bild 3",
+    "bild_titel_4":            "Kurz-Cover Bild 4 (Hauptbild)",
+    "bild_titel_5":            "Kurz-Cover Bild 5",
+    "bild_titel_6":            "Kurz-Cover Bild 6",
+    "bild_kurz_1":             "Kurz-Seite 2 – Bild 1",
+    "bild_kurz_2":             "Kurz-Seite 2 – Bild 2",
+    "bild_kurz_3":             "Kurz-Seite 2 – Bild 3",
+    "bild_kurz_4":             "Kurz-Seite 2 – Bild 4",
 }
 
 
@@ -260,6 +301,19 @@ FIELD_GROUPS = [
         ("min_altstadt",   "Min – Altstadt"),
         ("label_min_altstadt", "Label – Altstadt"),
     ]},
+    {"name": "Kurz-Exposé", "keys": [
+        ("projekt_untertitel",        "Untertitel / Tagline"),
+        ("projekt_beschreibung",      "Beschreibung (Cover)"),
+        ("projekt_beschreibung_kurz", "Pitch-Text (Seite 2)"),
+        ("text_relevanz",             "USP – Relevanz"),
+        ("text_design",               "USP – Design"),
+        ("text_foerderung",           "USP – Förderung"),
+        ("text_tech",                 "USP – Tech"),
+        ("besonderheiten_liste",      "Besonderheiten (Liste)"),
+        ("gesamtwohnflaeche",         "Gesamtwohnfläche"),
+        ("zimmer_anzahl_min",         "Zimmer min"),
+        ("zimmer_anzahl_max",         "Zimmer max"),
+    ]},
 ]
 
 
@@ -324,14 +378,42 @@ Erstelle einfach ein neues Exposé — du wirst automatisch in den Editor geleit
     def v2_api_job_get(job_id):
         if not os.path.exists(_v1_state_path(job_id)):
             return jsonify({"error": "not found"}), 404
+        # Optional ?typ=marketing|kurz|rechtlich → liefert Slide-Count fuer den Typ.
+        # Default = last_render_typ aus meta, sonst 'marketing'.
         state = _read_state(job_id)
         meta  = _read_meta(job_id)
         expose = state.get("expose_data", {})
-        slides_dir = _v1_slides_dir(job_id)
+        typ = (request.args.get("typ") or meta.get("last_render_typ") or "marketing").lower()
+        if typ not in VALID_EXPOSE_TYPS:
+            typ = "marketing"
+        slides_dir = _v1_slides_dir(job_id, typ)
         slide_count = 0
         if os.path.isdir(slides_dir):
             slide_count = len([n for n in os.listdir(slides_dir)
                               if n.startswith("slide_") and n.endswith(".jpg")])
+
+        # Per-Typ Render-Status (welche PDFs sind schon gecacht)
+        rendered_typs = [
+            t for t in VALID_EXPOSE_TYPS
+            if os.path.exists(_output_path(job_id, t, "pdf"))
+            or os.path.exists(_output_path(job_id, t, "pptx"))
+        ]
+
+        # Welche Templates sind ueberhaupt konfiguriert/erreichbar?
+        # marketing ist immer da (Pflicht), kurz/rechtlich nur wenn URL erreichbar.
+        import importlib as _il
+        _appmod = _il.import_module("app")
+        available_typs = ["marketing"]
+        for t in ("kurz", "rechtlich"):
+            url = _appmod.TEMPLATE_URLS.get(t)
+            if not url:
+                continue
+            # Template-Verfuegbarkeit ueber den Scan-Cache pruefen — wenn
+            # _get_template_placeholders eine nicht-leere Liste liefert,
+            # ist das Template erreichbar.
+            phs = _get_template_placeholders(t)
+            if phs:
+                available_typs.append(t)
 
         # Bild-Slots aus expose_data extrahieren
         bild_slots = []
@@ -353,15 +435,19 @@ Erstelle einfach ein neues Exposé — du wirst automatisch in den Editor geleit
                 slot = os.path.splitext(fname)[0].lower()
                 uploaded[slot] = fname
 
-        # Pro-Slide-Platzhalter aus dem Template (für Editor-Filter)
-        slide_placeholders = _get_template_placeholders()
+        # Pro-Slide-Platzhalter aus dem Template des AKTUELLEN Typs
+        # (Editor zeigt damit pro Folie nur die relevanten Edit-Felder).
+        slide_placeholders = _get_template_placeholders(typ)
 
         return jsonify({
             "job_id":      job_id,
             "name":        meta.get("name") or expose.get("projekt_titel", "Expose"),
             "status":      meta.get("status", "unknown"),
             "phase":       meta.get("phase", ""),
+            "current_typ": typ,
             "slide_count": slide_count,
+            "rendered_typs": rendered_typs,
+            "available_typs": available_typs,
             "expose":      expose,
             "field_groups": FIELD_GROUPS,
             "bild_slots":  bild_slots,
@@ -393,19 +479,25 @@ Erstelle einfach ein neues Exposé — du wirst automatisch in den Editor geleit
         """Triggert V1-Re-Render: PPTX neu füllen mit aktueller expose_data
         + Customer-Uploads, dann PDF + Slide-JPGs erzeugen.
         Setzt status="processing" + phase, läuft im Background-Thread.
+
+        Param: ?typ=marketing|kurz|rechtlich (Default: marketing)
         """
         if request.method == "OPTIONS":
             return ("", 204)
         if not os.path.exists(_v1_state_path(job_id)):
             return jsonify({"error": "not found"}), 404
 
-        # Use V1's own re-render logic by importing app.py's _run_finalize_job
-        # → das macht aber nur PDF, keine slide JPGs. Wir machen unseren eigenen
-        #   Worker der BEIDE produziert (für Editor-Vorschau + Download).
-        _write_meta(job_id, status="processing", phase="V2-Render läuft …")
-        t = threading.Thread(target=_v2_render_worker, args=(job_id,), daemon=True)
+        typ = (request.args.get("typ") or request.form.get("typ") or "marketing").lower()
+        if typ not in VALID_EXPOSE_TYPS:
+            return jsonify({"error": f"unknown typ: {typ}"}), 400
+
+        _write_meta(job_id, status="processing", phase=f"V2-Render läuft … ({typ})",
+                    last_render_typ=typ)
+        t = threading.Thread(target=_v2_render_worker,
+                             args=(job_id, typ),
+                             daemon=True)
         t.start()
-        return jsonify({"ok": True})
+        return jsonify({"ok": True, "typ": typ})
 
     @app.route("/v2/api/job/<job_id>/render-status")
     def v2_api_render_status(job_id):
@@ -414,30 +506,50 @@ Erstelle einfach ein neues Exposé — du wirst automatisch in den Editor geleit
             "status": meta.get("status", "unknown"),
             "phase":  meta.get("phase", ""),
             "error":  meta.get("error", None),
+            "last_render_typ": meta.get("last_render_typ", "marketing"),
+            # Per-Typ-Status: zeigt welche PDFs schon gerendert wurden (lazy-Cache)
+            "rendered_typs": [
+                t for t in VALID_EXPOSE_TYPS
+                if os.path.exists(_output_path(job_id, t, "pdf"))
+                or os.path.exists(_output_path(job_id, t, "pptx"))
+            ],
         })
 
     @app.route("/v2/api/job/<job_id>/download")
     def v2_api_download(job_id):
-        """Triggert Render falls nötig, liefert PDF zurück."""
+        """Liefert PDF zurück. ?typ=marketing|kurz|rechtlich (Default: marketing)."""
+        typ = (request.args.get("typ") or "marketing").lower()
+        if typ not in VALID_EXPOSE_TYPS:
+            return jsonify({"error": f"unknown typ: {typ}"}), 400
+
         meta = _read_meta(job_id)
-        pdf_path = meta.get("pdf_path")
-        if not pdf_path or not os.path.exists(pdf_path):
-            return jsonify({
-                "error": "Kein PDF vorhanden – erst 'Aktualisieren' klicken."
-            }), 409
-        ext = os.path.splitext(pdf_path)[1].lower()
-        if ext == ".pdf":
-            mt = "application/pdf"
-            name = f"{meta.get('name', 'Expose')}.pdf"
-        else:
+        # Pro-Typ-Pfad pruefen (PDF bevorzugt, PPTX als Fallback wenn keine
+        # Konvertierung verfuegbar war)
+        pdf_path = _output_path(job_id, typ, "pdf")
+        pptx_path = _output_path(job_id, typ, "pptx")
+        if os.path.exists(pdf_path):
+            out_path, mt, ext_label = pdf_path, "application/pdf", "pdf"
+        elif os.path.exists(pptx_path):
+            out_path = pptx_path
             mt = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-            name = f"{meta.get('name', 'Expose')}.pptx"
-        return send_file(pdf_path, mimetype=mt, as_attachment=True, download_name=name)
+            ext_label = "pptx"
+        else:
+            return jsonify({
+                "error": f"Kein {typ}-PDF vorhanden – erst 'Aktualisieren' klicken."
+            }), 409
+
+        name_base = meta.get("name", "Expose")
+        suffix = "" if typ == "marketing" else f"_{typ}"
+        return send_file(out_path, mimetype=mt, as_attachment=True,
+                         download_name=f"{name_base}{suffix}.{ext_label}")
 
 
-def _v2_render_worker(job_id: str):
+def _v2_render_worker(job_id: str, typ: str = "marketing"):
     """Background-Worker: lädt expose_data + Customer-Images, ruft V1-fill_pptx,
     konvertiert zu PDF, rendert Slide-JPGs.
+
+    typ: 'marketing' (Default) | 'kurz' | 'rechtlich'
+      Bestimmt welches Template geladen + welche Output-Pfade benutzt werden.
 
     RAM-Strategie für 512 MB Render Starter:
       - Nach jedem grossen Schritt: del + gc.collect()
@@ -478,10 +590,23 @@ def _v2_render_worker(job_id: str):
 
         projekt_name = expose.get("projekt_titel", "Expose")
 
-        _write_meta(job_id, phase="Template wird gefüllt …")
+        _write_meta(job_id, phase=f"Template wird gefüllt … ({typ})")
         import requests
-        tmpl_url = appmod.TEMPLATE_URL
-        tmpl_bytes = requests.get(tmpl_url, timeout=30).content
+        tmpl_url = appmod.TEMPLATE_URLS.get(typ, appmod.TEMPLATE_URL)
+        if not tmpl_url:
+            _write_meta(job_id, status="error",
+                        phase=f"Kein Template fuer Typ '{typ}' konfiguriert.",
+                        error=f"TEMPLATE_URLS['{typ}'] ist leer")
+            return
+        try:
+            tmpl_resp = requests.get(tmpl_url, timeout=30)
+            tmpl_resp.raise_for_status()
+            tmpl_bytes = tmpl_resp.content
+        except Exception as e:
+            _write_meta(job_id, status="error",
+                        phase=f"Template '{typ}' nicht ladbar",
+                        error=f"GET {tmpl_url}: {e}")
+            return
         pptx_bytes = appmod.fill_pptx(tmpl_bytes, expose, customer_images=customer_images)
         # Nach fill_pptx: tmpl + customer_images sind nicht mehr gebraucht.
         del tmpl_bytes, customer_images, state, cust_files
@@ -506,15 +631,15 @@ def _v2_render_worker(job_id: str):
         # Output-Pfad (PDF wenn möglich, sonst PPTX)
         slide_render_error = None
         if pdf_bytes:
-            out_path = os.path.join(JOB_DIR, f"{job_id}.pdf")
+            out_path = _output_path(job_id, typ, "pdf")
             with open(out_path, "wb") as f:
                 f.write(pdf_bytes)
             # PPTX-Bytes können nun freigegeben werden — PDF ist persistent.
             del pptx_bytes
             gc.collect()
 
-            _write_meta(job_id, phase="Slide-Vorschau wird erstellt …")
-            slides_dir = _v1_slides_dir(job_id)
+            _write_meta(job_id, phase=f"Slide-Vorschau wird erstellt … ({typ})")
+            slides_dir = _v1_slides_dir(job_id, typ)
             # Atomic swap: erst in tmp-Dir rendern, bei Erfolg alten Dir-Inhalt swappen.
             # Vorteil: bei Render-Fail (OOM/Exception) bleiben alte Slides erhalten.
             tmp_slides_dir = slides_dir + ".tmp"
@@ -551,7 +676,7 @@ def _v2_render_worker(job_id: str):
                 import shutil as _sh
                 _sh.rmtree(tmp_slides_dir, ignore_errors=True)
         else:
-            out_path = os.path.join(JOB_DIR, f"{job_id}.pptx")
+            out_path = _output_path(job_id, typ, "pptx")
             with open(out_path, "wb") as f:
                 f.write(pptx_bytes)
             del pptx_bytes
@@ -562,19 +687,21 @@ def _v2_render_worker(job_id: str):
             err_msg = slide_render_error or pdf_error
             _write_meta(job_id,
                         status="error",
-                        phase=f"Vorschau-Render fehlgeschlagen",
+                        phase=f"Vorschau-Render fehlgeschlagen ({typ})",
                         pdf_path=out_path,
                         name=projekt_name,
+                        last_render_typ=typ,
                         error=err_msg)
-            print(f"[v2] ✗ Render mit Fehler abgeschlossen: {err_msg[:200]}")
+            print(f"[v2] ✗ Render mit Fehler abgeschlossen ({typ}): {err_msg[:200]}")
         else:
             _write_meta(job_id,
                         status="preview",
-                        phase="Vorschau aktualisiert",
+                        phase=f"Vorschau aktualisiert ({typ})",
                         pdf_path=out_path,
                         name=projekt_name,
+                        last_render_typ=typ,
                         error=None)
-            print(f"[v2] ✓ Render fertig für Job {job_id}")
+            print(f"[v2] ✓ Render fertig für Job {job_id} (typ={typ})")
     except Exception as e:
         import traceback as tb
         err = f"{e}\n{tb.format_exc()}"

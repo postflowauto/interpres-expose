@@ -11,6 +11,11 @@
   <div class="brand">INTERPRÉS</div>
   <div class="brand-sub">Exposé Editor</div>
   <div class="job-name" id="job-name"></div>
+  <div class="typ-tabs" id="typ-tabs">
+    <button class="typ-tab active" data-typ="marketing">Marketing</button>
+    <button class="typ-tab" data-typ="kurz">Kurz-Exposé</button>
+    <button class="typ-tab" data-typ="rechtlich">Rechtliches</button>
+  </div>
   <div class="spacer"></div>
   <div class="status" id="render-status"></div>
   <button class="btn" id="btn-refresh">Vorschau aktualisieren</button>
@@ -19,7 +24,7 @@
 
 <div class="layout">
   <aside class="sidebar">
-    <div class="side-h">Folien</div>
+    <div class="side-h" id="sidebar-h">Folien</div>
     <div id="slide-list"></div>
   </aside>
 
@@ -58,31 +63,69 @@ const V1_API    = `/job/${JOB_ID}`;
 let job = null;
 let activeIdx = 0;
 let activeTab = 'texts';
+let activeTyp = 'marketing';   // 'marketing' | 'kurz' | 'rechtlich'
 let dirty = false;       // unsaved text changes
 let pendingText = {};    // batched text updates
 let saveTimer = null;
+const TYP_LABEL = {marketing:'Marketing-Exposé', kurz:'Kurz-Exposé', rechtlich:'Rechtliches Exposé'};
 
 function authHeaders(extra) {
   return Object.assign({'X-API-Token': API_TOKEN}, extra || {});
 }
 
 async function loadJob() {
-  const r = await fetch(V2_API);
+  const r = await fetch(`${V2_API}?typ=${activeTyp}`);
   if (!r.ok) {
     document.body.innerHTML = '<div style="padding:40px; color:#fff;">Job nicht gefunden.</div>';
     return;
   }
   job = await r.json();
   document.getElementById('job-name').textContent = job.name || '';
+  renderTypTabs();
   renderSlideList();
-  showSlide(0);
+  if (activeIdx >= job.slide_count) activeIdx = 0;
+  showSlide(activeIdx);
   renderProps();
-  // Auto-Render falls noch keine Folien-JPGs da sind
-  if (!job.slide_count && !window._autoRenderTriggered) {
-    window._autoRenderTriggered = true;
-    setStatus('Erste Vorschau wird automatisch erstellt …', 'saving');
+  // Auto-Render falls noch keine Folien-JPGs fuer diesen Typ da sind und
+  // das Template ueberhaupt verfuegbar ist
+  const typAvailable = (job.available_typs || ['marketing']).includes(activeTyp);
+  const autoKey = `_autoRender_${activeTyp}`;
+  if (typAvailable && !job.slide_count && !window[autoKey]) {
+    window[autoKey] = true;
+    setStatus(`Erste Vorschau für ${TYP_LABEL[activeTyp]} wird erstellt …`, 'saving');
     triggerRender();
   }
+}
+
+function renderTypTabs() {
+  const available = new Set(job.available_typs || ['marketing']);
+  document.querySelectorAll('.typ-tab').forEach(t => {
+    const typ = t.dataset.typ;
+    t.classList.toggle('active', typ === activeTyp);
+    if (!available.has(typ)) {
+      t.classList.add('disabled');
+      t.title = 'Template noch nicht hinterlegt';
+    } else {
+      t.classList.remove('disabled');
+      t.title = '';
+    }
+  });
+  document.getElementById('sidebar-h').textContent = `Folien · ${TYP_LABEL[activeTyp]}`;
+}
+
+async function switchTyp(typ) {
+  if (typ === activeTyp) return;
+  const available = new Set(job?.available_typs || ['marketing']);
+  if (!available.has(typ)) {
+    setStatus(`Template für „${TYP_LABEL[typ]}" noch nicht hinterlegt.`, 'error');
+    return;
+  }
+  // Pending Text-Aenderungen vorher speichern (gehoeren zum gleichen Job)
+  await flushTextChanges();
+  activeTyp = typ;
+  activeIdx = 0;
+  setStatus(`Wechsel zu ${TYP_LABEL[typ]} …`, 'saving');
+  await loadJob();
 }
 
 function renderSlideList() {
@@ -93,7 +136,7 @@ function renderSlideList() {
     el.className = 'slide-item' + (i === activeIdx ? ' active' : '');
     el.innerHTML = `
       <div class="thumb-wrap">
-        <img class="thumb-img" loading="lazy" src="${V1_API}/slide/${i+1}?token=${encodeURIComponent(API_TOKEN)}" alt="">
+        <img class="thumb-img" loading="lazy" src="${V1_API}/slide/${i+1}?typ=${activeTyp}&token=${encodeURIComponent(API_TOKEN)}" alt="">
       </div>
       <div class="meta">Folie ${i+1}</div>
     `;
@@ -101,7 +144,12 @@ function renderSlideList() {
     wrap.appendChild(el);
   }
   if (!job.slide_count) {
-    wrap.innerHTML = '<div class="hint" style="padding:20px;">Keine Folien-Vorschau verfügbar.<br>Klick "Vorschau aktualisieren".</div>';
+    const available = new Set(job.available_typs || ['marketing']);
+    if (!available.has(activeTyp)) {
+      wrap.innerHTML = `<div class="hint" style="padding:20px;">Template für „${TYP_LABEL[activeTyp]}" ist noch nicht hinterlegt.<br><br>Sobald das PPTX-Template auf GitHub liegt, erscheint hier die Vorschau.</div>`;
+    } else {
+      wrap.innerHTML = '<div class="hint" style="padding:20px;">Keine Folien-Vorschau verfügbar.<br>Klick "Vorschau aktualisieren".</div>';
+    }
   }
 }
 
@@ -114,8 +162,13 @@ function showSlide(idx) {
   img.style.opacity = '0';
   img.onload  = () => { ld.style.display = 'none'; img.style.opacity = '1'; };
   img.onerror = () => { ld.textContent = 'Folie nicht geladen'; };
-  img.src = `${V1_API}/slide/${idx+1}?token=${encodeURIComponent(API_TOKEN)}&t=${Date.now()}`;
-  document.getElementById('slide-pos').textContent = `${idx+1} / ${job.slide_count}`;
+  if (job.slide_count) {
+    img.src = `${V1_API}/slide/${idx+1}?typ=${activeTyp}&token=${encodeURIComponent(API_TOKEN)}&t=${Date.now()}`;
+  } else {
+    img.removeAttribute('src');
+    ld.textContent = 'Noch keine Vorschau';
+  }
+  document.getElementById('slide-pos').textContent = job.slide_count ? `${idx+1} / ${job.slide_count}` : '–';
   // Properties-Panel neu rendern (zeigt nur Felder dieser Folie)
   renderProps();
 }
@@ -327,10 +380,10 @@ async function removeImage(slotKey) {
 
 async function triggerRender() {
   await flushTextChanges();
-  setStatus('Vorschau wird neu gerendert …', 'saving');
+  setStatus(`Vorschau ${TYP_LABEL[activeTyp]} wird neu gerendert …`, 'saving');
   document.getElementById('btn-refresh').disabled = true;
   try {
-    const r = await fetch(`${V2_API}/render`, { method: 'POST', headers: authHeaders() });
+    const r = await fetch(`${V2_API}/render?typ=${activeTyp}`, { method: 'POST', headers: authHeaders() });
     if (!r.ok) {
       setStatus('Render-Trigger fehlgeschlagen', 'error');
       document.getElementById('btn-refresh').disabled = false;
@@ -364,17 +417,17 @@ async function pollRenderStatus() {
 
 async function downloadPdf() {
   await flushTextChanges();
+  const url = `${V2_API}/download?typ=${activeTyp}`;
   // Triggert render falls dirty
   if (dirty) {
     if (!confirm('Vorher Vorschau aktualisieren? (empfohlen, sonst zeigt das PDF die alte Version)')) {
-      window.location = `${V2_API}/download`;
+      window.location = url;
       return;
     }
     await triggerRender();
-    // Polling läuft – wenn fertig, dann download
     return;
   }
-  window.location = `${V2_API}/download`;
+  window.location = url;
 }
 
 function setStatus(msg, kind) {
@@ -383,7 +436,7 @@ function setStatus(msg, kind) {
   el.className = 'status ' + (kind || '');
 }
 
-// Tabs
+// Tabs (Texte/Bilder)
 document.querySelectorAll('.tab').forEach(t => {
   t.addEventListener('click', () => {
     document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
@@ -391,6 +444,11 @@ document.querySelectorAll('.tab').forEach(t => {
     activeTab = t.dataset.tab;
     renderProps();
   });
+});
+
+// Typ-Tabs (Marketing/Kurz/Rechtlich)
+document.querySelectorAll('.typ-tab').forEach(t => {
+  t.addEventListener('click', () => switchTyp(t.dataset.typ));
 });
 
 document.getElementById('btn-prev').addEventListener('click', () => {
