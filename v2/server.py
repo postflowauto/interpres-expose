@@ -303,8 +303,8 @@ FIELD_GROUPS = [
     ]},
     {"name": "Kurz-Exposé", "keys": [
         ("projekt_untertitel",        "Untertitel / Tagline"),
-        ("projekt_beschreibung",      "Beschreibung (Cover)"),
-        ("projekt_beschreibung_kurz", "Pitch-Text (Seite 2)"),
+        ("projekt_beschreibung",      "Beschreibung (Pitch-Text Seite 2)"),
+        ("projekt_beschreibung_kurz", "Beschreibung (Backup-Alias)"),
         ("text_relevanz",             "USP – Relevanz"),
         ("text_design",               "USP – Design"),
         ("text_foerderung",           "USP – Förderung"),
