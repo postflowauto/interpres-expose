@@ -544,6 +544,71 @@ Erstelle einfach ein neues Exposé — du wirst automatisch in den Editor geleit
                          download_name=f"{name_base}{suffix}.{ext_label}")
 
 
+# ── Kurz-Expose Image Auto-Mapping ───────────────────────────────────────
+# Welche Marketing-Slots (in Prio-Reihenfolge) sollen welchen Kurz-Slot
+# befuellen. Wird durchsucht: erstes verfuegbares Marketing-Bild gewinnt.
+_KURZ_IMAGE_MAPPING = {
+    # Cover Slide 1 — 6er Collage (bild_titel_4 ist das Hauptbild)
+    "bild_titel_1": ["bild_quartier", "bild_amenity_1", "bild_ansicht_1"],
+    "bild_titel_2": ["bild_interior", "bild_ausstattung_1", "bild_hotel_1"],
+    "bild_titel_3": ["bild_greenliving_1", "bild_amenity_2", "bild_quartier"],
+    "bild_titel_4": ["bild_titel", "bild_projekt_aussen", "bild_ansicht_1"],
+    "bild_titel_5": ["bild_projekt_aussen", "bild_ansicht_2", "bild_ansicht_1"],
+    "bild_titel_6": ["bild_ausstattung_2", "bild_hotel_2", "bild_amenity_3"],
+    # Seite 2 — 4 Bilder
+    "bild_kurz_1": ["bild_projekt_aussen", "bild_titel", "bild_ansicht_1"],
+    "bild_kurz_2": ["bild_greenliving_2", "bild_ansicht_2", "bild_quartier"],
+    "bild_kurz_3": ["bild_hotel_1", "bild_interior", "bild_ausstattung_1"],
+    "bild_kurz_4": ["bild_hotel_2", "bild_amenity_1", "bild_ausstattung_2"],
+}
+_KURZ_UNSPLASH_FALLBACKS = {
+    "bild_titel_1": "city lifestyle people street",
+    "bild_titel_2": "modern apartment bedroom interior",
+    "bild_titel_3": "modern apartment building exterior",
+    "bild_titel_4": "modern residential building facade",
+    "bild_titel_5": "residential apartment building street",
+    "bild_titel_6": "young woman lifestyle outdoor",
+    "bild_kurz_1": "modern apartment building exterior",
+    "bild_kurz_2": "apartment building aerial green",
+    "bild_kurz_3": "coffee shop friends modern",
+    "bild_kurz_4": "young people lifestyle group friends",
+}
+
+
+def _auto_map_kurz_images(expose: dict, customer_images: dict, appmod) -> None:
+    """Befuellt leere Kurz-Bildslots mit (1) passenden Marketing-Bildern des
+    Kunden oder (2) Unsplash-Fallbacks. Mutiert expose + customer_images in-place."""
+    for kurz_slot, sources in _KURZ_IMAGE_MAPPING.items():
+        # Kunde hat selbst hochgeladen → unverändert lassen
+        if customer_images.get(kurz_slot):
+            continue
+        # Marketing-Bild als Bytes uebertragen
+        for src in sources:
+            if customer_images.get(src):
+                customer_images[kurz_slot] = customer_images[src]
+                expose[kurz_slot] = ""
+                print(f"[v2 kurz] auto-map: {kurz_slot} <- {src} (customer)")
+                break
+        else:
+            # Marketing hat eine Unsplash-URL fuer diesen Marketing-Slot
+            for src in sources:
+                val = expose.get(src)
+                if isinstance(val, str) and val.startswith("http"):
+                    expose[kurz_slot] = val
+                    print(f"[v2 kurz] auto-map: {kurz_slot} <- {src} (url)")
+                    break
+            else:
+                # Letzter Schritt: frische Unsplash-Suche
+                query = _KURZ_UNSPLASH_FALLBACKS.get(kurz_slot, "modern apartment")
+                try:
+                    url = appmod.fetch_unsplash_image(query)
+                    if url:
+                        expose[kurz_slot] = url
+                        print(f"[v2 kurz] auto-map: {kurz_slot} <- unsplash({query!r})")
+                except Exception as e:
+                    print(f"[v2 kurz] unsplash {kurz_slot}: {e}")
+
+
 def _v2_render_worker(job_id: str, typ: str = "marketing"):
     """Background-Worker: lädt expose_data + Customer-Images, ruft V1-fill_pptx,
     konvertiert zu PDF, rendert Slide-JPGs.
@@ -587,6 +652,13 @@ def _v2_render_worker(job_id: str, typ: str = "marketing"):
                 with open(os.path.join(uploads_dir, fname), "rb") as f:
                     customer_images[slot] = f.read()
                 expose[slot] = ""
+
+        # ── Auto-Mapping fuer Kurz-Exposé ──────────────────────────────────
+        # Wenn der Kunde im Marketing schon passende Bilder hochgeladen hat,
+        # werden sie hier auf die Kurz-Slots uebertragen. Was leer bleibt,
+        # bekommt einen Unsplash-Fallback.
+        if typ == "kurz":
+            _auto_map_kurz_images(expose, customer_images, appmod)
 
         projekt_name = expose.get("projekt_titel", "Expose")
 
