@@ -222,6 +222,20 @@ DUMMY_EXPOSE_DATA = {
     "bild_projekt": "",
     "produkt_beschreibung": "Vollmöblierte Mikro-Apartments mit Smart-Lock",
     "zitat_intro": "Wohnen neu gedacht.",
+    # ── Kurz-Exposé Felder (TEST_MODE) ─────────────────────────────────────
+    # Längen orientiert an den Prompt-Limits (max-Zeichen), damit das
+    # Layout im TEST_MODE genauso aussieht wie mit echtem Claude-Output.
+    "projekt_untertitel": "Designed to stay – urbanes Mikro-Living mit Konzept.",  # ~52 / 60
+    "projekt_beschreibung": "In Hannover-Linden entsteht mit dem Stadtquartier Linden ein zukunftsweisendes Wohnprojekt mit 48 vollmöblierten 1- bis 2-Zimmer-Apartments. Geplant nach KfW-55-EE-Standard mit Photovoltaik und Fernwärme, ausgestattet mit Designermöbeln, Smart-Lock und Echtholzparkett. Das lebendige Gründerzeitviertel verbindet kurze Wege zur Leibniz Universität, zur Altstadt und zum Hauptbahnhof mit grünen Rückzugsorten und Quartiers-Flair. Ob als Eigennutzung oder Kapitalanlage – das Projekt überzeugt durch Lage, Effizienz und flexible Wohnungsgrößen.",  # ~540 / 560
+    "projekt_beschreibung_kurz": "In Hannover-Linden entsteht mit dem Stadtquartier Linden ein zukunftsweisendes Wohnprojekt mit 48 vollmöblierten 1- bis 2-Zimmer-Apartments. Geplant nach KfW-55-EE-Standard mit Photovoltaik und Fernwärme, ausgestattet mit Designermöbeln, Smart-Lock und Echtholzparkett. Das lebendige Gründerzeitviertel verbindet kurze Wege zur Leibniz Universität, zur Altstadt und zum Hauptbahnhof mit grünen Rückzugsorten und Quartiers-Flair. Ob als Eigennutzung oder Kapitalanlage – das Projekt überzeugt durch Lage, Effizienz und flexible Wohnungsgrößen.",
+    "text_relevanz":   "48.000 Studierende und steigende Single-Haushalte sorgen in Hannover für hohe Nachfrage nach Mikro-Wohnen.",  # ~105 / 110
+    "text_design":     "Designermöbel, Echtholzparkett, ausgestattete Küche und bodengleiche Walk-In-Dusche – bezugsfertig.",  # ~100 / 110
+    "text_foerderung": "KfW-55-EE-Darlehen, Sonder-AfA §7b EStG, degressive AfA §7 Abs.5a, Möbel-AfA – dreifacher Steuervorteil.",  # ~104 / 110
+    "text_tech":       "Smart-Lock, Glasfaser, Photovoltaik aufs Dach, E-Mobility-Anbindung – moderne Infrastruktur inklusive.",  # ~102 / 110
+    "besonderheiten_liste": "Dachterrasse mit Ausblick · E-Bike-Sharing für alle Bewohner · Smart-Lock und Glasfaser · vollmöbliert mit Designermöbeln · barrierearm konzipiert · Aufzug in jede Etage · Photovoltaik aufs Dach · Fernwärme aus regenerativen Quellen · LED-Beleuchtung in allen Räumen",  # ~275 / 340
+    "gesamtwohnflaeche": "2.142,40 m²",
+    "zimmer_anzahl_min": "1",
+    "zimmer_anzahl_max": "2",
 }
 
 # Relevante PDF-Typen nach Priorität
