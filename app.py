@@ -64,7 +64,7 @@ TEMPLATE_URL = "https://raw.githubusercontent.com/postflowauto/interpres-expose/
 # 'Template noch nicht hinterlegt' und blockiert nicht das Marketing-Expose.
 KURZ_TEMPLATE_URL = os.environ.get(
     "KURZ_TEMPLATE_URL",
-    "https://raw.githubusercontent.com/postflowauto/interpres-expose/main/urbanunits_Kurzexpose-3.pptx",
+    "https://raw.githubusercontent.com/postflowauto/interpres-expose/main/urbanunits_Kurzexpose-4.pptx",
 )
 RECHTLICH_TEMPLATE_URL = os.environ.get(
     "RECHTLICH_TEMPLATE_URL",
@@ -3898,6 +3898,10 @@ def fill_pptx(template_bytes, data, customer_images=None):
     # Stadt != Magdeburg.
     _override_legal_text(prs, data)
 
+    # ── Zahlen-Spalten-Geometrie normalisieren VOR dem Replace,
+    # solange die Platzhalter-Strings noch identifizierbar sind.
+    _normalize_number_columns(prs)
+
     for slide in prs.slides:
         for shape in list(slide.shapes):
             try:
@@ -4018,6 +4022,69 @@ def fill_pptx(template_bytes, data, customer_images=None):
     out = io.BytesIO()
     prs.save(out)
     return out.getvalue()
+
+
+# Gruppen von Platzhaltern, deren Textfelder geometrisch normalisiert werden.
+# Innerhalb einer Gruppe: alle Felder bekommen die gleiche X-Position, Width und
+# Height (jeweils das Median der Gruppe). Vertikale Y-Position bleibt unverändert.
+_NUMBER_COLUMN_GROUPS = [
+    # Slide 5 — Standort-Minuten (Zahl-Bereich)
+    ("min_uni", "min_bahnhof", "min_altstadt"),
+    ("label_min_uni", "label_min_bahnhof", "label_min_altstadt"),
+    # Slide 6 — Hotel-Features
+    ("feature_1_zahl", "feature_2_zahl", "feature_3_zahl"),
+    ("feature_1_label", "feature_2_label", "feature_3_label"),
+    # Slide 21 — Grundriss-Anzahl (Zahlen)
+    ("anzahl_1zi", "anzahl_2zi", "anzahl_barrierefrei"),
+]
+
+
+def _normalize_number_columns(prs):
+    """Macht Zahlen-Textfelder einer Gruppe geometrisch konsistent.
+
+    Hintergrund: Im Canva-Marketing-Template wurden die Zahlen-Felder
+    (z.B. {{MIN_UNI}}, {{MIN_BAHNHOF}}, {{MIN_ALTSTADT}}) leicht unterschiedlich
+    positioniert + verschieden breit/hoch. Beim Render wirken die Zahlen dann
+    nicht sauber untereinander zentriert. Diese Funktion sucht alle Shapes mit
+    einem Platzhalter der zur selben Gruppe gehört und setzt deren left, width,
+    height auf den Median-Wert der Gruppe. top bleibt unverändert (vertikale
+    Stapelung beibehalten).
+    """
+    import re as _re
+    PH = _re.compile(r'\{\{\s*([a-z][a-z0-9_]*)', _re.IGNORECASE)
+
+    for slide in prs.slides:
+        # Sammle alle Shapes pro Platzhalter-Key auf diesem Slide
+        shapes_by_key = {}
+        for shape in slide.shapes:
+            try:
+                if not shape.has_text_frame:
+                    continue
+            except Exception:
+                continue
+            text = shape.text_frame.text
+            m = PH.search(text)
+            if not m:
+                continue
+            key = m.group(1).lower()
+            shapes_by_key[key] = shape
+
+        for group in _NUMBER_COLUMN_GROUPS:
+            present = [shapes_by_key[k] for k in group if k in shapes_by_key]
+            if len(present) < 2:
+                continue
+            xs = sorted(s.left for s in present)
+            ws = sorted(s.width for s in present)
+            hs = sorted(s.height for s in present)
+            median_x = xs[len(xs) // 2]
+            median_w = ws[len(ws) // 2]
+            target_h = max(hs)  # nicht clippen: nimm die groesste Hoehe
+            for s in present:
+                s.left = median_x
+                s.width = median_w
+                s.height = target_h
+            print(f"  ↔ Zahlen-Spalte normalisiert: {[k for k in group if k in shapes_by_key]} "
+                  f"(x={median_x}, w={median_w}, h={target_h})")
 
 # ── Slot-Labels für Preview-UI: gibt {bild_key: human-readable label} zurück ──
 _SLOT_LABELS = {
