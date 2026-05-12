@@ -4554,27 +4554,24 @@ def _convert_to_pdf_libreoffice(pptx_bytes, filename):
 
 def convert_to_pdf(pptx_bytes, filename):
     """Konvertiert PPTX-Bytes zu PDF.
-    Reihenfolge: LibreOffice (wenn verfügbar) → CloudConvert (Fallback) → Fehler.
+    Reihenfolge: CloudConvert (wenn Key gesetzt) → LibreOffice → Fehler.
 
-    LibreOffice ist im Docker-Image installiert und kostenlos. CloudConvert war
-    der ursprüngliche Pfad, kostet aber pro Conversion + scheitert wenn der
-    Credit leer ist (HTTP 402). Daher: LibreOffice priorisieren wenn da, sonst
-    CloudConvert als Notfall-Fallback.
+    CloudConvert ist primaer: schneller (~3-5s vs 10-15s) und liefert sauberere
+    PDFs. LibreOffice ist Notfall-Fallback wenn CloudConvert nicht erreichbar
+    ist oder der Credit leer ist (HTTP 402).
     """
-    if _find_libreoffice():
+    if CLOUDCONVERT_KEY:
         try:
-            return _convert_to_pdf_libreoffice(pptx_bytes, filename)
+            return _convert_to_pdf_cloudconvert(pptx_bytes, filename)
         except Exception as e:
             import traceback as _tb
-            print(f"  LibreOffice Fehler: {e}\n{_tb.format_exc()[:600]}")
-            if CLOUDCONVERT_KEY:
-                print(f"  → Fallback CloudConvert")
+            print(f"  CloudConvert Fehler: {e}\n{_tb.format_exc()[:600]}")
+            if _find_libreoffice():
+                print(f"  → Fallback LibreOffice")
             else:
-                print(f"  → Kein CloudConvert-Fallback verfügbar – Fehler propagiert")
+                print(f"  → Kein LibreOffice-Fallback verfügbar – Fehler propagiert")
                 raise
-    if CLOUDCONVERT_KEY:
-        return _convert_to_pdf_cloudconvert(pptx_bytes, filename)
-    raise RuntimeError("Keine PDF-Konvertierung verfügbar (weder LibreOffice noch CloudConvert)")
+    return _convert_to_pdf_libreoffice(pptx_bytes, filename)
 
 
 def _can_convert_to_pdf():
