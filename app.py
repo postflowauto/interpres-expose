@@ -64,7 +64,7 @@ TEMPLATE_URL = "https://raw.githubusercontent.com/postflowauto/interpres-expose/
 # 'Template noch nicht hinterlegt' und blockiert nicht das Marketing-Expose.
 KURZ_TEMPLATE_URL = os.environ.get(
     "KURZ_TEMPLATE_URL",
-    "https://raw.githubusercontent.com/postflowauto/interpres-expose/main/urbanunits_Kurzexpose-2.pptx",
+    "https://raw.githubusercontent.com/postflowauto/interpres-expose/main/urbanunits_Kurzexpose-3.pptx",
 )
 RECHTLICH_TEMPLATE_URL = os.environ.get(
     "RECHTLICH_TEMPLATE_URL",
@@ -232,7 +232,7 @@ DUMMY_EXPOSE_DATA = {
     "text_design":     "Designermöbel, Echtholzparkett, ausgestattete Küche und bodengleiche Walk-In-Dusche – bezugsfertig.",  # ~100 / 110
     "text_foerderung": "KfW-55-EE-Darlehen, Sonder-AfA §7b EStG, degressive AfA §7 Abs.5a, Möbel-AfA – dreifacher Steuervorteil.",  # ~104 / 110
     "text_tech":       "Smart-Lock, Glasfaser, Photovoltaik aufs Dach, E-Mobility-Anbindung – moderne Infrastruktur inklusive.",  # ~102 / 110
-    "besonderheiten_liste": "Dachterrasse mit Ausblick · E-Bike-Sharing für alle Bewohner · Smart-Lock und Glasfaser · vollmöbliert mit Designermöbeln · barrierearm konzipiert · Aufzug in jede Etage · Photovoltaik aufs Dach · Fernwärme aus regenerativen Quellen · LED-Beleuchtung in allen Räumen",  # ~275 / 340
+    "besonderheiten_liste": ":  Dachterrasse mit Ausblick\n:  E-Bike-Sharing für alle Bewohner\n:  Smart-Lock und Glasfaser-Anschluss\n:  vollmöbliert mit Designermöbeln\n:  barrierearm, Aufzug in jede Etage\n:  Photovoltaik aufs Dach\n:  Fernwärme aus regenerativen Quellen\n:  LED-Beleuchtung in allen Räumen",  # 8 Zeilen, jede mit ':  '-Marker
     "gesamtwohnflaeche": "2.142,40 m²",
     "zimmer_anzahl_min": "1",
     "zimmer_anzahl_max": "2",
@@ -2159,12 +2159,16 @@ def generate_expose_with_claude(projektdaten, city_context=""):
         "    Foerderbausteine des Projekts (KfW-Stufe, QNG, Sonder-AfA, etc).\n"
         "  text_tech: max 110 Zeichen — 1-Zeiler USP TECH/SMART-HOME. Konkrete Tech aus dem\n"
         "    Datenraum: Smart-Lock, Glasfaser, PV, Waermepumpe, E-Ladesaeulen.\n"
-        "  besonderheiten_liste: ZIEL 220-340 Zeichen — 5-8 Bullet-Points, getrennt durch ' · '\n"
-        "    (Punkt mit Leerzeichen). JE Bullet 3-9 Worte. Konkrete Features aus dem Datenraum:\n"
+        "  besonderheiten_liste: 5-8 Stichpunkte, JEDER auf eigener Zeile, beginnend mit\n"
+        "    ': ' (Doppelpunkt + Leerzeichen) als Marker. Trenner zwischen Zeilen: ECHTER\n"
+        "    Zeilenumbruch (\\n). Beispiel-Format (Inhalt frei!):\n"
+        "      :  Dachterrasse mit Ausblick\\n:  E-Bike-Sharing fuer alle Bewohner\\n:  ...\n"
+        "    JE Punkt 3-10 Worte. Konkrete Features aus dem Datenraum:\n"
         "    Aussenanlagen (Balkon, Terrasse, Dachterrasse), Erschliessung (barrierearm,\n"
         "    Aufzug), Quartier-Features (Spielplatz, Gruenanlage), Technik (Glasfaser, PV,\n"
         "    Fernwaerme), Innenausstattung (Fliesen, Fussbodenheizung, Walk-in-Dusche).\n"
         "    Keine Beschreibungs-Saetze — nur kurze Stichpunkte.\n"
+        "    Gesamtlaenge inkl. ': ' Marker: 280-440 Zeichen.\n"
         "  gesamtwohnflaeche: berechne anzahl_we * Mittel(groesse_von, groesse_bis) und\n"
         "    formatiere mit Tausender-Punkt + Komma + ' m²', z.B. '3.741,58 m²'. Wenn die\n"
         "    Summe explizit im Datenraum steht (WFL-Berechnung), die echte Zahl nehmen.\n"
@@ -3448,6 +3452,9 @@ def fill_pptx(template_bytes, data, customer_images=None):
         runs[0] preserving its formatting, clear all other runs.
         If the placeholder contains a |Xpt font-size hint (e.g. {{MIN_UNI|50pt}}),
         apply that size to the replacement run — Canva PPTX exports lose font sizes.
+        If the replacement contains \\n, ECHTE PowerPoint-Paragraphen werden
+        nach diesem Paragraph eingefuegt (mit kopierter Formatierung — Bullet,
+        Font, Alignment werden vererbt).
         """
         if not para.runs:
             return
@@ -3467,13 +3474,44 @@ def fill_pptx(template_bytes, data, customer_images=None):
         # Use clean_text (soft-hyphens removed) for replacement
         modified = replace_text(clean_text)
         if modified != clean_text:
-            para.runs[0].text = modified
-            for run in para.runs[1:]:
-                run.text = ""
-            # Apply explicit font size if hint was present
-            if size_hint is not None:
-                from pptx.util import Pt
-                para.runs[0].font.size = Pt(size_hint)
+            # Multi-Line: erste Zeile in den aktuellen Paragraph, weitere
+            # als neue Paragraphen direkt danach (mit kopierter Formatierung).
+            if "\n" in modified:
+                lines = modified.split("\n")
+                para.runs[0].text = lines[0]
+                for run in para.runs[1:]:
+                    run.text = ""
+                if size_hint is not None:
+                    from pptx.util import Pt
+                    para.runs[0].font.size = Pt(size_hint)
+                # Weitere Zeilen als neue <a:p>-Elemente nach diesem einfuegen
+                from copy import deepcopy
+                from pptx.oxml.ns import qn
+                para_xml = para._p
+                parent = para_xml.getparent()
+                if parent is not None:
+                    insert_after = para_xml
+                    for line in lines[1:]:
+                        new_p = deepcopy(para_xml)
+                        runs = new_p.findall(qn('a:r'))
+                        if runs:
+                            first_t = runs[0].find(qn('a:t'))
+                            if first_t is not None:
+                                first_t.text = line
+                            for r_extra in runs[1:]:
+                                t = r_extra.find(qn('a:t'))
+                                if t is not None:
+                                    t.text = ""
+                        insert_after.addnext(new_p)
+                        insert_after = new_p
+            else:
+                para.runs[0].text = modified
+                for run in para.runs[1:]:
+                    run.text = ""
+                # Apply explicit font size if hint was present
+                if size_hint is not None:
+                    from pptx.util import Pt
+                    para.runs[0].font.size = Pt(size_hint)
 
     def replace_in_textframe(tf):
         """Replace placeholders across entire text frame, including cross-paragraph splits.
