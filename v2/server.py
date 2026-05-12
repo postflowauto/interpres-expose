@@ -746,15 +746,18 @@ def _v2_render_worker(job_id: str, typ: str = "marketing"):
                 pdf_bytes = appmod.convert_to_pdf(pptx_bytes, f"{projekt_safe}.pptx")
                 # Quellen-URLs als clickable Hyperlinks anreichern
                 pdf_bytes = appmod._add_hyperlinks_to_pdf(pdf_bytes)
-                # Rechtlich: Teilungserklaerung-PDF zwischen Vertrag und
-                # Verwaltungs-Mustern einfuegen (Index _RECHTLICH_SPLIT_AFTER).
+                # Rechtlich: Teilungserklaerung-PDF (oder Platzhalter-Hinweis)
+                # zwischen Vertrag und Verwaltungs-Mustern einfuegen.
                 if typ == "rechtlich":
                     teil_path = os.path.join(JOB_DIR, f"work_{job_id}", "teilungserklaerung.pdf")
+                    teil_bytes = None
                     if os.path.exists(teil_path):
                         with open(teil_path, "rb") as fh:
                             teil_bytes = fh.read()
-                        pdf_bytes = appmod._merge_rechtlich_pdf(pdf_bytes, teil_bytes)
-                        print(f"[v2] Teilungserklaerung gemerged ({len(teil_bytes)//1024} KB)")
+                        print(f"[v2] Teilungserklaerung wird gemerged ({len(teil_bytes)//1024} KB)")
+                    else:
+                        print(f"[v2] Keine Teilungserklaerung — Platzhalter-Folie wird eingefuegt")
+                    pdf_bytes = appmod._merge_rechtlich_pdf(pdf_bytes, teil_bytes)
             except Exception as e:
                 import traceback as _tb
                 pdf_error = str(e)

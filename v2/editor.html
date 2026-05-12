@@ -30,6 +30,13 @@
   <button class="btn primary" id="btn-download">PDF herunterladen</button>
 </div>
 
+<div id="teil-missing-warn" style="display:none; padding:10px 16px; background:#3b1f1f;
+     border-bottom:1px solid #6b2b2b; color:#f3c0c0; font-size:13px; align-items:center; gap:10px;">
+  <span style="font-size:16px;">⚠</span>
+  <span><strong>Teilungserklärung fehlt.</strong> Das Exposé wird mit einer Platzhalter-Folie generiert.
+  Für die finale Version vom Notar bitte das PDF oben rechts hochladen.</span>
+</div>
+
 <div class="layout">
   <aside class="sidebar">
     <div class="side-h" id="sidebar-h">Folien</div>
@@ -132,15 +139,18 @@ async function refreshTeilStatus() {
     const r = await fetch(`${V2_API}/teilungserklaerung`, { headers: authHeaders() });
     if (!r.ok) return;
     const j = await r.json();
-    const lbl = document.getElementById('teil-btn-label');
-    const rm  = document.getElementById('teil-remove-btn');
+    const lbl   = document.getElementById('teil-btn-label');
+    const rm    = document.getElementById('teil-remove-btn');
+    const warn  = document.getElementById('teil-missing-warn');
     if (j.uploaded) {
       const kb = Math.round((j.size || 0) / 1024);
-      lbl.textContent = `Teilungserklärung ✓ (${kb} KB)`;
+      lbl.textContent  = `Teilungserklärung ✓ (${kb} KB)`;
       rm.style.display = 'inline-flex';
+      if (warn) warn.style.display = 'none';
     } else {
-      lbl.textContent = 'Teilungserklärung hochladen (PDF)';
+      lbl.textContent  = 'Teilungserklärung hochladen (PDF)';
       rm.style.display = 'none';
+      if (warn) warn.style.display = 'flex';
     }
   } catch (e) { /* ignore */ }
 }

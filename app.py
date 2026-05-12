@@ -5674,26 +5674,65 @@ def _load_rechtlich_template_bytes():
     return requests.get(RECHTLICH_TEMPLATE_URL, timeout=60).content
 
 
+def _make_teilung_placeholder_pdf():
+    """Generiert eine 1-seitige A4-Hinweis-PDF anstelle der noch nicht
+    hochgeladenen Teilungserklaerung. Kennzeichnet dem Leser eindeutig,
+    dass die Teilung als separate Notar-Urkunde nachgereicht wird."""
+    import fitz  # pymupdf — schon in requirements
+    doc  = fitz.open()
+    page = doc.new_page(width=595, height=842)  # A4 in Points
+    # Hellgrauer Hintergrund-Block zur Hervorhebung
+    page.draw_rect(fitz.Rect(60, 240, 535, 560),
+                   color=(0.7, 0.7, 0.7), fill=(0.96, 0.96, 0.96), width=1)
+    page.insert_textbox(
+        fitz.Rect(60, 270, 535, 340),
+        "Teilungserklärung",
+        fontsize=24, fontname="helv", align=fitz.TEXT_ALIGN_CENTER,
+    )
+    page.insert_textbox(
+        fitz.Rect(80, 360, 515, 540),
+        "Die Teilungserklärung ist Bestandteil dieses Prospekts. "
+        "Sie wird durch den beurkundenden Notar als separate Urkunde "
+        "ausgefertigt und dem Käufer im Rahmen der Beurkundung ausgehändigt.\n\n"
+        "Bitte beachten Sie die beigefügte Notar-Urkunde.",
+        fontsize=12, fontname="helv", align=fitz.TEXT_ALIGN_CENTER,
+    )
+    out = doc.tobytes()
+    doc.close()
+    return out
+
+
 def _merge_rechtlich_pdf(dynamic_pdf_bytes, teil_pdf_bytes):
-    """Fuegt Teilungserklaerung-PDF zwischen Seite 102 (Vertrag) und Seite 103
-    (Verwaltungs-Muster) des dynamisch erzeugten Rechtlich-PDFs ein."""
-    import io as _io
-    from pypdf import PdfReader, PdfWriter
-    dyn = PdfReader(_io.BytesIO(dynamic_pdf_bytes))
-    n   = len(dyn.pages)
-    w   = PdfWriter()
+    """Fuegt Teilungserklaerung-PDF (oder Platzhalter-Hinweis wenn None oder
+    korrupt) zwischen Vertrag (Folie 102) und Verwaltungs-Mustern (Folie 103+)
+    ein. Nutzt pymupdf — keine zusaetzliche pypdf-Dependency noetig."""
+    import fitz
+    dyn = fitz.open(stream=dynamic_pdf_bytes, filetype="pdf")
+    n   = dyn.page_count
     cut = min(_RECHTLICH_SPLIT_AFTER, n)
-    for i in range(cut):
-        w.add_page(dyn.pages[i])
+
+    # Teilungserklaerung oeffnen — bei Fehler (korruptes Upload-PDF) Fallback
+    # auf Platzhalter-Hinweis, damit der Render nicht crasht.
+    teil = None
     if teil_pdf_bytes:
-        teil = PdfReader(_io.BytesIO(teil_pdf_bytes))
-        for p in teil.pages:
-            w.add_page(p)
-    for i in range(cut, n):
-        w.add_page(dyn.pages[i])
-    buf = _io.BytesIO()
-    w.write(buf)
-    return buf.getvalue()
+        try:
+            teil = fitz.open(stream=teil_pdf_bytes, filetype="pdf")
+        except Exception as e:
+            print(f"  ⚠️ Teilungserklaerung-PDF nicht lesbar ({e}) — nutze Platzhalter")
+            teil = None
+    if teil is None:
+        teil = fitz.open(stream=_make_teilung_placeholder_pdf(), filetype="pdf")
+
+    out = fitz.open()
+    if cut > 0:
+        out.insert_pdf(dyn, from_page=0, to_page=cut - 1)
+    out.insert_pdf(teil)
+    if cut < n:
+        out.insert_pdf(dyn, from_page=cut, to_page=n - 1)
+
+    result = out.tobytes()
+    dyn.close(); teil.close(); out.close()
+    return result
 
 
 @app.route("/job/<job_id>/teilungserklaerung", methods=["GET", "POST", "DELETE", "OPTIONS"])
@@ -5763,12 +5802,16 @@ def _run_render_rechtlich(job_id):
         pdf_bytes  = convert_to_pdf(filled, f"{projekt_name}_Rechtlich.pptx")
 
         teil_path  = os.path.join(_job_dir(job_id), "teilungserklaerung.pdf")
+        teil_bytes = None
         if os.path.exists(teil_path):
             _write_job(job_id, rechtlich_phase="Teilungserklaerung wird angehaengt …")
             with open(teil_path, "rb") as fh:
                 teil_bytes = fh.read()
-            pdf_bytes = _merge_rechtlich_pdf(pdf_bytes, teil_bytes)
-            print(f"[{job_id}] Teilungserklaerung gemerged ({len(teil_bytes)//1024} KB)")
+            print(f"[{job_id}] Teilungserklaerung wird gemerged ({len(teil_bytes)//1024} KB)")
+        else:
+            _write_job(job_id, rechtlich_phase="Hinweis-Folie wird eingefuegt (Teilungserklaerung fehlt) …")
+            print(f"[{job_id}] Keine Teilungserklaerung — Platzhalter-Folie wird eingefuegt")
+        pdf_bytes = _merge_rechtlich_pdf(pdf_bytes, teil_bytes)
 
         out_path = os.path.join(_job_dir(job_id), "rechtlich.pdf")
         with open(out_path, "wb") as fh:
