@@ -57,7 +57,7 @@ CLOUDCONVERT_KEY = os.environ.get("CLOUDCONVERT_KEY", "")
 UNSPLASH_ACCESS_KEY = os.environ.get("UNSPLASH_ACCESS_KEY", "")
 TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY", "")
 TEST_MODE = os.environ.get("TEST_MODE", "false").lower() == "true"
-TEMPLATE_URL = "https://raw.githubusercontent.com/postflowauto/interpres-expose/main/urbanunits_Marketing_Expose_v3.pdf-23.pptx"
+TEMPLATE_URL = "https://raw.githubusercontent.com/postflowauto/interpres-expose/main/urbanunits_Marketing_Expose_v3.pdf-24.pptx"
 
 # Zusatz-Templates (Kurz-Exposé + Rechtliches). Werden nur im Multi-Template-
 # Workflow geladen. Wenn URL leer/404 → der jeweilige Tab im Editor zeigt
