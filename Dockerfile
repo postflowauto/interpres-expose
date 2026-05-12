@@ -2,9 +2,12 @@ FROM python:3.11-slim
 
 # System-Abhängigkeiten:
 # - poppler-utils (pdftoppm): PDF → JPG für Slide-Vorschau
+# - libreoffice-impress: PPTX → PDF Konvertierung (Fallback wenn CloudConvert
+#   nicht verfügbar / Credit leer). Pulls libreoffice-core mit ein (~400 MB).
 # - Schriftarten: für deutsche Sonderzeichen + Canva-Fallback
 RUN apt-get update && apt-get install -y --no-install-recommends \
     poppler-utils \
+    libreoffice-impress \
     fonts-liberation \
     fonts-dejavu-core \
     && apt-get clean \
