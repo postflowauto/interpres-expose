@@ -228,20 +228,24 @@ DUMMY_EXPOSE_DATA = {
     "projekt_untertitel": "Designed to stay – urbanes Mikro-Living mit Konzept.",  # ~52 / 60
     "projekt_beschreibung": "In Hannover-Linden entsteht mit dem Stadtquartier Linden ein zukunftsweisendes Wohnprojekt mit 48 vollmöblierten 1- bis 2-Zimmer-Apartments. Geplant nach KfW-55-EE-Standard mit Photovoltaik und Fernwärme, ausgestattet mit Designermöbeln, Smart-Lock und Echtholzparkett. Das lebendige Gründerzeitviertel verbindet kurze Wege zur Leibniz Universität, zur Altstadt und zum Hauptbahnhof mit grünen Rückzugsorten und Quartiers-Flair. Ob als Eigennutzung oder Kapitalanlage – das Projekt überzeugt durch Lage, Effizienz und flexible Wohnungsgrößen.",  # ~540 / 560
     "projekt_beschreibung_kurz": "In Hannover-Linden entsteht mit dem Stadtquartier Linden ein zukunftsweisendes Wohnprojekt mit 48 vollmöblierten 1- bis 2-Zimmer-Apartments. Geplant nach KfW-55-EE-Standard mit Photovoltaik und Fernwärme, ausgestattet mit Designermöbeln, Smart-Lock und Echtholzparkett. Das lebendige Gründerzeitviertel verbindet kurze Wege zur Leibniz Universität, zur Altstadt und zum Hauptbahnhof mit grünen Rückzugsorten und Quartiers-Flair. Ob als Eigennutzung oder Kapitalanlage – das Projekt überzeugt durch Lage, Effizienz und flexible Wohnungsgrößen.",
-    "text_relevanz":   "48.000 Studierende und steigende Single-Haushalte sorgen in Hannover für hohe Nachfrage nach Mikro-Wohnen.",  # ~105 / 110
-    "text_design":     "Designermöbel, Echtholzparkett, ausgestattete Küche und bodengleiche Walk-In-Dusche – bezugsfertig.",  # ~100 / 110
-    "text_foerderung": "KfW-55-EE-Darlehen, Sonder-AfA §7b EStG, degressive AfA §7 Abs.5a, Möbel-AfA – dreifacher Steuervorteil.",  # ~104 / 110
-    "text_tech":       "Smart-Lock, Glasfaser, Photovoltaik aufs Dach, E-Mobility-Anbindung – moderne Infrastruktur inklusive.",  # ~102 / 110
+    "text_relevanz":   "48.000 Studierende sorgen in Hannover für hohe Mikro-Wohnen-Nachfrage.",  # ~75 / 75 (2 Zeilen)
+    "text_design":     "Designermöbel, Echtholzparkett und Walk-In-Dusche – bezugsfertig.",  # ~68 / 75
+    "text_foerderung": "KfW-55-EE, Sonder-AfA §7b und degressive AfA – dreifacher Steuervorteil.",  # ~74 / 75
+    "text_tech":       "Smart-Lock, Glasfaser, Photovoltaik und E-Mobility – moderne Infrastruktur.",  # ~75 / 75
+    # Cover-Stichworte (Slide 1 Marketing): 4 kurze Stichworte, je max ~22 Zeichen.
+    # User platziert die 4 Platzhalter selbst im Template (DQN-Stil: fette Caps).
+    "cover_stichwort_1": "VOLLMÖBLIERT",
+    "cover_stichwort_2": "FÖRDERFÄHIG",
+    "cover_stichwort_3": "KFW-40 QNG PLUS",
+    "cover_stichwort_4": "SMART HOME READY",
     "besonderheiten_liste": (
         ":  alle Apartments mit Balkon oder Dachterrasse\n"
         ":  barrierearm, Aufzug in alle Etagen\n"
         ":  E-Bike-Sharing für alle Bewohner\n"
-        ":  weitläufige Gemeinschaftsterrasse\n"
         ":  Glasfaseranschluss und Smart-Lock-System\n"
-        ":  nachhaltige Fernwärme für Heizung und Warmwasser\n"
-        ":  hochwertige Bodenbeläge in Eichenoptik, Fußbodenheizung, "
-        "LED-Deckenspots, bodengleiche Walk-In-Duschen, Designermöbel-Ausstattung"
-    ),  # 7 Punkte — Spacing wird per <a:spcBef> in fill_pptx gesetzt
+        ":  nachhaltige Fernwärme für Heizung\n"
+        ":  Eichenparkett, Fußbodenheizung, Designermöbel"
+    ),  # 6 Punkte — Spacing wird per <a:spcBef>=1200 (12pt) in fill_pptx gesetzt
     "gesamtwohnflaeche": "2.142,40 m²",
     "zimmer_anzahl_min": "1",
     "zimmer_anzahl_max": "2",
@@ -371,11 +375,16 @@ PLATZHALTER = {
     "projekt_untertitel": "",       # Tagline z.B. 'Urbaner Wohnkomfort in nachhaltigem Umfeld'
     "projekt_beschreibung": "",     # Cover-Untertitel-Block (links unten Kurz-S1)
     "projekt_beschreibung_kurz": "",  # grosser Pitch-Text auf Kurz-S2
-    "text_relevanz":   "",  # 1 Zeile USP — Marktrelevanz
-    "text_design":     "",  # 1 Zeile USP — Design/Wohnen
-    "text_foerderung": "",  # 1 Zeile USP — Foerderung/Steuer
-    "text_tech":       "",  # 1 Zeile USP — Technik/Smart-Home
-    "besonderheiten_liste": "",  # mehrzeilige Aufzaehlung (analog DQN-Bullet-Liste)
+    "text_relevanz":   "",  # max 75 Zeichen — 2-Zeiler USP Marktrelevanz
+    "text_design":     "",  # max 75 Zeichen — 2-Zeiler USP Design/Wohnen
+    "text_foerderung": "",  # max 75 Zeichen — 2-Zeiler USP Foerderung/Steuer
+    "text_tech":       "",  # max 75 Zeichen — 2-Zeiler USP Technik/Smart-Home
+    "besonderheiten_liste": "",  # max 6 Bullets im DQN-Stil
+    # Cover-Stichworte (Slide 1 Marketing) — User platziert 4 Platzhalter im Template
+    "cover_stichwort_1": "",
+    "cover_stichwort_2": "",
+    "cover_stichwort_3": "",
+    "cover_stichwort_4": "",
     # "Auf einen Blick" — rechte Spalte Kurz-S2
     "gesamtwohnflaeche": "",  # z.B. '3.741,58 m²' — Summe aller WE
     "zimmer_anzahl_min": "",  # '1' (kleinster Wohnungstyp)
@@ -2158,47 +2167,47 @@ def generate_expose_with_claude(projektdaten, city_context=""):
         "    setzt [projekt_titel] ...', '[projekt_titel] bringt ... nach {stadt}.'.\n"
         "  projekt_beschreibung_kurz: gleicher Inhalt wie projekt_beschreibung — Backwards-\n"
         "    Compat-Alias. Nimm einfach denselben Text.\n"
-        "  text_relevanz: max 110 Zeichen — 1-Zeiler USP MARKTRELEVANZ. Konkreter Markt-Bezug,\n"
-        "    keine Buzzwords. Statt 'im Trend von Mikroapartments': nimm Markt-Treiber wie\n"
-        "    Studierende, Pendler, Single-Haushalte, Mietnachfrage in {stadt}.\n"
-        "  text_design: max 110 Zeichen — 1-Zeiler USP DESIGN/WOHNEN. Nimm konkrete Materialien\n"
-        "    aus dem Datenraum (Eiche, Fliesen, Walk-in-Dusche, Kueche-Marke). Nicht 'Westwing-\n"
-        "    Stil' kopieren — schreib 'Designermoebel, Eichenparkett, vollausgestattet' o.ae.\n"
-        "  text_foerderung: max 110 Zeichen — 1-Zeiler USP FOERDERUNG/STEUER. Liste die echten\n"
-        "    Foerderbausteine des Projekts (KfW-Stufe, QNG, Sonder-AfA, etc).\n"
-        "  text_tech: max 110 Zeichen — 1-Zeiler USP TECH/SMART-HOME. Konkrete Tech aus dem\n"
-        "    Datenraum: Smart-Lock, Glasfaser, PV, Waermepumpe, E-Ladesaeulen.\n"
-        "  besonderheiten_liste: 6-8 Stichpunkte im DQN-Stil. JEDER Punkt auf eigener\n"
+        "  text_relevanz: ZIEL 60-75 Zeichen, ABSOLUTE OBERGRENZE 75 — passt damit sauber auf\n"
+        "    EXAKT 2 Zeilen in der Icon-Spalte. Konkreter Markt-Bezug, keine Buzzwords.\n"
+        "    Statt 'im Trend von Mikroapartments': nimm Markt-Treiber wie Studierende,\n"
+        "    Pendler, Single-Haushalte, Mietnachfrage in {stadt}.\n"
+        "  text_design: ZIEL 60-75 Zeichen, max 75 — 2-Zeiler USP DESIGN/WOHNEN. Nimm konkrete\n"
+        "    Materialien aus dem Datenraum (Eiche, Fliesen, Walk-in-Dusche, Kueche-Marke).\n"
+        "  text_foerderung: ZIEL 60-75 Zeichen, max 75 — 2-Zeiler USP FOERDERUNG/STEUER. Liste\n"
+        "    die echten Foerderbausteine (KfW-Stufe, QNG, Sonder-AfA, etc).\n"
+        "  text_tech: ZIEL 60-75 Zeichen, max 75 — 2-Zeiler USP TECH/SMART-HOME. Konkrete Tech:\n"
+        "    Smart-Lock, Glasfaser, PV, Waermepumpe, E-Ladesaeulen.\n"
+        "  cover_stichwort_1..4: 4 kurze Stichworte fuer die Cover-Box (Slide 1 Marketing),\n"
+        "    je max 22 Zeichen, GROSSBUCHSTABEN. DQN-Stil: 1-3 Worte pro Stichwort.\n"
+        "    Reihenfolge: 1) Wohnform/Ausstattung (z.B. 'VOLLMOEBLIERT', 'KOMPAKT-WOHNEN'),\n"
+        "    2) Foerder-/Steuer-Status (z.B. 'FOERDERFAEHIG', 'SONDER-AFA'),\n"
+        "    3) Energie-/KfW-Stufe (z.B. 'KFW-40 QNG PLUS', 'KFW-55 EE'),\n"
+        "    4) Tech-Highlight (z.B. 'SMART HOME READY', 'GLASFASER & PV').\n"
+        "    KEIN Lauftext, KEINE Saetze — pure Schlagworte.\n"
+        "  besonderheiten_liste: GENAU 6 Stichpunkte im DQN-Stil (NICHT mehr als 6 — sonst\n"
+        "    laeuft die Box ueber). JEDER Punkt auf eigener\n"
         "    Zeile, beginnend mit ':  ' (Doppelpunkt + 2 Leerzeichen) als Marker.\n"
         "    Trenner zwischen Zeilen: EINFACHER Zeilenumbruch (\\n). Spacing wird\n"
         "    automatisch zwischen den Zeilen gesetzt — KEINE doppelten Newlines.\n"
         "    \n"
-        "    ⚠️ DQN-STRUKTUR (Reihenfolge + Mischung an Laengen einhalten!):\n"
-        "      Punkt 1: Aussenbereich (Balkon, Terrasse, Dachterrasse) — kurzer Satz\n"
-        "      Punkt 2: Erschliessung (barrierearm, Aufzug) — 4-6 Worte\n"
-        "      Punkt 3: Quartier-Feature 1 (z.B. Spielplatz, Gemeinschaftsbereich)\n"
-        "        — 2-4 Worte\n"
-        "      Punkt 4: Quartier-Feature 2 (z.B. Gruenanlage, Gartenanteil) — 2-4 Worte\n"
-        "      Punkt 5: Anschluss/Tech (z.B. Glasfaser, Smart-Lock) — 2-5 Worte\n"
-        "      Punkt 6: Energie (z.B. Fernwaerme, Photovoltaik) — 4-8 Worte\n"
-        "      Punkt 7 (LANG, Innenausstattung-Sammler): mehrere Komma-getrennte\n"
-        "        Items in einem Punkt — Fliesen, Fussbodenheizung, Bodenbelaege,\n"
-        "        LED-Beleuchtung, Walk-In-Duschen, Sanitaer-Marke etc.\n"
-        "        Dieser Punkt darf 15-30 Worte haben.\n"
+        "    ⚠️ DQN-STRUKTUR (GENAU 6 Punkte, je kurz, max ~50 Zeichen pro Punkt):\n"
+        "      Punkt 1: Aussenbereich (Balkon, Terrasse, Dachterrasse)\n"
+        "      Punkt 2: Erschliessung (barrierearm, Aufzug)\n"
+        "      Punkt 3: Quartier-Feature (Spielplatz, Gemeinschaftsbereich, Gruenanlage)\n"
+        "      Punkt 4: Anschluss/Tech (Glasfaser, Smart-Lock)\n"
+        "      Punkt 5: Energie (Fernwaerme, Photovoltaik, Waermepumpe)\n"
+        "      Punkt 6: Innenausstattung (Eichenparkett, Fussbodenheizung, Designermoebel)\n"
         "    \n"
         "    Beispiel-Format (Format zeigen, Inhalt aus Projekt-Daten!):\n"
         "      ':  alle Wohnungen mit Balkon oder Dachterrasse\\n"
         ":  barrierearm, Aufzug in alle Etagen\\n"
         ":  quartierseigener Spielplatz\\n"
-        ":  weitlaeufige Gruenanlage\\n"
-        ":  Glasfaseranschluss\\n"
-        ":  nachhaltige Fernwaerme fuer Heizung und Warmwasser\\n"
-        ":  grossformatige Fliesen, Fussbodenheizung, Bodenbelaege in Eichenoptik, "
-        "LED-Deckenspots, bodengleiche Walk-In-Duschen, Sanitaerausstattung "
-        "namhafter Hersteller'\n"
+        ":  Glasfaseranschluss und Smart-Lock\\n"
+        ":  nachhaltige Fernwaerme fuer Heizung\\n"
+        ":  Eichenparkett, Fussbodenheizung, Designermoebel'\n"
         "    \n"
         "    Konkrete Features aus dem Datenraum nehmen — KEINE Buzzwords ohne Inhalt.\n"
-        "    Gesamtlaenge inkl. Marker + Newlines: 380-550 Zeichen.\n"
+        "    Gesamtlaenge inkl. Marker + Newlines: 250-380 Zeichen.\n"
         "  gesamtwohnflaeche: berechne anzahl_we * Mittel(groesse_von, groesse_bis) und\n"
         "    formatiere mit Tausender-Punkt + Komma + ' m²', z.B. '3.741,58 m²'. Wenn die\n"
         "    Summe explizit im Datenraum steht (WFL-Berechnung), die echte Zahl nehmen.\n"
@@ -3515,9 +3524,9 @@ def fill_pptx(template_bytes, data, customer_images=None):
                     from pptx.util import Pt
                     para.runs[0].font.size = Pt(size_hint)
                 # Weitere Zeilen als neue <a:p>-Elemente nach diesem einfuegen.
-                # Jeder neue Paragraph bekommt zusaetzlich <a:spcBef> = 600 (6pt),
-                # damit zwischen den Bullet-Points visuell Spacing entsteht ohne
-                # leere Paragraphen einzufuegen.
+                # Jeder neue Paragraph bekommt zusaetzlich <a:spcBef> = 1200 (12pt),
+                # damit zwischen den Bullet-Points luftiges Spacing entsteht (DQN-Look)
+                # ohne leere Paragraphen einzufuegen.
                 from copy import deepcopy
                 from pptx.oxml.ns import qn
                 from lxml import etree as _etree
@@ -3536,7 +3545,7 @@ def fill_pptx(template_bytes, data, customer_images=None):
                                 t = r_extra.find(qn('a:t'))
                                 if t is not None:
                                     t.text = ""
-                        # Space-Before setzen: 6pt = 600 (val ist 100stel pt)
+                        # Space-Before setzen: 12pt = 1200 (val ist 100stel pt)
                         pPr = new_p.find(qn('a:pPr'))
                         if pPr is None:
                             pPr = _etree.SubElement(new_p, qn('a:pPr'))
@@ -3546,7 +3555,7 @@ def fill_pptx(template_bytes, data, customer_images=None):
                             pPr.remove(old)
                         spc_before = _etree.SubElement(pPr, qn('a:spcBef'))
                         spc_pts = _etree.SubElement(spc_before, qn('a:spcPts'))
-                        spc_pts.set('val', '600')
+                        spc_pts.set('val', '1200')
                         # spcBef muss als erstes Kind von pPr stehen
                         pPr.insert(0, spc_before)
                         insert_after.addnext(new_p)
@@ -4916,6 +4925,14 @@ def _run_expose_job(job_id, zip_paths):
             print(f"[{job_id}]   Claude-Ausgabe: {len(raw_expose)} Felder")
             expose_data = {**PLATZHALTER, **raw_expose}
             expose_data["logo_initial"] = generate_logo_initial(expose_data.get("projekt_name", ""))
+
+            # Hard-Cap besonderheiten_liste auf 6 Bullets (Box-Hoehe ist fest).
+            _bl = expose_data.get("besonderheiten_liste", "") or ""
+            if _bl:
+                _lines = [ln for ln in _bl.split("\n") if ln.strip()]
+                if len(_lines) > 6:
+                    print(f"[{job_id}]   besonderheiten_liste: {len(_lines)} Bullets → auf 6 gekappt")
+                    expose_data["besonderheiten_liste"] = "\n".join(_lines[:6])
 
             # Direktes Flow von projektdaten-Fakten in expose_data (Daten aus PDF-Analyse
             # haben Vorrang vor evtl. leeren Generator-Outputs für diese Felder)
