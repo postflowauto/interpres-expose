@@ -233,15 +233,15 @@ DUMMY_EXPOSE_DATA = {
     "text_foerderung": "KfW-55-EE-Darlehen, Sonder-AfA §7b EStG, degressive AfA §7 Abs.5a, Möbel-AfA – dreifacher Steuervorteil.",  # ~104 / 110
     "text_tech":       "Smart-Lock, Glasfaser, Photovoltaik aufs Dach, E-Mobility-Anbindung – moderne Infrastruktur inklusive.",  # ~102 / 110
     "besonderheiten_liste": (
-        ":  alle Apartments mit Balkon oder Dachterrasse\n\n"
-        ":  barrierearm, Aufzug in alle Etagen\n\n"
-        ":  E-Bike-Sharing für alle Bewohner\n\n"
-        ":  weitläufige Gemeinschaftsterrasse\n\n"
-        ":  Glasfaseranschluss und Smart-Lock-System\n\n"
-        ":  nachhaltige Fernwärme für Heizung und Warmwasser\n\n"
+        ":  alle Apartments mit Balkon oder Dachterrasse\n"
+        ":  barrierearm, Aufzug in alle Etagen\n"
+        ":  E-Bike-Sharing für alle Bewohner\n"
+        ":  weitläufige Gemeinschaftsterrasse\n"
+        ":  Glasfaseranschluss und Smart-Lock-System\n"
+        ":  nachhaltige Fernwärme für Heizung und Warmwasser\n"
         ":  hochwertige Bodenbeläge in Eichenoptik, Fußbodenheizung, "
         "LED-Deckenspots, bodengleiche Walk-In-Duschen, Designermöbel-Ausstattung"
-    ),  # 7 Punkte im DQN-Stil — kurze + langer Sammler am Ende, mit \n\n Spacing
+    ),  # 7 Punkte — Spacing wird per <a:spcBef> in fill_pptx gesetzt
     "gesamtwohnflaeche": "2.142,40 m²",
     "zimmer_anzahl_min": "1",
     "zimmer_anzahl_max": "2",
@@ -2170,7 +2170,8 @@ def generate_expose_with_claude(projektdaten, city_context=""):
         "    Datenraum: Smart-Lock, Glasfaser, PV, Waermepumpe, E-Ladesaeulen.\n"
         "  besonderheiten_liste: 6-8 Stichpunkte im DQN-Stil. JEDER Punkt auf eigener\n"
         "    Zeile, beginnend mit ':  ' (Doppelpunkt + 2 Leerzeichen) als Marker.\n"
-        "    Trenner zwischen Zeilen: DOPPELTER Zeilenumbruch (\\n\\n) — gibt Spacing.\n"
+        "    Trenner zwischen Zeilen: EINFACHER Zeilenumbruch (\\n). Spacing wird\n"
+        "    automatisch zwischen den Zeilen gesetzt — KEINE doppelten Newlines.\n"
         "    \n"
         "    ⚠️ DQN-STRUKTUR (Reihenfolge + Mischung an Laengen einhalten!):\n"
         "      Punkt 1: Aussenbereich (Balkon, Terrasse, Dachterrasse) — kurzer Satz\n"
@@ -2186,12 +2187,12 @@ def generate_expose_with_claude(projektdaten, city_context=""):
         "        Dieser Punkt darf 15-30 Worte haben.\n"
         "    \n"
         "    Beispiel-Format (Format zeigen, Inhalt aus Projekt-Daten!):\n"
-        "      ':  alle Wohnungen mit Balkon oder Dachterrasse\\n\\n"
-        ":  barrierearm, Aufzug in alle Etagen\\n\\n"
-        ":  quartierseigener Spielplatz\\n\\n"
-        ":  weitlaeufige Gruenanlage\\n\\n"
-        ":  Glasfaseranschluss\\n\\n"
-        ":  nachhaltige Fernwaerme fuer Heizung und Warmwasser\\n\\n"
+        "      ':  alle Wohnungen mit Balkon oder Dachterrasse\\n"
+        ":  barrierearm, Aufzug in alle Etagen\\n"
+        ":  quartierseigener Spielplatz\\n"
+        ":  weitlaeufige Gruenanlage\\n"
+        ":  Glasfaseranschluss\\n"
+        ":  nachhaltige Fernwaerme fuer Heizung und Warmwasser\\n"
         ":  grossformatige Fliesen, Fussbodenheizung, Bodenbelaege in Eichenoptik, "
         "LED-Deckenspots, bodengleiche Walk-In-Duschen, Sanitaerausstattung "
         "namhafter Hersteller'\n"
@@ -3513,9 +3514,13 @@ def fill_pptx(template_bytes, data, customer_images=None):
                 if size_hint is not None:
                     from pptx.util import Pt
                     para.runs[0].font.size = Pt(size_hint)
-                # Weitere Zeilen als neue <a:p>-Elemente nach diesem einfuegen
+                # Weitere Zeilen als neue <a:p>-Elemente nach diesem einfuegen.
+                # Jeder neue Paragraph bekommt zusaetzlich <a:spcBef> = 600 (6pt),
+                # damit zwischen den Bullet-Points visuell Spacing entsteht ohne
+                # leere Paragraphen einzufuegen.
                 from copy import deepcopy
                 from pptx.oxml.ns import qn
+                from lxml import etree as _etree
                 para_xml = para._p
                 parent = para_xml.getparent()
                 if parent is not None:
@@ -3531,6 +3536,19 @@ def fill_pptx(template_bytes, data, customer_images=None):
                                 t = r_extra.find(qn('a:t'))
                                 if t is not None:
                                     t.text = ""
+                        # Space-Before setzen: 6pt = 600 (val ist 100stel pt)
+                        pPr = new_p.find(qn('a:pPr'))
+                        if pPr is None:
+                            pPr = _etree.SubElement(new_p, qn('a:pPr'))
+                            new_p.insert(0, pPr)
+                        # Existierendes spcBef entfernen
+                        for old in pPr.findall(qn('a:spcBef')):
+                            pPr.remove(old)
+                        spc_before = _etree.SubElement(pPr, qn('a:spcBef'))
+                        spc_pts = _etree.SubElement(spc_before, qn('a:spcPts'))
+                        spc_pts.set('val', '600')
+                        # spcBef muss als erstes Kind von pPr stehen
+                        pPr.insert(0, spc_before)
                         insert_after.addnext(new_p)
                         insert_after = new_p
             else:
@@ -4098,6 +4116,9 @@ def _normalize_number_columns(prs):
             key = m.group(1).lower()
             shapes_by_key[key] = shape
 
+        # Font-Size-Hint Pattern: {{KEY|50pt}}
+        SIZE_HINT = _re.compile(r'\|\s*(\d+)\s*pt\b', _re.IGNORECASE)
+
         for group in _NUMBER_COLUMN_GROUPS:
             present = [shapes_by_key[k] for k in group if k in shapes_by_key]
             if len(present) < 2:
@@ -4107,11 +4128,31 @@ def _normalize_number_columns(prs):
             hs = sorted(s.height for s in present)
             median_x = xs[len(xs) // 2]
             median_w = ws[len(ws) // 2]
-            target_h = max(hs)  # nicht clippen: nimm die groesste Hoehe
+            target_h = max(hs)
+
+            # Mindesthoehe basierend auf Font-Size-Hint sicherstellen.
+            # Canva-Export hat die Textbox-Hoehe oft nur ~95885 EMU (0.1cm)
+            # gesetzt — viel zu klein fuer 33-50pt Schrift. Daraus folgt:
+            # Text wird oben/unten geclippt, scheint nicht zentriert.
+            # 1 pt = 12700 EMU; wir geben 1.8x Schrifthoehe als Mindestbox.
+            for s in present:
+                m = SIZE_HINT.search(s.text_frame.text)
+                if m:
+                    font_pt = int(m.group(1))
+                    min_h = int(font_pt * 12700 * 1.8)
+                    if min_h > target_h:
+                        target_h = min_h
+
+            from pptx.enum.text import MSO_ANCHOR
             for s in present:
                 s.left = median_x
                 s.width = median_w
                 s.height = target_h
+                # Vertikal mittig in der Box (sonst sitzt der Text oben)
+                try:
+                    s.text_frame.vertical_anchor = MSO_ANCHOR.MIDDLE
+                except Exception:
+                    pass
             print(f"  ↔ Zahlen-Spalte normalisiert: {[k for k in group if k in shapes_by_key]} "
                   f"(x={median_x}, w={median_w}, h={target_h})")
 
