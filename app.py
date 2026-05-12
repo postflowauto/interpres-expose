@@ -104,6 +104,29 @@ DUMMY_EXPOSE_DATA = {
     "besonderheiten": "Möbliert, Smart-Lock, Dachterrasse, E-Bike-Sharing",
     "steuerliche_moeglichkeiten": "Dreifach AfA - 5% degressiv §7 Abs.5a EStG + 5% Sonder-AfA §7b EStG + 10% Möbel-AfA",
     "prospekt_datum": "April 2026",
+    # Rechtlicher Teil B — Platzhalter aus rechtlich_template.pptx
+    "entwickler_adresse":          "Lindener Marktplatz 5, 30449 Hannover",
+    "entwickler_strasse":          "Lindener Marktplatz 5",
+    "entwickler_plz_ort":          "30449 Hannover",
+    "entwickler_handelsregister":  "Amtsgericht Hannover unter HRB 12345",
+    "verwalter_name":              "Interpres Hausverwaltung GmbH",
+    "verwalter_strasse":           "Lindener Marktplatz 5",
+    "verwalter_geschaeftsfuehrer": "Max Mustermann und Anna Beispiel",
+    "projekt_adresse":             "Lindener Marktplatz 5",
+    "projekt_plz_stadt":           "30449 Hannover",
+    "projekt_areal":               "Alten Stadtquartier Linden",
+    "projekt_typ":                 "Neubau Mikroapartments",
+    "fertig_geplant":              "30.06.2027",
+    "fertig_verbindlich":          "31.12.2027",
+    "verweisurkunde_datum":        "04.07.2025",
+    "stand_steuer":                "Juli 2025",
+    "kaufpreis_von":               "189.000,00",
+    "kaufpreis_bis":               "325.000,00",
+    "baujahr_range":               "2025-2027",
+    "notar_name":                  "Peter Krolopp",
+    "notar_adresse":               "Humboldtstr. 2, 39112 Magdeburg",
+    "notar_stadt":                 "Magdeburg",
+    "weg_bezeichnung":             "Stadtquartier Linden",
     "text_kapitel_invest": "INVEST", "text_kapitel_live": "LIVE",
     "text_kapitel_stay": "STAY", "text_kapitel_know": "KNOW",
     "text_kapitel_hotel": "HOTEL",
@@ -385,6 +408,29 @@ PLATZHALTER = {
     "cover_stichwort_2": "",
     "cover_stichwort_3": "",
     "cover_stichwort_4": "",
+    # ── Rechtlicher Teil B (eigenes PPTX-Template) ───────────────────────
+    "entwickler_adresse":          "",
+    "entwickler_strasse":          "",
+    "entwickler_plz_ort":          "",
+    "entwickler_handelsregister":  "",
+    "verwalter_name":              "",
+    "verwalter_strasse":           "",
+    "verwalter_geschaeftsfuehrer": "",
+    "projekt_adresse":             "",
+    "projekt_plz_stadt":           "",
+    "projekt_areal":               "",
+    "projekt_typ":                 "",
+    "fertig_geplant":              "",
+    "fertig_verbindlich":          "",
+    "verweisurkunde_datum":        "",
+    "stand_steuer":                "",
+    "kaufpreis_von":               "",
+    "kaufpreis_bis":               "",
+    "baujahr_range":               "",
+    "notar_name":                  "",
+    "notar_adresse":               "",
+    "notar_stadt":                 "",
+    "weg_bezeichnung":             "",
     # "Auf einen Blick" — rechte Spalte Kurz-S2
     "gesamtwohnflaeche": "",  # z.B. '3.741,58 m²' — Summe aller WE
     "zimmer_anzahl_min": "",  # '1' (kleinster Wohnungstyp)
@@ -5610,6 +5656,170 @@ def job_uploaded_preview(job_id, slot):
                 mt = "image/webp"
             return send_file(os.path.join(ud, fname), mimetype=mt)
     return jsonify({"error": "Slot nicht hochgeladen"}), 404
+
+
+# ── Rechtlicher Teil B ────────────────────────────────────────────────────────
+# Pfad lokal: erst aus Repo (urbanunits_Rechtlich_v1.pptx), Fallback URL.
+_RECHTLICH_TPL_LOCAL = os.path.join(os.path.dirname(__file__), "urbanunits_Rechtlich_v1.pptx")
+# PDF-Seitenanzahl im PPTX-Template, die VOR der Teilungserklaerung kommen
+# (Cover, Angebot, Vor-/Nachteile, Konzept, Steuern, Vertrag = S. 1-102 im DQN-Original).
+# Danach (Index ≥ _RECHTLICH_SPLIT_AFTER) kommen Verwaltungs-Muster (S. 308-322).
+_RECHTLICH_SPLIT_AFTER = 102
+
+
+def _load_rechtlich_template_bytes():
+    if os.path.exists(_RECHTLICH_TPL_LOCAL):
+        with open(_RECHTLICH_TPL_LOCAL, "rb") as fh:
+            return fh.read()
+    return requests.get(RECHTLICH_TEMPLATE_URL, timeout=60).content
+
+
+def _merge_rechtlich_pdf(dynamic_pdf_bytes, teil_pdf_bytes):
+    """Fuegt Teilungserklaerung-PDF zwischen Seite 102 (Vertrag) und Seite 103
+    (Verwaltungs-Muster) des dynamisch erzeugten Rechtlich-PDFs ein."""
+    import io as _io
+    from pypdf import PdfReader, PdfWriter
+    dyn = PdfReader(_io.BytesIO(dynamic_pdf_bytes))
+    n   = len(dyn.pages)
+    w   = PdfWriter()
+    cut = min(_RECHTLICH_SPLIT_AFTER, n)
+    for i in range(cut):
+        w.add_page(dyn.pages[i])
+    if teil_pdf_bytes:
+        teil = PdfReader(_io.BytesIO(teil_pdf_bytes))
+        for p in teil.pages:
+            w.add_page(p)
+    for i in range(cut, n):
+        w.add_page(dyn.pages[i])
+    buf = _io.BytesIO()
+    w.write(buf)
+    return buf.getvalue()
+
+
+@app.route("/job/<job_id>/teilungserklaerung", methods=["GET", "POST", "DELETE", "OPTIONS"])
+def job_teilungserklaerung(job_id):
+    """PDF-Upload der Teilungserklärung (vom Notar geliefert). Wird beim
+    Render des rechtlichen Teils B zwischen Vertrag und Verwaltungs-Muster
+    eingefuegt. Multipart-Field: 'file' (PDF)."""
+    if request.method == "OPTIONS":
+        return make_response("", 204)
+    if not _authorize_job(job_id):
+        return jsonify({"error": "Unauthorized"}), 401
+    job = _read_job(job_id)
+    if not job:
+        return jsonify({"error": "Job nicht gefunden"}), 404
+    path = os.path.join(_job_dir(job_id), "teilungserklaerung.pdf")
+
+    if request.method == "GET":
+        if os.path.exists(path):
+            return jsonify({"uploaded": True, "size": os.path.getsize(path)})
+        return jsonify({"uploaded": False})
+
+    if request.method == "DELETE":
+        if os.path.exists(path):
+            try: os.remove(path)
+            except OSError: pass
+        return jsonify({"ok": True})
+
+    # POST: Upload
+    f = request.files.get("file")
+    if not f or not f.filename:
+        return jsonify({"error": "Keine Datei"}), 400
+    if not f.filename.lower().endswith(".pdf"):
+        return jsonify({"error": "Nur PDF erlaubt"}), 400
+    f.save(path)
+    sz = os.path.getsize(path)
+    print(f"[{job_id}] Teilungserklaerung hochgeladen: {sz//1024} KB")
+    return jsonify({"ok": True, "size": sz})
+
+
+def _run_render_rechtlich(job_id):
+    """Background-Worker: Rechtlich-PPTX befuellen, PDF konvertieren, mit
+    Teilungserklaerung mergen, Ergebnis unter rechtlich.pdf ablegen."""
+    try:
+        _write_job(job_id, rechtlich_status="processing",
+                   rechtlich_phase="Template wird geladen …")
+        # Daten aus State holen
+        state_path = _job_state_path(job_id)
+        if not os.path.exists(state_path):
+            raise RuntimeError("Job-State nicht gefunden")
+        with open(state_path) as fh:
+            state = json.load(fh)
+        expose_data  = dict(state.get("expose_data") or {})
+        projekt_name = state.get("projekt_name", "Expose")
+
+        # Derived: ENTWICKLER_ADRESSE_INVERS = "{plz_ort}, {strasse}"
+        if not expose_data.get("entwickler_adresse_invers"):
+            plz_ort = (expose_data.get("entwickler_plz_ort") or "").strip()
+            strasse = (expose_data.get("entwickler_strasse") or "").strip()
+            if plz_ort and strasse:
+                expose_data["entwickler_adresse_invers"] = f"{plz_ort}, {strasse}"
+
+        _write_job(job_id, rechtlich_phase="PPTX wird befuellt …")
+        tmpl_bytes = _load_rechtlich_template_bytes()
+        filled     = fill_pptx(tmpl_bytes, expose_data)
+
+        _write_job(job_id, rechtlich_phase="PDF wird konvertiert (CloudConvert) …")
+        pdf_bytes  = convert_to_pdf(filled, f"{projekt_name}_Rechtlich.pptx")
+
+        teil_path  = os.path.join(_job_dir(job_id), "teilungserklaerung.pdf")
+        if os.path.exists(teil_path):
+            _write_job(job_id, rechtlich_phase="Teilungserklaerung wird angehaengt …")
+            with open(teil_path, "rb") as fh:
+                teil_bytes = fh.read()
+            pdf_bytes = _merge_rechtlich_pdf(pdf_bytes, teil_bytes)
+            print(f"[{job_id}] Teilungserklaerung gemerged ({len(teil_bytes)//1024} KB)")
+
+        out_path = os.path.join(_job_dir(job_id), "rechtlich.pdf")
+        with open(out_path, "wb") as fh:
+            fh.write(pdf_bytes)
+        _write_job(job_id,
+                   rechtlich_status="done",
+                   rechtlich_phase="Fertig",
+                   rechtlich_size=len(pdf_bytes))
+        print(f"[{job_id}] Rechtlich-PDF fertig: {len(pdf_bytes)//1024} KB → {out_path}")
+    except Exception as e:
+        import traceback as _tb
+        err = f"{e}\n{_tb.format_exc()[:600]}"
+        print(f"[{job_id}] Rechtlich-Render fehlgeschlagen: {err}")
+        _write_job(job_id, rechtlich_status="error", rechtlich_error=str(e))
+
+
+@app.route("/job/<job_id>/render-rechtlich", methods=["POST", "OPTIONS"])
+def job_render_rechtlich(job_id):
+    """Startet Hintergrund-Render des rechtlichen Teils B. Gibt sofort 202 zurueck.
+    Status kann via GET /job/<id> abgefragt werden (Felder rechtlich_status/_phase)."""
+    if request.method == "OPTIONS":
+        return make_response("", 204)
+    if not _authorize_job(job_id):
+        return jsonify({"error": "Unauthorized"}), 401
+    job = _read_job(job_id)
+    if not job:
+        return jsonify({"error": "Job nicht gefunden"}), 404
+    if not os.path.exists(_job_state_path(job_id)):
+        return jsonify({"error": "Job-State nicht vorhanden — erst Marketing finalisieren"}), 400
+
+    _write_job(job_id, rechtlich_status="processing",
+               rechtlich_phase="Wird gestartet …", rechtlich_error=None)
+    t = _threading.Thread(target=_run_render_rechtlich, args=(job_id,), daemon=True)
+    t.start()
+    return jsonify({"ok": True, "job_id": job_id})
+
+
+@app.route("/job/<job_id>/download-rechtlich", methods=["GET", "OPTIONS"])
+def job_download_rechtlich(job_id):
+    """Liefert das generierte Rechtlich-PDF als Download."""
+    if request.method == "OPTIONS":
+        return make_response("", 204)
+    if not _authorize_job(job_id):
+        return jsonify({"error": "Unauthorized"}), 401
+    path = os.path.join(_job_dir(job_id), "rechtlich.pdf")
+    if not os.path.exists(path):
+        return jsonify({"error": "Noch nicht generiert"}), 404
+    name = (_read_job(job_id) or {}).get("name", "Expose")
+    return send_file(path, mimetype="application/pdf",
+                     as_attachment=True,
+                     download_name=f"{name}_Rechtlicher-Teil-B.pdf")
 
 
 @app.route("/debug-images", methods=["GET"])

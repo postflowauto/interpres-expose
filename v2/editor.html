@@ -14,12 +14,18 @@
   <div class="typ-tabs" id="typ-tabs">
     <button class="typ-tab active" data-typ="marketing">Marketing</button>
     <button class="typ-tab" data-typ="kurz">Kurz-Exposé</button>
-    <!-- Rechtliches kommt spaeter — Backend ist vorbereitet, Tab vorerst versteckt
     <button class="typ-tab" data-typ="rechtlich">Rechtliches</button>
-    -->
   </div>
   <div class="spacer"></div>
   <div class="status" id="render-status"></div>
+  <!-- Rechtlich-spezifisch: Teilungserklaerungs-Upload -->
+  <div id="rechtlich-extra" style="display:none; gap:6px; align-items:center;">
+    <label class="btn" style="cursor:pointer; margin-right:0;">
+      <input type="file" accept=".pdf" id="teil-file-input" style="display:none;">
+      <span id="teil-btn-label">Teilungserklärung hochladen (PDF)</span>
+    </label>
+    <button class="btn" id="teil-remove-btn" style="display:none;" title="Teilungserklärung entfernen">✕</button>
+  </div>
   <button class="btn" id="btn-refresh">Vorschau aktualisieren</button>
   <button class="btn primary" id="btn-download">PDF herunterladen</button>
 </div>
@@ -113,6 +119,65 @@ function renderTypTabs() {
     }
   });
   document.getElementById('sidebar-h').textContent = `Folien · ${TYP_LABEL[activeTyp]}`;
+  // Rechtlich-Extras (Teilungserklaerungs-Upload) nur fuer typ=rechtlich
+  const extra = document.getElementById('rechtlich-extra');
+  if (extra) {
+    extra.style.display = (activeTyp === 'rechtlich') ? 'flex' : 'none';
+    if (activeTyp === 'rechtlich') refreshTeilStatus();
+  }
+}
+
+async function refreshTeilStatus() {
+  try {
+    const r = await fetch(`${V2_API}/teilungserklaerung`, { headers: authHeaders() });
+    if (!r.ok) return;
+    const j = await r.json();
+    const lbl = document.getElementById('teil-btn-label');
+    const rm  = document.getElementById('teil-remove-btn');
+    if (j.uploaded) {
+      const kb = Math.round((j.size || 0) / 1024);
+      lbl.textContent = `Teilungserklärung ✓ (${kb} KB)`;
+      rm.style.display = 'inline-flex';
+    } else {
+      lbl.textContent = 'Teilungserklärung hochladen (PDF)';
+      rm.style.display = 'none';
+    }
+  } catch (e) { /* ignore */ }
+}
+
+async function uploadTeilungserklaerung(file) {
+  const fd = new FormData();
+  fd.append('file', file);
+  setStatus('Teilungserklärung wird hochgeladen …', 'saving');
+  const r = await fetch(`${V2_API}/teilungserklaerung`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: fd,
+  });
+  if (!r.ok) {
+    const j = await r.json().catch(() => ({}));
+    setStatus('Upload-Fehler: ' + (j.error || r.status), 'error');
+    return;
+  }
+  await refreshTeilStatus();
+  dirty = true;  // PDF muss neu gerendert werden, um Teilung einzubinden
+  setStatus('Teilungserklärung gespeichert · „Vorschau aktualisieren" klicken', 'saved');
+}
+
+async function removeTeilungserklaerung() {
+  if (!confirm('Teilungserklärung wirklich entfernen?')) return;
+  setStatus('Teilungserklärung wird entfernt …', 'saving');
+  const r = await fetch(`${V2_API}/teilungserklaerung`, {
+    method: 'DELETE',
+    headers: authHeaders(),
+  });
+  if (!r.ok) {
+    setStatus('Fehler beim Entfernen', 'error');
+    return;
+  }
+  await refreshTeilStatus();
+  dirty = true;
+  setStatus('Teilungserklärung entfernt', 'saved');
 }
 
 async function switchTyp(typ) {
@@ -461,6 +526,13 @@ document.getElementById('btn-next').addEventListener('click', () => {
 });
 document.getElementById('btn-refresh').addEventListener('click', triggerRender);
 document.getElementById('btn-download').addEventListener('click', downloadPdf);
+
+document.getElementById('teil-file-input').addEventListener('change', e => {
+  const f = e.target.files && e.target.files[0];
+  if (f) uploadTeilungserklaerung(f);
+  e.target.value = '';  // reset, sodass dieselbe Datei erneut waehlbar ist
+});
+document.getElementById('teil-remove-btn').addEventListener('click', removeTeilungserklaerung);
 
 window.addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;

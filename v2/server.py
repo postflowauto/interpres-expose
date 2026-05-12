@@ -74,6 +74,39 @@ def _scan_template_placeholders(pptx_bytes: bytes) -> list:
     return result
 
 
+_LOCAL_TEMPLATE_FILES = {
+    "marketing": "urbanunits_Marketing_Expose_v3.pdf-24.pptx",
+    "kurz":      "urbanunits_Kurzexpose-4.pptx",
+    "rechtlich": "urbanunits_Rechtlich_v1.pptx",
+}
+
+
+def _load_template_bytes(typ: str = "marketing") -> bytes | None:
+    """Laed das PPTX-Template fuer den angegebenen Typ. Erst lokal aus Repo,
+    Fallback URL aus TEMPLATE_URLS. Gibt None zurueck wenn beides nicht klappt."""
+    repo_root = os.path.dirname(os.path.dirname(__file__))
+    fname = _LOCAL_TEMPLATE_FILES.get(typ, "")
+    if fname:
+        path = os.path.join(repo_root, fname)
+        if os.path.exists(path):
+            with open(path, "rb") as fh:
+                return fh.read()
+    try:
+        import importlib, requests
+        appmod = importlib.import_module("app")
+        url = appmod.TEMPLATE_URLS.get(typ) or appmod.TEMPLATE_URL
+        if not url:
+            return None
+        resp = requests.get(url, timeout=30)
+        if resp.status_code != 200:
+            print(f"[v2] Template-URL ({typ}): HTTP {resp.status_code} — {url[:80]}")
+            return None
+        return resp.content
+    except Exception as e:
+        print(f"[v2] Template-Load ({typ}) Fehler: {e}")
+        return None
+
+
 def _get_template_placeholders(typ: str = "marketing") -> list[list[str]]:
     """Lazy-loads + cached: pro Slide alle Template-Platzhalter fuer den
     angegebenen Typ. Wenn das Template fuer den Typ nicht erreichbar ist
@@ -81,21 +114,11 @@ def _get_template_placeholders(typ: str = "marketing") -> list[list[str]]:
     Editor zeigt dann eine Hinweis-Meldung statt zu crashen."""
     if typ in _PER_SLIDE_PLACEHOLDERS_BY_TYP:
         return _PER_SLIDE_PLACEHOLDERS_BY_TYP[typ]
+    tmpl_bytes = _load_template_bytes(typ)
+    if not tmpl_bytes:
+        _PER_SLIDE_PLACEHOLDERS_BY_TYP[typ] = []
+        return []
     try:
-        import importlib
-        appmod = importlib.import_module("app")
-        import requests
-        url = appmod.TEMPLATE_URLS.get(typ) or appmod.TEMPLATE_URL
-        if not url:
-            _PER_SLIDE_PLACEHOLDERS_BY_TYP[typ] = []
-            return []
-        resp = requests.get(url, timeout=30)
-        if resp.status_code != 200:
-            print(f"[v2] Template-Scan ({typ}): HTTP {resp.status_code} — "
-                  f"Template noch nicht hinterlegt. URL: {url[:80]}")
-            _PER_SLIDE_PLACEHOLDERS_BY_TYP[typ] = []
-            return []
-        tmpl_bytes = resp.content
         scanned = _scan_template_placeholders(tmpl_bytes)
         _PER_SLIDE_PLACEHOLDERS_BY_TYP[typ] = scanned
         print(f"[v2] Template-Scan ({typ}): {len(scanned)} Slides, "
@@ -499,6 +522,38 @@ Erstelle einfach ein neues Exposé — du wirst automatisch in den Editor geleit
         t.start()
         return jsonify({"ok": True, "typ": typ})
 
+    @app.route("/v2/api/job/<job_id>/teilungserklaerung",
+               methods=["GET", "POST", "DELETE", "OPTIONS"])
+    def v2_api_teilungserklaerung(job_id):
+        """PDF-Upload der Teilungserklaerung fuer den rechtlichen Teil B."""
+        if request.method == "OPTIONS":
+            return ("", 204)
+        work_dir = os.path.join(JOB_DIR, f"work_{job_id}")
+        os.makedirs(work_dir, exist_ok=True)
+        path = os.path.join(work_dir, "teilungserklaerung.pdf")
+
+        if request.method == "GET":
+            if os.path.exists(path):
+                return jsonify({"uploaded": True, "size": os.path.getsize(path)})
+            return jsonify({"uploaded": False})
+
+        if request.method == "DELETE":
+            if os.path.exists(path):
+                try: os.remove(path)
+                except OSError: pass
+            return jsonify({"ok": True})
+
+        # POST
+        f = request.files.get("file")
+        if not f or not f.filename:
+            return jsonify({"error": "Keine Datei"}), 400
+        if not f.filename.lower().endswith(".pdf"):
+            return jsonify({"error": "Nur PDF erlaubt"}), 400
+        f.save(path)
+        sz = os.path.getsize(path)
+        print(f"[v2] [{job_id}] Teilungserklaerung hochgeladen: {sz//1024} KB")
+        return jsonify({"ok": True, "size": sz})
+
     @app.route("/v2/api/job/<job_id>/render-status")
     def v2_api_render_status(job_id):
         meta = _read_meta(job_id)
@@ -663,22 +718,20 @@ def _v2_render_worker(job_id: str, typ: str = "marketing"):
         projekt_name = expose.get("projekt_titel", "Expose")
 
         _write_meta(job_id, phase=f"Template wird gefüllt … ({typ})")
-        import requests
-        tmpl_url = appmod.TEMPLATE_URLS.get(typ, appmod.TEMPLATE_URL)
-        if not tmpl_url:
-            _write_meta(job_id, status="error",
-                        phase=f"Kein Template fuer Typ '{typ}' konfiguriert.",
-                        error=f"TEMPLATE_URLS['{typ}'] ist leer")
-            return
-        try:
-            tmpl_resp = requests.get(tmpl_url, timeout=30)
-            tmpl_resp.raise_for_status()
-            tmpl_bytes = tmpl_resp.content
-        except Exception as e:
+        tmpl_bytes = _load_template_bytes(typ)
+        if not tmpl_bytes:
             _write_meta(job_id, status="error",
                         phase=f"Template '{typ}' nicht ladbar",
-                        error=f"GET {tmpl_url}: {e}")
+                        error=f"Kein lokales File und URL nicht erreichbar fuer typ={typ}")
             return
+
+        # Derived field fuer Rechtlich: ENTWICKLER_ADRESSE_INVERS
+        if typ == "rechtlich" and not expose.get("entwickler_adresse_invers"):
+            plz_ort = (expose.get("entwickler_plz_ort") or "").strip()
+            strasse = (expose.get("entwickler_strasse") or "").strip()
+            if plz_ort and strasse:
+                expose["entwickler_adresse_invers"] = f"{plz_ort}, {strasse}"
+
         pptx_bytes = appmod.fill_pptx(tmpl_bytes, expose, customer_images=customer_images)
         # Nach fill_pptx: tmpl + customer_images sind nicht mehr gebraucht.
         del tmpl_bytes, customer_images, state, cust_files
@@ -693,6 +746,15 @@ def _v2_render_worker(job_id: str, typ: str = "marketing"):
                 pdf_bytes = appmod.convert_to_pdf(pptx_bytes, f"{projekt_safe}.pptx")
                 # Quellen-URLs als clickable Hyperlinks anreichern
                 pdf_bytes = appmod._add_hyperlinks_to_pdf(pdf_bytes)
+                # Rechtlich: Teilungserklaerung-PDF zwischen Vertrag und
+                # Verwaltungs-Mustern einfuegen (Index _RECHTLICH_SPLIT_AFTER).
+                if typ == "rechtlich":
+                    teil_path = os.path.join(JOB_DIR, f"work_{job_id}", "teilungserklaerung.pdf")
+                    if os.path.exists(teil_path):
+                        with open(teil_path, "rb") as fh:
+                            teil_bytes = fh.read()
+                        pdf_bytes = appmod._merge_rechtlich_pdf(pdf_bytes, teil_bytes)
+                        print(f"[v2] Teilungserklaerung gemerged ({len(teil_bytes)//1024} KB)")
             except Exception as e:
                 import traceback as _tb
                 pdf_error = str(e)
