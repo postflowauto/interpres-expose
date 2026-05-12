@@ -4145,14 +4145,74 @@ def _normalize_number_columns(prs):
 
             from pptx.enum.text import MSO_ANCHOR
             for s in present:
-                s.left = median_x
-                s.width = median_w
+                # Box-Mitte beim Vergroessern erhalten: top wird nach oben
+                # verschoben, damit der visuelle Mittelpunkt (= Zahl-Position
+                # mit vertical_anchor=MIDDLE) gleich bleibt wie im Template.
+                orig_center = s.top + s.height // 2
+                s.left   = median_x
+                s.width  = median_w
                 s.height = target_h
-                # Vertikal mittig in der Box (sonst sitzt der Text oben)
+                s.top    = orig_center - target_h // 2
                 try:
                     s.text_frame.vertical_anchor = MSO_ANCHOR.MIDDLE
                 except Exception:
                     pass
+
+            # Vertikale Symmetrie: erste + letzte top bleiben, mittlere werden
+            # linear zwischen ihnen interpoliert. Zugehoerige Labels (festes
+            # Text-Shape direkt unter der Zahl, horizontal ueberlappend) werden
+            # mit dem gleichen delta_y mitbewegt — sonst trennt sich die Zahl
+            # vom Label-Text. Platzhalter-Shapes ({{...}}) werden NICHT als
+            # Label genommen, weil sie evtl. in einer eigenen Gruppe sitzen
+            # und dort selbst normalisiert werden (sonst doppelte Verschiebung).
+            if len(present) >= 3:
+                num_h = target_h
+                labels_for = {}
+                for num_shape in present:
+                    n_left   = num_shape.left
+                    n_right  = num_shape.left + num_shape.width
+                    n_bottom = num_shape.top  + num_shape.height
+                    candidates = []
+                    for other in slide.shapes:
+                        if other is num_shape:
+                            continue
+                        try:
+                            if not other.has_text_frame:
+                                continue
+                        except Exception:
+                            continue
+                        other_text = other.text_frame.text.strip()
+                        if not other_text or "{{" in other_text:
+                            continue
+                        o_center_x = other.left + other.width // 2
+                        # Horizontal: Label-Mittelpunkt innerhalb erweiterter Zahl-Box
+                        if not (n_left - num_shape.width <= o_center_x <= n_right + num_shape.width):
+                            continue
+                        # Vertikal: Label muss unter der Zahl-Box sein, max ~4 Box-Hoehen weg
+                        if other.top < num_shape.top:
+                            continue
+                        dist = other.top - n_bottom
+                        if dist > num_h * 4:
+                            continue
+                        candidates.append((dist, other))
+                    if candidates:
+                        candidates.sort(key=lambda x: x[0])
+                        labels_for[id(num_shape)] = candidates[0][1]
+
+                sorted_shapes  = sorted(present, key=lambda s: s.top)
+                tops_sorted    = [s.top for s in sorted_shapes]
+                y_first, y_last = tops_sorted[0], tops_sorted[-1]
+                n              = len(sorted_shapes)
+                even_tops      = [y_first + (y_last - y_first) * i // (n - 1) for i in range(n)]
+                for shape, new_top in zip(sorted_shapes, even_tops):
+                    delta = new_top - shape.top
+                    if delta == 0:
+                        continue
+                    shape.top = new_top
+                    lbl = labels_for.get(id(shape))
+                    if lbl is not None:
+                        lbl.top = lbl.top + delta
+
             print(f"  ↔ Zahlen-Spalte normalisiert: {[k for k in group if k in shapes_by_key]} "
                   f"(x={median_x}, w={median_w}, h={target_h})")
 
