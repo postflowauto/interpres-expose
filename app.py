@@ -4491,30 +4491,8 @@ def render_pdf_to_jpgs(pdf_bytes, out_dir, dpi=110):
     return normalized
 
 
-def _find_libreoffice():
-    """Sucht den LibreOffice-Binary an allen bekannten Pfaden."""
-    import shutil
-    for name in ("libreoffice", "soffice"):
-        path = shutil.which(name)
-        if path:
-            return path
-    # Bekannte Installations-Pfade (Debian/Ubuntu/Docker)
-    for candidate in (
-        "/usr/bin/libreoffice",
-        "/usr/bin/soffice",
-        "/usr/lib/libreoffice/program/soffice",
-        "/opt/libreoffice/program/soffice",
-        "/Applications/LibreOffice.app/Contents/MacOS/soffice",
-    ):
-        if os.path.isfile(candidate):
-            return candidate
-    return None
-
-
 def _convert_to_pdf_cloudconvert(pptx_bytes, filename, max_wait_s=300):
-    """Konvertiert PPTX → PDF über CloudConvert API.
-    Vermeidet lokale LibreOffice-Installation (RAM-Schoner für Render Starter).
-    """
+    """Konvertiert PPTX → PDF über CloudConvert API."""
     if not CLOUDCONVERT_KEY:
         raise RuntimeError("CLOUDCONVERT_KEY nicht gesetzt")
 
@@ -4591,62 +4569,15 @@ def _convert_to_pdf_cloudconvert(pptx_bytes, filename, max_wait_s=300):
     return pdf_resp.content
 
 
-def _convert_to_pdf_libreoffice(pptx_bytes, filename):
-    """Fallback: LibreOffice headless lokal (nur wenn installiert UND genug RAM)."""
-    import subprocess, tempfile, glob as _glob
-
-    lo_bin = _find_libreoffice()
-    if not lo_bin:
-        raise RuntimeError("LibreOffice nicht gefunden")
-    print(f"convert_to_pdf (LibreOffice): {lo_bin} für {filename} ({len(pptx_bytes)//1024} KB)")
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        pptx_path = os.path.join(tmpdir, filename)
-        with open(pptx_path, "wb") as f:
-            f.write(pptx_bytes)
-        env = os.environ.copy()
-        env["HOME"] = tmpdir
-        result = subprocess.run(
-            [lo_bin, "--headless", "--norestore", "--nofirststartwizard",
-             "--convert-to", "pdf", "--outdir", tmpdir, pptx_path],
-            capture_output=True, text=True, timeout=300, env=env
-        )
-        if result.returncode != 0:
-            raise RuntimeError(f"LibreOffice rc={result.returncode}: {result.stderr[:300]}")
-        pdf_stem = os.path.splitext(filename)[0]
-        matches = _glob.glob(os.path.join(tmpdir, f"{pdf_stem}.pdf")) \
-                  or _glob.glob(os.path.join(tmpdir, "*.pdf"))
-        if not matches:
-            raise RuntimeError("LibreOffice hat keine PDF-Datei erzeugt")
-        with open(matches[0], "rb") as f:
-            return f.read()
-
-
 def convert_to_pdf(pptx_bytes, filename):
-    """Konvertiert PPTX-Bytes zu PDF.
-    Reihenfolge: CloudConvert (wenn Key gesetzt) → LibreOffice → Fehler.
-
-    CloudConvert ist primaer: schneller (~3-5s vs 10-15s) und liefert sauberere
-    PDFs. LibreOffice ist Notfall-Fallback wenn CloudConvert nicht erreichbar
-    ist oder der Credit leer ist (HTTP 402).
-    """
-    if CLOUDCONVERT_KEY:
-        try:
-            return _convert_to_pdf_cloudconvert(pptx_bytes, filename)
-        except Exception as e:
-            import traceback as _tb
-            print(f"  CloudConvert Fehler: {e}\n{_tb.format_exc()[:600]}")
-            if _find_libreoffice():
-                print(f"  → Fallback LibreOffice")
-            else:
-                print(f"  → Kein LibreOffice-Fallback verfügbar – Fehler propagiert")
-                raise
-    return _convert_to_pdf_libreoffice(pptx_bytes, filename)
+    """Konvertiert PPTX-Bytes zu PDF via CloudConvert."""
+    if not CLOUDCONVERT_KEY:
+        raise RuntimeError("CLOUDCONVERT_KEY nicht gesetzt")
+    return _convert_to_pdf_cloudconvert(pptx_bytes, filename)
 
 
 def _can_convert_to_pdf():
-    """True wenn entweder CloudConvert-Key oder LibreOffice verfügbar ist."""
-    return bool(CLOUDCONVERT_KEY) or _find_libreoffice() is not None
+    return bool(CLOUDCONVERT_KEY)
 
 def assemble_session(session_id):
     """Liest alle Chunks einer Session von /tmp und gibt die assemblierten Bytes zurück."""
@@ -4717,7 +4648,6 @@ def health():
         "service":        "INTERPRES Full Pipeline v3",
         "test_mode":      TEST_MODE,
         "cloudconvert":   bool(CLOUDCONVERT_KEY),
-        "libreoffice":    _find_libreoffice() is not None,
         "pdftoppm":       _find_pdftoppm() is not None,
     }
     # PyMuPDF-Verfügbarkeit (Fallback-Renderer)
@@ -4727,7 +4657,7 @@ def health():
     except Exception:
         info["pymupdf"] = False
     info["preview_ready"] = (
-        (info["cloudconvert"] or info["libreoffice"])
+        info["cloudconvert"]
         and (info["pdftoppm"] or info["pymupdf"])
     )
     return jsonify(info)
@@ -5126,7 +5056,7 @@ def _run_expose_job(job_id, zip_paths):
         except Exception:
             _has_pymupdf = False
         _can_render_jpgs = _ppm_path or _has_pymupdf
-        print(f"[{job_id}] Preview-Tools: PDF-Konverter={'CloudConvert' if CLOUDCONVERT_KEY else ('LibreOffice' if _find_libreoffice() else 'KEINER')}, "
+        print(f"[{job_id}] Preview-Tools: PDF-Konverter={'CloudConvert' if CLOUDCONVERT_KEY else 'KEINER'}, "
               f"pdftoppm={_ppm_path or 'FEHLT'}, pymupdf={_has_pymupdf}")
         try:
             if _can_pdf and _can_render_jpgs:
@@ -5156,7 +5086,7 @@ def _run_expose_job(job_id, zip_paths):
                       f"– Pfad: {_job_slides_dir(job_id)}")
             else:
                 missing = []
-                if not _can_pdf:        missing.append("CLOUDCONVERT_KEY/LibreOffice")
+                if not _can_pdf:        missing.append("CLOUDCONVERT_KEY")
                 if not _can_render_jpgs: missing.append("pdftoppm UND pymupdf")
                 print(f"[{job_id}] ⚠️ Preview übersprungen – fehlt: {', '.join(missing)}")
         except Exception as pe:
