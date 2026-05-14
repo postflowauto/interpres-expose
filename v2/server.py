@@ -461,6 +461,11 @@ Erstelle einfach ein neues Exposé — du wirst automatisch in den Editor geleit
         # Pro-Slide-Platzhalter aus dem Template des AKTUELLEN Typs
         # (Editor zeigt damit pro Folie nur die relevanten Edit-Felder).
         slide_placeholders = _get_template_placeholders(typ)
+        # Flache Liste ALLER Platzhalter dieses Typs (ueber alle Folien) —
+        # dient als typ-sicherer Fallback im Editor: wenn das Pro-Folie-
+        # Scanning mal leer ist, werden trotzdem NUR Felder dieses Typs
+        # gezeigt (nie marketing/kurz/rechtlich gemischt).
+        typ_placeholders = sorted({k for slide in slide_placeholders for k in slide})
 
         return jsonify({
             "job_id":      job_id,
@@ -476,6 +481,7 @@ Erstelle einfach ein neues Exposé — du wirst automatisch in den Editor geleit
             "bild_slots":  bild_slots,
             "uploaded":    uploaded,
             "slide_placeholders": slide_placeholders,
+            "typ_placeholders":   typ_placeholders,
         })
 
     @app.route("/v2/api/job/<job_id>/text", methods=["PUT", "OPTIONS"])
