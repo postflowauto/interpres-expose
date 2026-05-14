@@ -64,7 +64,7 @@ TEMPLATE_URL = "https://raw.githubusercontent.com/postflowauto/interpres-expose/
 # 'Template noch nicht hinterlegt' und blockiert nicht das Marketing-Expose.
 KURZ_TEMPLATE_URL = os.environ.get(
     "KURZ_TEMPLATE_URL",
-    "https://raw.githubusercontent.com/postflowauto/interpres-expose/main/urbanunits_Kurzexpose-4.pptx",
+    "https://raw.githubusercontent.com/postflowauto/interpres-expose/main/urbanunits_Kurzexpose-5.pptx",
 )
 RECHTLICH_TEMPLATE_URL = os.environ.get(
     "RECHTLICH_TEMPLATE_URL",
