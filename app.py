@@ -268,7 +268,7 @@ DUMMY_EXPOSE_DATA = {
         ":  Glasfaseranschluss und Smart-Lock-System\n"
         ":  nachhaltige Fernwärme für Heizung\n"
         ":  Eichenparkett, Fußbodenheizung, Designermöbel"
-    ),  # 6 Punkte — Spacing wird per <a:spcBef>=1200 (12pt) in fill_pptx gesetzt
+    ),  # 6 Punkte — Spacing wird per <a:spcBef>=2000 (20pt) in fill_pptx gesetzt
     "gesamtwohnflaeche": "2.142,40 m²",
     "zimmer_anzahl_min": "1",
     "zimmer_anzahl_max": "2",
@@ -3570,7 +3570,7 @@ def fill_pptx(template_bytes, data, customer_images=None):
                     from pptx.util import Pt
                     para.runs[0].font.size = Pt(size_hint)
                 # Weitere Zeilen als neue <a:p>-Elemente nach diesem einfuegen.
-                # Jeder neue Paragraph bekommt zusaetzlich <a:spcBef> = 1200 (12pt),
+                # Jeder neue Paragraph bekommt zusaetzlich <a:spcBef> = 2000 (20pt),
                 # damit zwischen den Bullet-Points luftiges Spacing entsteht (DQN-Look)
                 # ohne leere Paragraphen einzufuegen.
                 from copy import deepcopy
@@ -3591,7 +3591,7 @@ def fill_pptx(template_bytes, data, customer_images=None):
                                 t = r_extra.find(qn('a:t'))
                                 if t is not None:
                                     t.text = ""
-                        # Space-Before setzen: 12pt = 1200 (val ist 100stel pt)
+                        # Space-Before setzen: 20pt = 2000 (val ist 100stel pt)
                         pPr = new_p.find(qn('a:pPr'))
                         if pPr is None:
                             pPr = _etree.SubElement(new_p, qn('a:pPr'))
@@ -3601,7 +3601,7 @@ def fill_pptx(template_bytes, data, customer_images=None):
                             pPr.remove(old)
                         spc_before = _etree.SubElement(pPr, qn('a:spcBef'))
                         spc_pts = _etree.SubElement(spc_before, qn('a:spcPts'))
-                        spc_pts.set('val', '1200')
+                        spc_pts.set('val', '2000')
                         # spcBef muss als erstes Kind von pPr stehen
                         pPr.insert(0, spc_before)
                         insert_after.addnext(new_p)
