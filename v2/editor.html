@@ -33,8 +33,10 @@
 <div id="teil-missing-warn" style="display:none; padding:10px 16px; background:#3b1f1f;
      border-bottom:1px solid #6b2b2b; color:#f3c0c0; font-size:13px; align-items:center; gap:10px;">
   <span style="font-size:16px;">⚠</span>
-  <span><strong>Teilungserklärung fehlt.</strong> Das Exposé wird mit einer Platzhalter-Folie generiert.
-  Für die finale Version vom Notar bitte das PDF oben rechts hochladen.</span>
+  <span><strong>Teilungserklärung fehlt.</strong> Das PDF wird als <strong>ENTWURF</strong>
+  generiert (Wasserzeichen auf jeder Seite, Platzhalter-Folie statt Notar-Urkunde,
+  Dateiname endet auf <code style="background:#000;padding:1px 4px;border-radius:3px;">_ENTWURF</code>).
+  Für die finale Version bitte das Notar-PDF oben rechts hochladen — gilt projektweit.</span>
 </div>
 
 <div class="layout">
@@ -144,8 +146,12 @@ async function refreshTeilStatus() {
     const warn  = document.getElementById('teil-missing-warn');
     if (j.uploaded) {
       const kb = Math.round((j.size || 0) / 1024);
-      lbl.textContent  = `Teilungserklärung ✓ (${kb} KB)`;
+      const scopeNote = j.scope === 'project' ? ' · projektweit' : '';
+      lbl.textContent  = `Teilungserklärung ✓ (${kb} KB${scopeNote})`;
       rm.style.display = 'inline-flex';
+      rm.title = j.scope === 'project'
+        ? 'Teilungserklärung aus diesem Job entfernen (projektweite Ablage bleibt erhalten)'
+        : 'Teilungserklärung entfernen';
       if (warn) warn.style.display = 'none';
     } else {
       lbl.textContent  = 'Teilungserklärung hochladen (PDF)';

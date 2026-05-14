@@ -525,23 +525,46 @@ Erstelle einfach ein neues Exposé — du wirst automatisch in den Editor geleit
     @app.route("/v2/api/job/<job_id>/teilungserklaerung",
                methods=["GET", "POST", "DELETE", "OPTIONS"])
     def v2_api_teilungserklaerung(job_id):
-        """PDF-Upload der Teilungserklaerung fuer den rechtlichen Teil B."""
+        """PDF-Upload der Teilungserklaerung fuer den rechtlichen Teil B.
+
+        Speicherung doppelt:
+        - job-spezifisch:  work_<id>/teilungserklaerung.pdf (Override pro Job)
+        - projekt-spezifisch: appmod._project_teilung_path (gilt fuer alle
+          Jobs desselben Projekts).
+        Beim POST geht der Default-Scope auf 'project' (Vertriebs-Komfort);
+        ?scope=job nur fuer Sonderfaelle.
+        """
         if request.method == "OPTIONS":
             return ("", 204)
-        work_dir = os.path.join(JOB_DIR, f"work_{job_id}")
+        import importlib
+        appmod = importlib.import_module("app")
+        state = _read_state(job_id)
+        projekt_name = (state.get("projekt_name") or "default") if state else "default"
+
+        work_dir  = os.path.join(JOB_DIR, f"work_{job_id}")
         os.makedirs(work_dir, exist_ok=True)
-        path = os.path.join(work_dir, "teilungserklaerung.pdf")
+        job_path  = os.path.join(work_dir, "teilungserklaerung.pdf")
+        proj_path = appmod._project_teilung_path(projekt_name)
 
         if request.method == "GET":
-            if os.path.exists(path):
-                return jsonify({"uploaded": True, "size": os.path.getsize(path)})
+            if os.path.exists(job_path):
+                return jsonify({"uploaded": True, "size": os.path.getsize(job_path),
+                                "scope": "job"})
+            if os.path.exists(proj_path):
+                return jsonify({"uploaded": True, "size": os.path.getsize(proj_path),
+                                "scope": "project", "projekt_name": projekt_name})
             return jsonify({"uploaded": False})
 
         if request.method == "DELETE":
-            if os.path.exists(path):
-                try: os.remove(path)
+            scope = (request.args.get("scope") or "job").lower()
+            removed = []
+            if os.path.exists(job_path):
+                try: os.remove(job_path); removed.append("job")
                 except OSError: pass
-            return jsonify({"ok": True})
+            if scope == "project" and os.path.exists(proj_path):
+                try: os.remove(proj_path); removed.append("project")
+                except OSError: pass
+            return jsonify({"ok": True, "removed": removed})
 
         # POST
         f = request.files.get("file")
@@ -549,10 +572,13 @@ Erstelle einfach ein neues Exposé — du wirst automatisch in den Editor geleit
             return jsonify({"error": "Keine Datei"}), 400
         if not f.filename.lower().endswith(".pdf"):
             return jsonify({"error": "Nur PDF erlaubt"}), 400
-        f.save(path)
-        sz = os.path.getsize(path)
-        print(f"[v2] [{job_id}] Teilungserklaerung hochgeladen: {sz//1024} KB")
-        return jsonify({"ok": True, "size": sz})
+        scope = (request.args.get("scope") or "project").lower()
+        target = job_path if scope == "job" else proj_path
+        f.save(target)
+        sz = os.path.getsize(target)
+        print(f"[v2] [{job_id}] Teilungserklaerung gespeichert ({scope}, {sz//1024} KB): {target}")
+        return jsonify({"ok": True, "size": sz, "scope": scope,
+                        "projekt_name": projekt_name})
 
     @app.route("/v2/api/job/<job_id>/render-status")
     def v2_api_render_status(job_id):
@@ -595,6 +621,9 @@ Erstelle einfach ein neues Exposé — du wirst automatisch in den Editor geleit
 
         name_base = meta.get("name", "Expose")
         suffix = "" if typ == "marketing" else f"_{typ}"
+        # ENTWURF-Markierung im Dateinamen wenn rechtlich ohne Teilung
+        if typ == "rechtlich" and meta.get("rechtlich_is_entwurf"):
+            suffix += "_ENTWURF"
         return send_file(out_path, mimetype=mt, as_attachment=True,
                          download_name=f"{name_base}{suffix}.{ext_label}")
 
@@ -746,18 +775,20 @@ def _v2_render_worker(job_id: str, typ: str = "marketing"):
                 pdf_bytes = appmod.convert_to_pdf(pptx_bytes, f"{projekt_safe}.pptx")
                 # Quellen-URLs als clickable Hyperlinks anreichern
                 pdf_bytes = appmod._add_hyperlinks_to_pdf(pdf_bytes)
-                # Rechtlich: Teilungserklaerung-PDF (oder Platzhalter-Hinweis)
-                # zwischen Vertrag und Verwaltungs-Mustern einfuegen.
+                # Rechtlich: Teilungserklaerung (oder Platzhalter) einfuegen.
+                # Bei fehlender Teilung: ENTWURF-Wasserzeichen auf jeder Seite.
                 if typ == "rechtlich":
-                    teil_path = os.path.join(JOB_DIR, f"work_{job_id}", "teilungserklaerung.pdf")
-                    teil_bytes = None
-                    if os.path.exists(teil_path):
-                        with open(teil_path, "rb") as fh:
-                            teil_bytes = fh.read()
-                        print(f"[v2] Teilungserklaerung wird gemerged ({len(teil_bytes)//1024} KB)")
+                    teil_bytes = appmod._resolve_teilung_bytes(job_id, projekt_name)
+                    is_entwurf = teil_bytes is None
+                    if teil_bytes:
+                        print(f"[v2] Teilungserklaerung gefunden ({len(teil_bytes)//1024} KB)")
                     else:
-                        print(f"[v2] Keine Teilungserklaerung — Platzhalter-Folie wird eingefuegt")
+                        print(f"[v2] Keine Teilungserklaerung — Entwurf-Modus mit Wasserzeichen")
                     pdf_bytes = appmod._merge_rechtlich_pdf(pdf_bytes, teil_bytes)
+                    if is_entwurf:
+                        pdf_bytes = appmod._add_entwurf_watermark(pdf_bytes)
+                    # Meta-Flag fuer Download-Filename setzen
+                    _write_meta(job_id, rechtlich_is_entwurf=is_entwurf)
             except Exception as e:
                 import traceback as _tb
                 pdf_error = str(e)

@@ -5739,7 +5739,13 @@ def _merge_rechtlich_pdf(dynamic_pdf_bytes, teil_pdf_bytes):
 def job_teilungserklaerung(job_id):
     """PDF-Upload der Teilungserklärung (vom Notar geliefert). Wird beim
     Render des rechtlichen Teils B zwischen Vertrag und Verwaltungs-Muster
-    eingefuegt. Multipart-Field: 'file' (PDF)."""
+    eingefuegt. Multipart-Field: 'file' (PDF).
+
+    Speicherung doppelt:
+    - job-spezifisch:  _job_dir/teilungserklaerung.pdf  (Job-Override)
+    - projekt-spezifisch: _PROJECT_TEIL_DIR/<slug>.pdf (gilt fuer alle Jobs
+      desselben Projekts — Vertrieb muss pro Projekt nur 1x hochladen).
+    """
     if request.method == "OPTIONS":
         return make_response("", 204)
     if not _authorize_job(job_id):
@@ -5747,18 +5753,41 @@ def job_teilungserklaerung(job_id):
     job = _read_job(job_id)
     if not job:
         return jsonify({"error": "Job nicht gefunden"}), 404
-    path = os.path.join(_job_dir(job_id), "teilungserklaerung.pdf")
+
+    # Projekt-Name aus State holen (fuer projekt-weite Ablage)
+    projekt_name = "default"
+    state_path = _job_state_path(job_id)
+    if os.path.exists(state_path):
+        try:
+            with open(state_path) as fh:
+                projekt_name = json.load(fh).get("projekt_name", "default") or "default"
+        except Exception:
+            pass
+    proj_path = _project_teilung_path(projekt_name)
+    job_path  = os.path.join(_job_dir(job_id), "teilungserklaerung.pdf")
 
     if request.method == "GET":
-        if os.path.exists(path):
-            return jsonify({"uploaded": True, "size": os.path.getsize(path)})
-        return jsonify({"uploaded": False})
+        # Status: zeigt sowohl job-spezifisch als auch projekt-weit
+        info = {"uploaded": False}
+        if os.path.exists(job_path):
+            info = {"uploaded": True, "size": os.path.getsize(job_path), "scope": "job"}
+        elif os.path.exists(proj_path):
+            info = {"uploaded": True, "size": os.path.getsize(proj_path),
+                    "scope": "project", "projekt_name": projekt_name}
+        return jsonify(info)
 
     if request.method == "DELETE":
-        if os.path.exists(path):
-            try: os.remove(path)
+        # Default: nur den Job-Override loeschen (projekt-weit bleibt aktiv).
+        # Mit ?scope=project wird auch der projekt-weite gelöscht.
+        scope = (request.args.get("scope") or "job").lower()
+        removed = []
+        if os.path.exists(job_path):
+            try: os.remove(job_path); removed.append("job")
             except OSError: pass
-        return jsonify({"ok": True})
+        if scope == "project" and os.path.exists(proj_path):
+            try: os.remove(proj_path); removed.append("project")
+            except OSError: pass
+        return jsonify({"ok": True, "removed": removed})
 
     # POST: Upload
     f = request.files.get("file")
@@ -5766,10 +5795,92 @@ def job_teilungserklaerung(job_id):
         return jsonify({"error": "Keine Datei"}), 400
     if not f.filename.lower().endswith(".pdf"):
         return jsonify({"error": "Nur PDF erlaubt"}), 400
-    f.save(path)
-    sz = os.path.getsize(path)
-    print(f"[{job_id}] Teilungserklaerung hochgeladen: {sz//1024} KB")
-    return jsonify({"ok": True, "size": sz})
+    # Standardziel: projekt-weit (Vertriebs-Komfort).
+    # Wenn ?scope=job angefragt, wird stattdessen nur job-spezifisch gespeichert.
+    scope = (request.args.get("scope") or "project").lower()
+    target = job_path if scope == "job" else proj_path
+    f.save(target)
+    sz = os.path.getsize(target)
+    print(f"[{job_id}] Teilungserklaerung gespeichert ({scope}, {sz//1024} KB): {target}")
+    return jsonify({"ok": True, "size": sz, "scope": scope})
+
+
+def _add_entwurf_watermark(pdf_bytes):
+    """Fuegt auf jeder Seite des PDFs ein ENTWURF-Wasserzeichen ein:
+    - Roter Banner oben rechts ('ENTWURF · Teilungserklaerung fehlt')
+    - Grosser heller Schriftzug 'ENTWURF' zentriert (wirkt wie transparent)
+    Wird genutzt wenn keine Teilungserklaerung uploaded ist, damit der
+    Endkunde sofort erkennt: das ist noch nicht die finale Fassung.
+    """
+    import fitz
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    for page in doc:
+        w, h = page.rect.width, page.rect.height
+        # Top-right Banner (klein, dezent)
+        try:
+            page.insert_textbox(
+                fitz.Rect(w - 250, 14, w - 16, 38),
+                "ENTWURF · Teilungserklärung fehlt",
+                fontsize=10, fontname="hebo",
+                color=(0.78, 0.10, 0.10),
+                align=fitz.TEXT_ALIGN_RIGHT,
+            )
+        except Exception:
+            pass
+        # Grosser Wasserzeichen-Text in Seitenmitte
+        try:
+            mid_y = h * 0.45
+            page.insert_textbox(
+                fitz.Rect(0, mid_y, w, mid_y + 140),
+                "ENTWURF",
+                fontsize=84, fontname="hebo",
+                color=(0.92, 0.82, 0.82),
+                align=fitz.TEXT_ALIGN_CENTER,
+            )
+        except Exception:
+            pass
+    out = doc.tobytes()
+    doc.close()
+    return out
+
+
+# ── Projekt-Level Teilungserklaerung-Storage ──────────────────────────────
+# Idee: Teilungserklaerung-PDF wird einmal pro Projekt hochgeladen (nicht
+# pro Job) und steht damit fuer alle kuenftigen Render-Durchlaeufe desselben
+# Projekts zur Verfuegung. Spart dem Vertrieb das wiederholte Hochladen.
+_PROJECT_TEIL_DIR = os.path.join("/tmp", "interpres_projekte_teilung")
+os.makedirs(_PROJECT_TEIL_DIR, exist_ok=True)
+
+
+def _project_slug(projekt_name):
+    """Stabiler URL-safe Slug aus dem Projektnamen."""
+    import re as _re
+    s = (projekt_name or "").lower().strip()
+    s = _re.sub(r"[^a-z0-9äöüß]+", "-", s)
+    s = _re.sub(r"^-+|-+$", "", s)
+    return s or "default"
+
+
+def _project_teilung_path(projekt_name):
+    """Pfad zur projekt-weiten Teilungserklaerung."""
+    return os.path.join(_PROJECT_TEIL_DIR, f"{_project_slug(projekt_name)}.pdf")
+
+
+def _resolve_teilung_bytes(job_id, projekt_name):
+    """Sucht Teilungserklaerung in Reihenfolge:
+    1. Job-spezifisch (legacy + Override) — _job_dir/teilungserklaerung.pdf
+    2. Projekt-weit                       — _PROJECT_TEIL_DIR/<slug>.pdf
+    Gibt bytes oder None zurueck.
+    """
+    job_path = os.path.join(_job_dir(job_id), "teilungserklaerung.pdf")
+    if os.path.exists(job_path):
+        with open(job_path, "rb") as fh:
+            return fh.read()
+    proj_path = _project_teilung_path(projekt_name)
+    if os.path.exists(proj_path):
+        with open(proj_path, "rb") as fh:
+            return fh.read()
+    return None
 
 
 def _run_render_rechtlich(job_id):
@@ -5801,25 +5912,28 @@ def _run_render_rechtlich(job_id):
         _write_job(job_id, rechtlich_phase="PDF wird konvertiert (CloudConvert) …")
         pdf_bytes  = convert_to_pdf(filled, f"{projekt_name}_Rechtlich.pptx")
 
-        teil_path  = os.path.join(_job_dir(job_id), "teilungserklaerung.pdf")
-        teil_bytes = None
-        if os.path.exists(teil_path):
+        teil_bytes = _resolve_teilung_bytes(job_id, projekt_name)
+        is_entwurf = teil_bytes is None
+        if teil_bytes:
             _write_job(job_id, rechtlich_phase="Teilungserklaerung wird angehaengt …")
-            with open(teil_path, "rb") as fh:
-                teil_bytes = fh.read()
-            print(f"[{job_id}] Teilungserklaerung wird gemerged ({len(teil_bytes)//1024} KB)")
+            print(f"[{job_id}] Teilungserklaerung gefunden ({len(teil_bytes)//1024} KB)")
         else:
-            _write_job(job_id, rechtlich_phase="Hinweis-Folie wird eingefuegt (Teilungserklaerung fehlt) …")
-            print(f"[{job_id}] Keine Teilungserklaerung — Platzhalter-Folie wird eingefuegt")
+            _write_job(job_id,
+                       rechtlich_phase="Entwurf-Modus: Platzhalter + Wasserzeichen …")
+            print(f"[{job_id}] Keine Teilungserklaerung — Entwurf-Modus")
         pdf_bytes = _merge_rechtlich_pdf(pdf_bytes, teil_bytes)
+        if is_entwurf:
+            pdf_bytes = _add_entwurf_watermark(pdf_bytes)
+            print(f"[{job_id}] ENTWURF-Wasserzeichen aufgepraegt")
 
         out_path = os.path.join(_job_dir(job_id), "rechtlich.pdf")
         with open(out_path, "wb") as fh:
             fh.write(pdf_bytes)
         _write_job(job_id,
                    rechtlich_status="done",
-                   rechtlich_phase="Fertig",
-                   rechtlich_size=len(pdf_bytes))
+                   rechtlich_phase="Fertig" + (" (Entwurf)" if is_entwurf else ""),
+                   rechtlich_size=len(pdf_bytes),
+                   rechtlich_is_entwurf=is_entwurf)
         print(f"[{job_id}] Rechtlich-PDF fertig: {len(pdf_bytes)//1024} KB → {out_path}")
     except Exception as e:
         import traceback as _tb
@@ -5851,7 +5965,8 @@ def job_render_rechtlich(job_id):
 
 @app.route("/job/<job_id>/download-rechtlich", methods=["GET", "OPTIONS"])
 def job_download_rechtlich(job_id):
-    """Liefert das generierte Rechtlich-PDF als Download."""
+    """Liefert das generierte Rechtlich-PDF als Download. Filename hat
+    Suffix '_ENTWURF' wenn keine Teilungserklaerung uploaded war."""
     if request.method == "OPTIONS":
         return make_response("", 204)
     if not _authorize_job(job_id):
@@ -5859,10 +5974,12 @@ def job_download_rechtlich(job_id):
     path = os.path.join(_job_dir(job_id), "rechtlich.pdf")
     if not os.path.exists(path):
         return jsonify({"error": "Noch nicht generiert"}), 404
-    name = (_read_job(job_id) or {}).get("name", "Expose")
+    job  = _read_job(job_id) or {}
+    name = job.get("name", "Expose")
+    suffix = "_ENTWURF" if job.get("rechtlich_is_entwurf") else ""
     return send_file(path, mimetype="application/pdf",
                      as_attachment=True,
-                     download_name=f"{name}_Rechtlicher-Teil-B.pdf")
+                     download_name=f"{name}_Rechtlicher-Teil-B{suffix}.pdf")
 
 
 @app.route("/debug-images", methods=["GET"])
