@@ -4439,6 +4439,137 @@ def _render_pdf_to_jpgs_pymupdf(pdf_bytes, out_dir, dpi=110):
         doc.close()
 
 
+def _extract_slide_shapes(pptx_bytes, slide_idx):
+    """Extrahiert alle Top-Level-Shapes einer Folie fuer den WYSIWYG-Editor.
+    Liefert: shape_id, type (text/image/other), bbox in EMU, z-index, Inhalt
+    (Text bzw. Bild als data-URL). Frontend rechnet EMU->Pixel selbst anhand
+    von slide_width_emu (klare Skalierung relativ zur JPG-Anzeige).
+    """
+    import io as _io, base64 as _b64
+    from pptx import Presentation
+    from pptx.enum.shapes import MSO_SHAPE_TYPE
+
+    prs = Presentation(_io.BytesIO(pptx_bytes))
+    if slide_idx >= len(prs.slides):
+        return None
+    slide = prs.slides[slide_idx]
+
+    out_shapes = []
+    for z, shape in enumerate(slide.shapes):
+        try:
+            left, top = shape.left, shape.top
+            w, h = shape.width, shape.height
+            if left is None or top is None or w is None or h is None:
+                continue
+            sd = {
+                "shape_id": int(shape.shape_id),
+                "name":     shape.name or "",
+                "z_index":  z,
+                "bbox_emu": {"left": int(left), "top": int(top),
+                             "width": int(w), "height": int(h)},
+            }
+            try:
+                stype = shape.shape_type
+            except Exception:
+                stype = None
+            # --- Picture ---
+            if stype == MSO_SHAPE_TYPE.PICTURE:
+                sd["type"] = "image"
+                try:
+                    img = shape.image
+                    sd["image_data_url"] = (
+                        f"data:{img.content_type};base64,"
+                        f"{_b64.b64encode(img.blob).decode()}"
+                    )
+                except Exception:
+                    sd["image_data_url"] = None
+            # --- Text ---
+            elif shape.has_text_frame and shape.text_frame.text.strip():
+                sd["type"] = "text"
+                tf = shape.text_frame
+                sd["text"] = tf.text
+                # Erstes Run-Sample fuer Font-Properties
+                if tf.paragraphs and tf.paragraphs[0].runs:
+                    r = tf.paragraphs[0].runs[0]
+                    try:
+                        if r.font.size:
+                            sd["font_size_pt"] = float(r.font.size.pt)
+                    except Exception: pass
+                    try:
+                        if r.font.color and r.font.color.type is not None and r.font.color.rgb:
+                            sd["color"] = f"#{r.font.color.rgb}"
+                    except Exception: pass
+                    if r.font.bold:   sd["bold"]   = True
+                    if r.font.italic: sd["italic"] = True
+                    if r.font.name:   sd["font_name"] = r.font.name
+                # Alignment
+                if tf.paragraphs and tf.paragraphs[0].alignment is not None:
+                    align_map = {1: "left", 2: "center", 3: "right", 4: "justify"}
+                    sd["text_align"] = align_map.get(tf.paragraphs[0].alignment, "left")
+            else:
+                # Andere Shapes (Auto-Shapes, Linien, Gruppen) — anzeigen als Outline-Box
+                sd["type"] = "other"
+            out_shapes.append(sd)
+        except Exception as e:
+            print(f"  _extract_slide_shapes: Folie {slide_idx+1} Shape {z} Fehler: {e}")
+            continue
+
+    return {
+        "slide_idx":        slide_idx,
+        "slide_width_emu":  int(prs.slide_width),
+        "slide_height_emu": int(prs.slide_height),
+        "shapes":           out_shapes,
+    }
+
+
+def _apply_shape_overrides(pptx_bytes, overrides):
+    """Wendet projektspezifische Shape-Position-Overrides auf das PPTX an.
+    overrides: dict mit Struktur { "<slide_idx>": { "<shape_id>": {left,top,width,height} } }
+    Wird nach fill_pptx() aufgerufen, sodass User-Drags ueber Re-Renders
+    persistent bleiben (Texte/Bilder kommen aus expose_data, Positionen
+    aus overrides).
+    """
+    if not overrides:
+        return pptx_bytes
+    import io as _io
+    from pptx import Presentation
+    from pptx.util import Emu
+
+    prs = Presentation(_io.BytesIO(pptx_bytes))
+    applied = 0
+    for slide_key, shape_dict in overrides.items():
+        try:
+            sidx = int(slide_key)
+        except (TypeError, ValueError):
+            continue
+        if sidx >= len(prs.slides):
+            continue
+        slide = prs.slides[sidx]
+        # Map shape_id → shape (one pass)
+        by_id = {int(sh.shape_id): sh for sh in slide.shapes}
+        for sid_str, bbox in (shape_dict or {}).items():
+            try:
+                sid = int(sid_str)
+            except (TypeError, ValueError):
+                continue
+            sh = by_id.get(sid)
+            if sh is None:
+                continue
+            try:
+                if "left"   in bbox: sh.left   = Emu(int(bbox["left"]))
+                if "top"    in bbox: sh.top    = Emu(int(bbox["top"]))
+                if "width"  in bbox: sh.width  = Emu(int(bbox["width"]))
+                if "height" in bbox: sh.height = Emu(int(bbox["height"]))
+                applied += 1
+            except Exception as e:
+                print(f"  _apply_shape_overrides: Slide {sidx} Shape {sid} Fehler: {e}")
+    if applied:
+        print(f"  _apply_shape_overrides: {applied} Shape-Positionen angewendet")
+    out = _io.BytesIO()
+    prs.save(out)
+    return out.getvalue()
+
+
 def _add_hyperlinks_to_pdf(pdf_bytes):
     """Findet alle URLs (http/https) im PDF-Text und macht sie zu klickbaren
     Hyperlinks (PyMuPDF link annotations). DQN macht das auch — Quellen sind

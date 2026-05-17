@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <title>INTERPRÉS – Editor</title>
 <link rel="stylesheet" href="/v2/static/editor.css">
+<!-- moveable.js für Live-Drag/Resize der Shapes (MIT-Lizenz, ~60KB) -->
+<script src="https://cdn.jsdelivr.net/npm/moveable@0.53.0/dist/moveable.min.js"></script>
 </head>
 <body>
 
@@ -246,8 +248,14 @@ function showSlide(idx) {
   const ld  = document.getElementById('slide-loading');
   ld.style.display = 'flex';
   img.style.opacity = '0';
-  img.onload  = () => { ld.style.display = 'none'; img.style.opacity = '1'; };
+  img.onload  = () => {
+    ld.style.display = 'none'; img.style.opacity = '1';
+    // Erst nach Image-Load Shape-Overlay rendern (sonst kennen wir die Display-Größe nicht)
+    loadShapesForSlide(idx);
+  };
   img.onerror = () => { ld.textContent = 'Folie nicht geladen'; };
+  // Existierendes Overlay sofort wegräumen, bevor neue Folie kommt
+  destroyShapeOverlay();
   if (job.slide_count) {
     img.src = `${V1_API}/slide/${idx+1}?typ=${activeTyp}&token=${encodeURIComponent(API_TOKEN)}&t=${Date.now()}`;
   } else {
@@ -258,6 +266,254 @@ function showSlide(idx) {
   // Properties-Panel neu rendern (zeigt nur Felder dieser Folie)
   renderProps();
 }
+
+// ── WYSIWYG-Editor: Live-Drag/Resize über dem JPG ───────────────────────
+let currentMoveable = null;
+let currentSlideData = null;  // { slide_width_emu, slide_height_emu, shapes:[] }
+let selectedShapeEl = null;
+
+function destroyShapeOverlay() {
+  if (currentMoveable) {
+    try { currentMoveable.destroy(); } catch (_) {}
+    currentMoveable = null;
+  }
+  const frame = document.getElementById('slide-frame');
+  if (frame) {
+    const o = frame.querySelector('.shape-overlay');
+    if (o) o.remove();
+    const h = frame.querySelector('.edit-mode-hint');
+    if (h) h.remove();
+  }
+  selectedShapeEl = null;
+}
+
+async function loadShapesForSlide(idx) {
+  if (!job || !job.slide_count) return;
+  try {
+    const r = await fetch(`${V2_API}/slide/${idx}/shapes?typ=${activeTyp}`,
+                         { headers: authHeaders() });
+    if (!r.ok) {
+      // 409 = noch kein PPTX (erst „Vorschau aktualisieren") — kein Fehler, Overlay leer lassen
+      if (r.status !== 409) console.warn('Shape-Load', r.status, await r.text());
+      return;
+    }
+    const data = await r.json();
+    currentSlideData = data;
+    renderShapeOverlay(data);
+  } catch (e) { console.warn('loadShapesForSlide', e); }
+}
+
+function renderShapeOverlay(data) {
+  destroyShapeOverlay();
+  const frame = document.getElementById('slide-frame');
+  const img   = document.getElementById('slide-img');
+  if (!img || !img.complete || !img.naturalWidth) return;
+
+  // Display-Rect des JPGs innerhalb des slide-frame (object-fit: contain
+  // kann links/oben Padding lassen, wenn Aspect-Ratio nicht exakt matcht)
+  const frameRect = frame.getBoundingClientRect();
+  const imgAR     = img.naturalWidth / img.naturalHeight;
+  const frameAR   = frameRect.width / frameRect.height;
+  let dispW, dispH, offsetX, offsetY;
+  if (imgAR > frameAR) {
+    dispW = frameRect.width;
+    dispH = frameRect.width / imgAR;
+    offsetX = 0;
+    offsetY = (frameRect.height - dispH) / 2;
+  } else {
+    dispH = frameRect.height;
+    dispW = frameRect.height * imgAR;
+    offsetY = 0;
+    offsetX = (frameRect.width - dispW) / 2;
+  }
+  const scaleX = dispW / data.slide_width_emu;
+  const scaleY = dispH / data.slide_height_emu;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'shape-overlay';
+  overlay.style.left   = offsetX + 'px';
+  overlay.style.top    = offsetY + 'px';
+  overlay.style.width  = dispW + 'px';
+  overlay.style.height = dispH + 'px';
+  overlay.style.right  = 'auto';
+  overlay.style.bottom = 'auto';
+  overlay.style.inset  = 'auto';
+
+  data.shapes.forEach(s => {
+    const el = document.createElement('div');
+    el.className = `movable-shape type-${s.type}`;
+    el.dataset.shapeId = s.shape_id;
+    el.dataset.shapeType = s.type;
+    const b = s.bbox_emu;
+    el.style.left   = (b.left   * scaleX) + 'px';
+    el.style.top    = (b.top    * scaleY) + 'px';
+    el.style.width  = (b.width  * scaleX) + 'px';
+    el.style.height = (b.height * scaleY) + 'px';
+    el.style.zIndex = String(s.z_index);
+
+    if (s.type === 'text' && s.text) {
+      const txt = document.createElement('div');
+      txt.textContent = s.text;
+      // Schriftgröße proportional zum Slide skalieren (pt → display-px)
+      if (s.font_size_pt) {
+        const pxPerPt = (dispW / data.slide_width_emu) * (914400 / 72);
+        txt.style.fontSize = (s.font_size_pt * pxPerPt) + 'px';
+      }
+      if (s.color)       txt.style.color = s.color;
+      if (s.text_align)  txt.style.textAlign = s.text_align;
+      if (s.bold)        txt.style.fontWeight = '700';
+      if (s.italic)      txt.style.fontStyle = 'italic';
+      if (s.font_name)   txt.style.fontFamily = `"${s.font_name}", sans-serif`;
+      el.appendChild(txt);
+    } else if (s.type === 'image' && s.image_data_url) {
+      const im = document.createElement('img');
+      im.src = s.image_data_url;
+      el.appendChild(im);
+    }
+
+    el.addEventListener('mousedown', (ev) => {
+      ev.stopPropagation();
+      selectShape(el);
+    });
+    overlay.appendChild(el);
+  });
+
+  frame.appendChild(overlay);
+
+  // Edit-Hint anzeigen
+  const hint = document.createElement('div');
+  hint.className = 'edit-mode-hint';
+  hint.textContent = `Live-Editor: ${data.shapes.length} Elemente · klicken → ziehen/skalieren`;
+  frame.appendChild(hint);
+
+  // Deselect-on-frame-click
+  frame.addEventListener('mousedown', (ev) => {
+    if (ev.target === frame || ev.target.id === 'slide-img') {
+      deselectShape();
+    }
+  });
+}
+
+function selectShape(el) {
+  if (selectedShapeEl === el) return;
+  deselectShape();
+  selectedShapeEl = el;
+  el.classList.add('selected');
+  attachMoveableTo(el);
+}
+
+function deselectShape() {
+  if (currentMoveable) {
+    try { currentMoveable.destroy(); } catch (_) {}
+    currentMoveable = null;
+  }
+  if (selectedShapeEl) {
+    selectedShapeEl.classList.remove('selected');
+    selectedShapeEl = null;
+  }
+}
+
+function attachMoveableTo(targetEl) {
+  if (typeof Moveable === 'undefined') {
+    console.warn('moveable.js nicht geladen');
+    return;
+  }
+  currentMoveable = new Moveable(document.body, {
+    target: targetEl,
+    draggable: true,
+    resizable: true,
+    keepRatio: false,
+    edge: false,
+    origin: false,
+    throttleDrag: 0,
+    throttleResize: 0,
+  });
+
+  let lastTranslate = [0, 0];
+
+  currentMoveable.on('drag', e => {
+    e.target.style.transform = `translate(${e.beforeTranslate[0]}px, ${e.beforeTranslate[1]}px)`;
+    lastTranslate = e.beforeTranslate;
+  });
+  currentMoveable.on('dragEnd', e => {
+    // CSS-transform in left/top "backen" → dann auf 0 setzen
+    const t = e.target;
+    const newLeft = parseFloat(t.style.left || 0) + lastTranslate[0];
+    const newTop  = parseFloat(t.style.top  || 0) + lastTranslate[1];
+    t.style.left = newLeft + 'px';
+    t.style.top  = newTop  + 'px';
+    t.style.transform = '';
+    lastTranslate = [0, 0];
+    if (currentMoveable) currentMoveable.updateRect();
+    saveShapeBbox(t);
+  });
+  currentMoveable.on('resize', e => {
+    e.target.style.width  = e.width  + 'px';
+    e.target.style.height = e.height + 'px';
+    e.target.style.transform = `translate(${e.drag.beforeTranslate[0]}px, ${e.drag.beforeTranslate[1]}px)`;
+    lastTranslate = e.drag.beforeTranslate;
+    // Text-Inhalt mit-skalieren
+    const txt = e.target.querySelector('div');
+    if (txt && txt.dataset.basePxPt) {
+      // optional: font-size live re-scale
+    }
+  });
+  currentMoveable.on('resizeEnd', e => {
+    const t = e.target;
+    const newLeft = parseFloat(t.style.left || 0) + lastTranslate[0];
+    const newTop  = parseFloat(t.style.top  || 0) + lastTranslate[1];
+    t.style.left = newLeft + 'px';
+    t.style.top  = newTop  + 'px';
+    t.style.transform = '';
+    lastTranslate = [0, 0];
+    if (currentMoveable) currentMoveable.updateRect();
+    saveShapeBbox(t);
+  });
+}
+
+async function saveShapeBbox(targetEl) {
+  if (!currentSlideData) return;
+  const sid = targetEl.dataset.shapeId;
+  const overlay = targetEl.parentElement;
+  const overlayRect = overlay.getBoundingClientRect();
+  const targetRect  = targetEl.getBoundingClientRect();
+  // Pixel-Position relativ zum Overlay → EMU
+  const dispW   = overlayRect.width;
+  const dispH   = overlayRect.height;
+  const emuPerPxX = currentSlideData.slide_width_emu  / dispW;
+  const emuPerPxY = currentSlideData.slide_height_emu / dispH;
+  const bbox = {
+    left:   Math.round((targetRect.left - overlayRect.left) * emuPerPxX),
+    top:    Math.round((targetRect.top  - overlayRect.top)  * emuPerPxY),
+    width:  Math.round(targetRect.width  * emuPerPxX),
+    height: Math.round(targetRect.height * emuPerPxY),
+  };
+
+  setStatus(`Position wird gespeichert (Shape ${sid})…`, 'saving');
+  try {
+    const r = await fetch(
+      `${V2_API}/slide/${activeIdx}/shape/${sid}?typ=${activeTyp}`,
+      { method: 'PUT',
+        headers: Object.assign({'Content-Type': 'application/json'}, authHeaders()),
+        body: JSON.stringify(bbox) }
+    );
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    dirty = true;
+    setStatus(`Position gespeichert ✓ — „Vorschau aktualisieren" für finales Render`, 'saved');
+  } catch (e) {
+    setStatus(`Speichern fehlgeschlagen: ${e.message}`, 'error');
+    console.error(e);
+  }
+}
+
+// Bei Fenster-Resize: Overlay neu zeichnen (Skalierung ändert sich)
+let _resizeTimer = null;
+window.addEventListener('resize', () => {
+  if (_resizeTimer) clearTimeout(_resizeTimer);
+  _resizeTimer = setTimeout(() => {
+    if (currentSlideData) renderShapeOverlay(currentSlideData);
+  }, 200);
+});
 
 // ── Properties Panel ─────────────────────────────────────────────────────
 function renderProps() {

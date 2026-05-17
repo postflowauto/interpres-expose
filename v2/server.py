@@ -586,6 +586,71 @@ Erstelle einfach ein neues Exposé — du wirst automatisch in den Editor geleit
         return jsonify({"ok": True, "size": sz, "scope": scope,
                         "projekt_name": projekt_name})
 
+    # ── WYSIWYG-Editor: Shape-Extraction + Position-Update ───────────────
+    @app.route("/v2/api/job/<job_id>/slide/<int:slide_idx>/shapes")
+    def v2_api_slide_shapes(job_id, slide_idx):
+        """Liefert alle Shapes der angegebenen Folie fuer den Live-Drag-Editor.
+        Editor rendert diese als Overlay (Texte als <div>, Bilder als <img>)
+        ueber dem JPG. Pixel-Skalierung im Frontend per slide_width_emu.
+        """
+        typ = (request.args.get("typ") or "marketing").lower()
+        if typ not in VALID_EXPOSE_TYPS:
+            return jsonify({"error": f"unknown typ: {typ}"}), 400
+        pptx_path = _output_path(job_id, typ, "pptx")
+        if not os.path.exists(pptx_path):
+            return jsonify({"error": "PPTX noch nicht gerendert — erst Vorschau aktualisieren"}), 409
+        with open(pptx_path, "rb") as fh:
+            pptx_bytes = fh.read()
+        import importlib
+        appmod = importlib.import_module("app")
+        data = appmod._extract_slide_shapes(pptx_bytes, slide_idx)
+        if data is None:
+            return jsonify({"error": f"slide_idx {slide_idx} ausserhalb"}), 404
+        return jsonify(data)
+
+    @app.route("/v2/api/job/<job_id>/slide/<int:slide_idx>/shape/<int:shape_id>",
+               methods=["PUT", "DELETE", "OPTIONS"])
+    def v2_api_slide_shape_update(job_id, slide_idx, shape_id):
+        """PUT speichert neue bbox (left,top,width,height in EMU) als Override
+        im Job-State. DELETE entfernt den Override (Original-Position).
+
+        Persistenz: state["shape_overrides"][typ][slide_idx][shape_id] = bbox.
+        Wird beim naechsten Re-Render durch _apply_shape_overrides angewandt
+        — User-Drags bleiben damit ueber Re-Renders erhalten.
+        """
+        if request.method == "OPTIONS":
+            return ("", 204)
+        typ = (request.args.get("typ") or "marketing").lower()
+        if typ not in VALID_EXPOSE_TYPS:
+            return jsonify({"error": f"unknown typ: {typ}"}), 400
+
+        state = _read_state(job_id) or {}
+        overrides = state.setdefault("shape_overrides", {})
+        typ_over  = overrides.setdefault(typ, {})
+        slide_key = str(slide_idx)
+        shape_key = str(shape_id)
+
+        if request.method == "DELETE":
+            slide_over = typ_over.get(slide_key, {})
+            if shape_key in slide_over:
+                del slide_over[shape_key]
+            if not slide_over and slide_key in typ_over:
+                del typ_over[slide_key]
+            _write_state(job_id, state)
+            return jsonify({"ok": True, "removed": True})
+
+        body = request.get_json(silent=True) or {}
+        try:
+            bbox = {k: int(body[k]) for k in ("left", "top", "width", "height")}
+        except (KeyError, TypeError, ValueError):
+            return jsonify({"error": "Body braucht left,top,width,height (EMU int)"}), 400
+        if bbox["width"] < 1000 or bbox["height"] < 1000:
+            return jsonify({"error": "width/height zu klein (min 1000 EMU)"}), 400
+
+        typ_over.setdefault(slide_key, {})[shape_key] = bbox
+        _write_state(job_id, state)
+        return jsonify({"ok": True, "bbox": bbox})
+
     @app.route("/v2/api/job/<job_id>/render-status")
     def v2_api_render_status(job_id):
         meta = _read_meta(job_id)
@@ -768,6 +833,20 @@ def _v2_render_worker(job_id: str, typ: str = "marketing"):
                 expose["entwickler_adresse_invers"] = f"{plz_ort}, {strasse}"
 
         pptx_bytes = appmod.fill_pptx(tmpl_bytes, expose, customer_images=customer_images)
+
+        # Shape-Position-Overrides aus User-Drag-Editor anwenden — pro Typ.
+        # Format: state["shape_overrides"][typ][slide_idx][shape_id] = bbox.
+        # Damit bleiben User-Verschiebungen ueber Re-Renders persistent.
+        overrides = (state.get("shape_overrides") or {}).get(typ, {})
+        if overrides:
+            pptx_bytes = appmod._apply_shape_overrides(pptx_bytes, overrides)
+
+        # PPTX persistent speichern — wird vom Shape-Extractor des Editors
+        # gelesen (damit der Editor die aktuellen Texte/Bilder/Positionen sieht).
+        pptx_persistent_path = _output_path(job_id, typ, "pptx")
+        with open(pptx_persistent_path, "wb") as f:
+            f.write(pptx_bytes)
+
         # Nach fill_pptx: tmpl + customer_images sind nicht mehr gebraucht.
         del tmpl_bytes, customer_images, state, cust_files
         gc.collect()
