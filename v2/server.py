@@ -76,7 +76,7 @@ def _scan_template_placeholders(pptx_bytes: bytes) -> list:
 
 _LOCAL_TEMPLATE_FILES = {
     "marketing": "urbanunits_Marketing_Expose_v3.pdf-24.pptx",
-    "kurz":      "urbanunits_Kurzexpose-7.pptx",
+    "kurz":      "urbanunits_Kurzexpose-8.pptx",
     "rechtlich": "urbanunits_Rechtlich_v1.pptx",
 }
 
