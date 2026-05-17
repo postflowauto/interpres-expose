@@ -380,13 +380,7 @@ function renderShapeOverlay(data) {
 
   frame.appendChild(overlay);
 
-  // Edit-Hint anzeigen
-  const hint = document.createElement('div');
-  hint.className = 'edit-mode-hint';
-  hint.textContent = `Live-Editor: ${data.shapes.length} Elemente · klicken → ziehen/skalieren`;
-  frame.appendChild(hint);
-
-  // Deselect-on-frame-click
+  // Deselect-on-frame-click (Klick außerhalb einer Shape)
   frame.addEventListener('mousedown', (ev) => {
     if (ev.target === frame || ev.target.id === 'slide-img') {
       deselectShape();
