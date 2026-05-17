@@ -359,6 +359,20 @@ UNSPLASH_QUERIES = {
     "BILD_GRUNDRISS_2": "apartment floor plan 2 room layout",
     "BILD_GRUNDRISS_3": "apartment floor plan 3 room layout",
     "BILD_GRUNDRISS_4": "apartment floor plan large layout",
+    # ── Kurz-Exposé Cover-Collage (Seite 1, 6 Slots) — werden via Auto-Mapping
+    #    aus Marketing-Bildern befüllt; nur falls dort nichts liegt, springt
+    #    Unsplash mit thematischen Lifestyle-/Architektur-Bildern ein.
+    "BILD_TITEL_1": "modern apartment building exterior daylight",
+    "BILD_TITEL_2": "modern apartment living room interior",
+    "BILD_TITEL_3": "modern apartment bedroom design",
+    "BILD_TITEL_4": "luxury apartment building entrance architecture",
+    "BILD_TITEL_5": "urban neighborhood street trees lifestyle",
+    "BILD_TITEL_6": "modern kitchen interior apartment",
+    # ── Kurz-Exposé Seite 2 (4 Slots) ──
+    "BILD_KURZ_1": "modern apartment building exterior",
+    "BILD_KURZ_2": "modern apartment interior living",
+    "BILD_KURZ_3": "luxury hotel lobby interior modern",
+    "BILD_KURZ_4": "modern apartment balcony view urban",
 }
 
 PLATZHALTER = {
@@ -1300,28 +1314,17 @@ def fill_image_placeholders(data):
         print(f"  {slot} ({landmark_type}) → {url[:70]}")
 
     # Slots die NUR mit echten Projektfotos vom Kunden befüllt werden.
-    # Alles andere kriegt automatisch ein passendes Stock-/Wikimedia-Bild.
-    # Ziel: Kunde sieht ein vollständiges Exposé und ersetzt nur die paar
-    # echten Projekt-spezifischen Bilder (Cover, Außenansichten, Grundrisse,
-    # konkrete Wohnungen). Generische Themenbilder (Greenliving, Interior,
-    # Ausstattung, Rechtliches, etc.) liefert die Pipeline.
+    # Reduziert auf das Minimum: nur Material, das es als Stock NICHT gibt
+    # (Projekt-Hauptansicht + Grundrisse vom Architekten). Alles andere
+    # bekommt einen thematischen Unsplash-Fallback — ein Bauträger kann vor
+    # Fertigstellung schließlich keine Amenity-Fotos (Tiefgarage, Foyer,
+    # Bike-Sharing) oder Innenraum-Fotos liefern. Wenn der Kunde später
+    # echte Bilder hochlädt, ueberschreiben sie den Fallback.
     _NO_FALLBACK_SLOTS = {
-        # ── Echte Projekt-Visualisierungen / Renderings vom Bauträger ──
-        "bild_titel", "bild_projekt", "bild_projekt_aussen",
-        "bild_ansicht_1", "bild_ansicht_2",
-        # ── Außenansichten Standort (echtes Quartier-Foto wenn möglich) ──
-        "bild_standort_aussen",
-        # ── Konkrete Grundriss-Pläne (DIN-277 vom Architekt) ──
+        # ── Cover + Haupt-Außenansicht: echtes Projekt-Rendering Pflicht ──
+        "bild_titel", "bild_projekt_aussen",
+        # ── Grundrisse vom Architekten (gibt's nicht als Stock) ──
         "bild_grundriss_1", "bild_grundriss_2", "bild_grundriss_3", "bild_grundriss_4",
-        # ── Amenity-Bilder werden separat via Wikimedia + Vision validiert ──
-        *{f"bild_amenity_{n}" for n in range(1, 10)},
-        # ── Wohnungstyp-Bilder: Kunde lädt seine Grundriss-/Innenraum-Fotos selbst.
-        # Vorher kamen Berge/Auto/Wölfe via Picsum-Fallback rein — sah unprofessionell.
-        *{f"bild_we_{n}" for n in range(1, 21)},
-        # ── Kurz-Exposé Cover-Collage (6 Slots) + Seite-2-Bilder (4 Slots).
-        # Kunde lädt seine echten Projekt-/Lifestyle-Fotos hoch.
-        *{f"bild_titel_{n}" for n in range(1, 7)},
-        *{f"bild_kurz_{n}"  for n in range(1, 5)},
     }
 
     queries = UNSPLASH_QUERIES.copy()
@@ -2260,8 +2263,9 @@ def generate_expose_with_claude(projektdaten, city_context=""):
         "  zimmer_anzahl_min / zimmer_anzahl_max: Zahlen aus zimmer_typen ableiten\n"
         "    (z.B. '1-Zimmer und 2-Zimmer' → min='1', max='2'). Reine Ziffern, keine\n"
         "    Einheit, keine Worte.\n"
-        "  bild_titel_1..6: leer lassen — Kunde laedt Cover-Collage-Bilder selbst hoch.\n"
-        "  bild_kurz_1..4: leer lassen — Kunde laedt Seite-2-Bilder selbst hoch.\n\n"
+        "  bild_titel_1..6: leer lassen — werden auto-gemappt aus Marketing-Bildern;\n"
+        "    fehlende kriegen einen thematischen Unsplash-Fallback.\n"
+        "  bild_kurz_1..4: leer lassen — analog, auto-gemappt + Fallback.\n\n"
 
         "WICHTIG: alle obigen Zeichen-Limits sind HARTE Obergrenzen. Lieber 1-2 starke Sätze\n"
         "als ein dritter Halbsatz der das Layout sprengt.\n"
